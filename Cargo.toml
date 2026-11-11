@@ -2,5 +2,33 @@
 name = "sjml-cli"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Build, validate, and package SJML Rust guest projects"
+repository = "https://github.com/SomSomovich/sjml-cli"
+readme = "README.md"
+include = [
+    "src/**",
+    "tests/cli.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "LICENSE",
+    "README.md",
+]
+
+[[bin]]
+name = "sjml-cli"
+path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+toml = "0.8.23"
+sha2 = "0.10.9"
+zip = { version = "2.6.1", default-features = false, features = ["deflate"] }
+flate2 = "1.1.10"
+unicode-normalization = "0.1.25"
+base64 = "0.22"
+wasmparser = "0.245.1"
+tempfile = "3.24.0"
