@@ -210,11 +210,19 @@ impl fmt::Display for StorageError {
                 formatter,
                 "stored schema {stored_id}@{stored_version} is incompatible with {expected_id}@{expected_version}"
             ),
-            Self::MigrationRequired => formatter.write_str("this record requires an explicit schema migration"),
-            Self::MigrationPathMissing => formatter.write_str("no registered storage migration path reaches the requested schema"),
-            Self::AmbiguousMigrationPath => formatter.write_str("more than one storage migration path reaches the requested schema"),
-            Self::MigrationCycle => formatter.write_str("storage migration registration would create a cycle"),
-            Self::DuplicateMigration => formatter.write_str("the same storage migration is already registered"),
+            Self::MigrationRequired => {
+                formatter.write_str("this record requires an explicit schema migration")
+            }
+            Self::MigrationPathMissing => formatter
+                .write_str("no registered storage migration path reaches the requested schema"),
+            Self::AmbiguousMigrationPath => formatter
+                .write_str("more than one storage migration path reaches the requested schema"),
+            Self::MigrationCycle => {
+                formatter.write_str("storage migration registration would create a cycle")
+            }
+            Self::DuplicateMigration => {
+                formatter.write_str("the same storage migration is already registered")
+            }
             Self::MigrationFailed(error) => write!(formatter, "storage migration failed: {error}"),
         }
     }
@@ -1496,10 +1504,10 @@ mod tests {
             .unwrap_err(),
             StorageError::AmbiguousMigrationPath
         );
-        assert!(register_migration::<BranchB, BranchC, _>(|old| {
-            Ok(BranchC { value: old.value })
-        })
-        .is_ok());
+        assert!(
+            register_migration::<BranchB, BranchC, _>(|old| { Ok(BranchC { value: old.value }) })
+                .is_ok()
+        );
     }
 
     #[test]

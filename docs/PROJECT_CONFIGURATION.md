@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.43.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.44.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.35.0"
+abi = "^1.36.0"
 minecraft = "~1.21.1"
-sjml = "^0.45.0"
+sjml = "^0.46.0"
 
 [[modules]]
 id = "main"
@@ -106,7 +106,7 @@ server module can run for clients without SJML, but network channels or
 Other `[mod]` fields are `authors`, `description`, `license`, arbitrary bounded
 `metadata`, and `distribution`. `runtime.abi` is required; `runtime.minecraft`
 and `runtime.sjml` are optional compatibility ranges. SemVer ranges such as
-`^1.35.0` and `~1.21.1` are checked by the host.
+`^1.36.0` and `~1.21.1` are checked by the host.
 
 Each `[[modules]]` entry can also declare:
 
@@ -179,6 +179,8 @@ module's manifest request and the administrator's list.
 | `events.cancel` | Vetoing cancellable `block.break` events; also requires `events.subscribe`. |
 | `world.read`, `world.write` | Reading loaded server-world state; writes require both. |
 | `entity.read`, `entity.spawn`, `entity.effect.apply` | Reading player/entity snapshots, spawning registered entities, or applying registered effects. |
+| `entity.remove`, `entity.velocity.write` | Removing loaded non-player entities or changing their bounded velocity; both also require `entity.read`. |
+| `player.teleport`, `player.vitals.write`, `player.game_mode.write`, `player.motion.write` | Teleporting a live player, changing bounded vitals, game mode, or velocity; each also requires `entity.read` and logical-server execution. |
 | `entity.data.read`, `entity.data.write` | Reading or changing module-owned data attached to non-player entities. |
 | `inventory.read`, `inventory.write` | Reading loaded block inventories or changing registered string components. Some operations require both `world.read` and an inventory capability. |
 | `block_entity.nbt.read` | Reading bounded block-entity snapshots and NBT. |

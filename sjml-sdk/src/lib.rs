@@ -126,7 +126,7 @@ pub use batch::{Batch, BatchValue, CallResult};
 pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle};
-pub use entity::EntitySnapshot;
+pub use entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
@@ -142,37 +142,43 @@ pub use network::{
     ChannelRef, LogicalSide, NetworkContext, NetworkContextSnapshot, NetworkDirection,
     NetworkSubscriptionHandle, Player as NetworkPlayer, Uuid,
 };
-pub use player::PlayerSnapshot;
+pub use player::{
+    MAX_PLAYER_VELOCITY_COMPONENT, PlayerGameMode, PlayerMotion, PlayerSnapshot, PlayerVelocity,
+    PlayerVitals,
+};
 pub use recipe::{
-    CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
+    CraftingSlot, RECIPE_CALLBACK_SCHEMA_VERSION, RecipeEvaluation, RecipeMatchInput,
 };
 pub use registry::{
-    BlockEntityModelDefinition, EntityModelDefinition, ModelAnimation, ModelAnimationAxis,
-    ModelCuboid, MAX_BOUND_MODEL_CUBOIDS,
+    BlockEntityModelDefinition, EntityModelDefinition, MAX_BOUND_MODEL_CUBOIDS, ModelAnimation,
+    ModelAnimationAxis, ModelCuboid,
 };
 pub use render::{
-    RenderContext, RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle,
-    WorldModelBuilder, WorldRenderFrame, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
-    MAX_WORLD_MODEL_VERTICES,
+    MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS, MAX_WORLD_MODEL_VERTICES, RenderContext,
+    RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle, WorldModelBuilder,
+    WorldRenderFrame,
 };
 pub use screen_input::{ScreenInputEvent, ScreenInputSubscriptionHandle};
 pub use serialization::{
-    from_bytes, to_bytes, Decoder, Encoder, StableDecode, StableEncode, MAX_COLLECTION_ITEMS,
-    MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
+    Decoder, Encoder, MAX_COLLECTION_ITEMS, MAX_PAYLOAD_BYTES, MAX_STRING_BYTES, StableDecode,
+    StableEncode, from_bytes, to_bytes,
 };
+pub use sjml_macros::{StableDecode, StableEncode};
 pub use sjml_macros::{
     command, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe, service,
 };
-pub use sjml_macros::{StableDecode, StableEncode};
 pub use storage::{
     MigrationFailure, MigrationMode, MigrationReport, StableRecord, StorageError, StorageResult,
     StorageScope,
 };
 pub use task::GuestTaskId;
 pub use widgets::{
-    Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
+    Button, MAX_TEXT_FIELD_BYTES, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect,
 };
-pub use world::{BlockStateSnapshot, MAX_WORLD_BLOCK_STATES};
+pub use world::{
+    BlockStateSnapshot, HeightmapType, LightSnapshot, MAX_WORLD_BLOCK_COORDINATE,
+    MAX_WORLD_BLOCK_STATES,
+};
 
 /// Common imports for an SJML guest module.
 pub mod prelude {
@@ -190,7 +196,7 @@ pub mod prelude {
         MAX_CLIENT_INPUT_SUBSCRIPTIONS,
     };
     pub use crate::entity;
-    pub use crate::entity::EntitySnapshot;
+    pub use crate::entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
     pub use crate::entity_data;
     pub use crate::entity_data::{
         ENTITY_DATA_MISSING, MAX_ENTITY_DATA_KEY_BYTES, MAX_ENTITY_DATA_VALUE_BYTES,
@@ -198,11 +204,11 @@ pub mod prelude {
     pub use crate::error::{ErrorCode, SjmlError, SjmlResult};
     pub use crate::events;
     pub use crate::events::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
-        EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerJoined, PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick,
-        WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        BlockBreak, BlockPlace, DEFAULT_SERVER_TICK_INTERVAL, EffectTickEvent, EntityDamaged,
+        EntityDeath, EntitySpawned, EventPriority, InventoryChanged, MAX_INVENTORY_CHANGE_COUNT,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL, PlayerInteracted, PlayerJoined,
+        PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle, subscribe,
+        subscribe_with_interval, unsubscribe,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -220,64 +226,70 @@ pub mod prelude {
     pub use crate::menu::{MenuAction, MenuDefinition, MenuItem};
     pub use crate::network;
     pub use crate::network::{
-        broadcast, send_to, send_to_server, subscribe as subscribe_network,
-        unsubscribe as unsubscribe_network, ChannelRef, LogicalSide, NetworkContext,
-        NetworkContextSnapshot, NetworkDirection, NetworkSubscriptionHandle, Player, Uuid,
+        ChannelRef, LogicalSide, NetworkContext, NetworkContextSnapshot, NetworkDirection,
+        NetworkSubscriptionHandle, Player, Uuid, broadcast, send_to, send_to_server,
+        subscribe as subscribe_network, unsubscribe as unsubscribe_network,
     };
     pub use crate::player;
-    pub use crate::player::PlayerSnapshot;
+    pub use crate::player::{
+        MAX_PLAYER_VELOCITY_COMPONENT, PlayerGameMode, PlayerMotion, PlayerSnapshot,
+        PlayerVelocity, PlayerVitals,
+    };
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
     pub use crate::registry::{
-        add_to_creative_tab, custom_registry_value, register_attribute_effect, register_block,
-        register_block_entity, register_block_entity_model, register_cooking_recipe,
-        register_creative_tab, register_custom_registry, register_custom_value,
-        register_effect_tick, register_entity, register_entity_ai_goal, register_entity_model,
-        register_fluid, register_fluid_with_visuals, register_item, register_particle,
-        register_recipe_serializer, register_shaped_recipe, register_shapeless_recipe,
-        register_sound, register_string_component, set_entity_attribute, set_item_string_component,
         AttributeModifierOperation, BlockDefinition, BlockEntityModelDefinition,
         CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
         EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
-        FluidVisualDefinition, ItemDefinition, ModelAnimation, ModelAnimationAxis, ModelCuboid,
-        RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey, ShapelessRecipeDefinition,
-        StringComponentDefinition, MAX_BOUND_MODEL_CUBOIDS,
+        FluidVisualDefinition, ItemDefinition, MAX_BOUND_MODEL_CUBOIDS, ModelAnimation,
+        ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey,
+        ShapelessRecipeDefinition, SmithingTransformRecipeDefinition, StringComponentDefinition,
+        add_to_creative_tab,
+        custom_registry_value, register_attribute_effect, register_block, register_block_entity,
+        register_block_entity_model, register_cooking_recipe, register_creative_tab,
+        register_custom_registry, register_custom_value, register_effect_tick, register_entity,
+        register_entity_ai_goal, register_entity_model, register_fluid,
+        register_fluid_with_visuals, register_item, register_particle, register_recipe_serializer,
+        register_shaped_recipe, register_shapeless_recipe, register_smithing_transform_recipe,
+        register_sound,
+        register_string_component, set_entity_attribute, set_item_string_component,
     };
     pub use crate::render;
     pub use crate::render::{
+        MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS, MAX_WORLD_MODEL_VERTICES,
         RenderContext, RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle,
-        WorldModelBuilder, WorldRenderFrame, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
-        MAX_WORLD_MODEL_VERTICES,
+        WorldModelBuilder, WorldRenderFrame,
     };
     pub use crate::screen_input;
     pub use crate::screen_input::{
-        ScreenInputEvent, ScreenInputSubscriptionHandle, MAX_SCREEN_INPUT_COORDINATE,
-        MAX_SCREEN_INPUT_SUBSCRIPTIONS,
+        MAX_SCREEN_INPUT_COORDINATE, MAX_SCREEN_INPUT_SUBSCRIPTIONS, ScreenInputEvent,
+        ScreenInputSubscriptionHandle,
     };
     pub use crate::serialization::{
-        from_bytes, to_bytes, MAX_COLLECTION_ITEMS, MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
+        MAX_COLLECTION_ITEMS, MAX_PAYLOAD_BYTES, MAX_STRING_BYTES, from_bytes, to_bytes,
     };
     pub use crate::storage;
     pub use crate::storage::{
-        clear_migration_mode, migrate_record, migrate_scope, register_migration,
-        register_migration_with_mode, set_migration_mode, MigrationFailure, MigrationMode,
-        MigrationReport, StableRecord, StorageError, StorageResult, StorageScope,
+        MigrationFailure, MigrationMode, MigrationReport, StableRecord, StorageError,
+        StorageResult, StorageScope, clear_migration_mode, migrate_record, migrate_scope,
+        register_migration, register_migration_with_mode, set_migration_mode,
     };
-    pub use crate::task::{self, spawn_compute, GuestTaskId};
+    pub use crate::task::{self, GuestTaskId, spawn_compute};
     pub use crate::widgets;
     pub use crate::widgets::{
-        Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
+        Button, MAX_TEXT_FIELD_BYTES, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect,
     };
     pub use crate::world;
     pub use crate::world::{
-        BlockStateSnapshot, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
-        MAX_WORLD_BLOCK_STATES, MAX_WORLD_RAYCAST_RESPONSE_BYTES, MAX_WORLD_RAY_COORDINATE,
-        MAX_WORLD_RAY_DISTANCE,
+        BlockStateSnapshot, HeightmapType, LightSnapshot, MAX_WORLD_BLOCK_COORDINATE,
+        MAX_WORLD_BLOCK_STATES, MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
+        MAX_WORLD_RAYCAST_RESPONSE_BYTES, RaycastBlockMode, RaycastFluidMode, RaycastHit,
+        RaycastPoint,
     };
+    pub use crate::{StableDecode, StableEncode};
     pub use crate::{
         command, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe, service,
     };
-    pub use crate::{StableDecode, StableEncode};
 }
 
 /// Internal helpers referenced by macro expansions.

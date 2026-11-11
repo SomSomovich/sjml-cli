@@ -1,17 +1,18 @@
-//! Scoped access to online player sessions on the owning logical server. Snapshots require requested
-//! and granted `entity.read`; effect application also requires `entity.effect.apply`, and
-//! teleportation also requires `player.teleport`. Player handles
+//! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, and game-mode reads require
+//! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
+//! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
+//! `player.vitals.write`, and velocity changes require `player.motion.write`. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
+#[cfg(target_arch = "wasm32")]
+use crate::MAX_STRING_BYTES;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 #[cfg(target_arch = "wasm32")]
 use crate::entity::status_result;
-use crate::entity::{validate_effect_id, MAX_EFFECT_DURATION_TICKS};
+use crate::entity::{MAX_EFFECT_DURATION_TICKS, validate_effect_id};
 #[cfg(target_arch = "wasm32")]
-use crate::MAX_STRING_BYTES;
-#[cfg(target_arch = "wasm32")]
-use crate::{to_bytes, Decoder};
+use crate::{Decoder, to_bytes};
 use crate::{ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, StableEncode};
 
 /// Current identity, dimension, and coordinates of one online player.
@@ -32,6 +33,88 @@ pub struct PlayerSnapshot {
     pub z: f64,
 }
 
+/// Detached health, hunger, and experience data for one live player session.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerVitals {
+    /// Current health, between zero and the host's supported ceiling.
+    pub health: f32,
+    /// Maximum health, greater than zero and no more than the host's supported ceiling.
+    pub max_health: f32,
+    /// Current food level, from zero through twenty.
+    pub food_level: u32,
+    /// Current food saturation, from zero through twenty.
+    pub saturation: f32,
+    /// Current experience level, from zero through one million.
+    pub experience_level: u32,
+    /// Progress toward the next experience level, from zero through one.
+    pub experience_progress: f32,
+}
+
+/// Maximum health value accepted by [`set_health`]. The host also limits it to the player's current maximum health.
+pub const MAX_PLAYER_HEALTH: f32 = 1_000_000.0;
+/// Maximum food level accepted by [`set_food`].
+pub const MAX_PLAYER_FOOD_LEVEL: u32 = 20;
+/// Maximum experience level accepted by [`set_experience`].
+pub const MAX_PLAYER_EXPERIENCE_LEVEL: u32 = 20_000;
+
+/// One of Minecraft's built-in player game modes.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u32)]
+pub enum PlayerGameMode {
+    Survival = 0,
+    Creative = 1,
+    Adventure = 2,
+    Spectator = 3,
+}
+
+impl TryFrom<u32> for PlayerGameMode {
+    type Error = SjmlError;
+
+    fn try_from(code: u32) -> Result<Self, Self::Error> {
+        match code {
+            0 => Ok(Self::Survival),
+            1 => Ok(Self::Creative),
+            2 => Ok(Self::Adventure),
+            3 => Ok(Self::Spectator),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an unsupported player game mode",
+            )),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct PlayerGameModeSnapshot {
+    mode: u32,
+}
+
+impl PlayerVitals {
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn validate(self) -> SjmlResult<()> {
+        if !self.health.is_finite()
+            || !(0.0..=1_000_000.0).contains(&self.health)
+            || !self.max_health.is_finite()
+            || !(f32::MIN_POSITIVE..=1_000_000.0).contains(&self.max_health)
+            || self.food_level > 20
+            || !self.saturation.is_finite()
+            || !(0.0..=20.0).contains(&self.saturation)
+            || self.experience_level > 1_000_000
+            || !self.experience_progress.is_finite()
+            || !(0.0..=1.0).contains(&self.experience_progress)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned non-finite or out-of-range player vitals",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Absolute same-dimension destination for a server-authoritative player teleport.
 #[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -46,6 +129,59 @@ pub struct PlayerTeleport {
     pub yaw: f32,
     /// Absolute pitch in degrees, limited to -90..=90.
     pub pitch: f32,
+}
+
+/// Current velocity and yaw/pitch rotation of an online player.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerMotion {
+    /// X velocity in blocks per tick.
+    pub velocity_x: f64,
+    /// Y velocity in blocks per tick.
+    pub velocity_y: f64,
+    /// Z velocity in blocks per tick.
+    pub velocity_z: f64,
+    /// Current yaw in degrees.
+    pub yaw: f32,
+    /// Current pitch in degrees.
+    pub pitch: f32,
+}
+
+/// Bounded velocity to apply to an online player, in blocks per tick.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerVelocity {
+    /// X velocity component.
+    pub x: f64,
+    /// Y velocity component.
+    pub y: f64,
+    /// Z velocity component.
+    pub z: f64,
+}
+
+impl PlayerVelocity {
+    /// Creates a velocity after checking that every component is finite and within the host limit.
+    pub fn new(x: f64, y: f64, z: f64) -> SjmlResult<Self> {
+        let velocity = Self { x, y, z };
+        velocity.validate()?;
+        Ok(velocity)
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if !self.x.is_finite()
+            || !self.y.is_finite()
+            || !self.z.is_finite()
+            || self.x.abs() > MAX_PLAYER_VELOCITY_COMPONENT
+            || self.y.abs() > MAX_PLAYER_VELOCITY_COMPONENT
+            || self.z.abs() > MAX_PLAYER_VELOCITY_COMPONENT
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "player velocity components must be finite and within ±64 blocks per tick",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl PlayerTeleport {
@@ -88,6 +224,8 @@ impl PlayerTeleport {
 pub const MAX_TELEPORT_COORDINATE: f64 = 29_999_984.0;
 /// Maximum absolute yaw accepted by the teleport API.
 pub const MAX_TELEPORT_YAW: f32 = 36_000.0;
+/// Maximum absolute velocity component accepted by the player motion API, in blocks per tick.
+pub const MAX_PLAYER_VELOCITY_COMPONENT: f64 = 64.0;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_player_v1")]
@@ -96,6 +234,18 @@ extern "C" {
     fn imported_online(output: i32, capacity: i32) -> i32;
     #[link_name = "snapshot"]
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "vitals"]
+    fn imported_vitals(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "game_mode"]
+    fn imported_game_mode(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_game_mode"]
+    fn imported_set_game_mode(handle: i32, length: i32, game_mode: i32) -> i32;
+    #[link_name = "set_health"]
+    fn imported_set_health(handle: i32, length: i32, health_bits: i32) -> i32;
+    #[link_name = "set_food"]
+    fn imported_set_food(handle: i32, length: i32, food_level: i32, saturation_bits: i32) -> i32;
+    #[link_name = "set_experience"]
+    fn imported_set_experience(handle: i32, length: i32, level: i32, progress_bits: i32) -> i32;
     #[link_name = "apply_effect"]
     fn imported_apply_effect(
         handle: i32,
@@ -111,6 +261,15 @@ extern "C" {
         handle_length: i32,
         destination: i32,
         destination_length: i32,
+    ) -> i32;
+    #[link_name = "motion"]
+    fn imported_motion(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_velocity"]
+    fn imported_set_velocity(
+        handle: i32,
+        handle_length: i32,
+        velocity: i32,
+        velocity_length: i32,
     ) -> i32;
 }
 
@@ -148,6 +307,203 @@ pub fn snapshot(handle: PlayerHandle) -> SjmlResult<PlayerSnapshot> {
                 )
             }
         })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads health, food level, saturation, and experience for an online player.
+///
+/// Requires the declared and granted `entity.read` capability, a live player handle,
+/// and a logical-server context. The host resolves the current player object on
+/// every call, so a handle remains valid across respawn while logout and runtime
+/// shutdown invalidate it. The returned value is detached; it cannot mutate the
+/// player and exposes no Minecraft object. Values outside the bounded schema are
+/// reported as `InvalidArgument`.
+pub fn vitals(handle: PlayerHandle) -> SjmlResult<PlayerVitals> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let encoded_vitals = read_output::<PlayerVitals>(28, |output, capacity| {
+            // SAFETY: the encoded handle and output buffer remain live through the synchronous import.
+            unsafe {
+                imported_vitals(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as u32 as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        encoded_vitals.validate()?;
+        Ok(encoded_vitals)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the current server-authoritative game mode of an online player session.
+///
+/// Requires the declared and granted `entity.read` capability and a live player
+/// handle. Client modules and static registration never receive live player state.
+pub fn game_mode(handle: PlayerHandle) -> SjmlResult<PlayerGameMode> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let snapshot = read_output::<PlayerGameModeSnapshot>(8, |output, capacity| {
+            // SAFETY: the encoded handle and output buffer remain live through the synchronous import.
+            unsafe {
+                imported_game_mode(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as u32 as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        PlayerGameMode::try_from(snapshot.mode)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Changes the game mode of an online player on the owning logical server.
+///
+/// Requires both `entity.read` and `player.game_mode.write` to be declared in
+/// the module and granted by the host. The host checks the owning server thread
+/// and re-resolves the current object for the same login session on every call.
+/// Client contexts and static registration cannot change a player's mode.
+pub fn set_game_mode(handle: PlayerHandle, game_mode: PlayerGameMode) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the handle buffer stays live during this bounded synchronous host import.
+        let status = unsafe {
+            imported_set_game_mode(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                game_mode as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the player game-mode change")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, game_mode);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the current health of an online player on the owning logical server.
+///
+/// Requires both `entity.read` and `player.vitals.write` to be declared and
+/// granted. Health must be finite, no greater than the current maximum health,
+/// and within `0..=MAX_PLAYER_HEALTH`; zero health can cause normal Minecraft
+/// death processing. Client contexts, static registration, stale sessions, and
+/// calls off the owning server thread are denied by the host.
+pub fn set_health(handle: PlayerHandle, health: f32) -> SjmlResult<()> {
+    if !health.is_finite() || !(0.0..=MAX_PLAYER_HEALTH).contains(&health) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player health must be finite and between zero and 1,000,000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the handle and scalar remain valid throughout this synchronous bounded call.
+        let status = unsafe {
+            imported_set_health(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                health.to_bits() as i32,
+            )
+        };
+        status_result(status, "host rejected the player health change")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets food level and saturation together for an online player.
+///
+/// Requires `entity.read` and `player.vitals.write`. Food is limited to 0–20;
+/// saturation must be finite and between zero and the requested food level.
+/// The host applies both fields only after validating the complete pair and the
+/// current live session on its owning logical-server thread.
+pub fn set_food(handle: PlayerHandle, food_level: u32, saturation: f32) -> SjmlResult<()> {
+    if food_level > MAX_PLAYER_FOOD_LEVEL
+        || !saturation.is_finite()
+        || !(0.0..=food_level as f32).contains(&saturation)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "food level must be 0..20 and saturation must be finite and between zero and food level",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the handle and scalar values remain valid throughout this synchronous bounded call.
+        let status = unsafe {
+            imported_set_food(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                food_level as i32,
+                saturation.to_bits() as i32,
+            )
+        };
+        status_result(status, "host rejected the player food change")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets an online player's experience level and normalized bar progress.
+///
+/// Requires `entity.read` and `player.vitals.write`. Levels are limited to
+/// `0..=MAX_PLAYER_EXPERIENCE_LEVEL`; progress must be finite and in `[0, 1)`.
+/// Minecraft stores experience in whole points, so the host rounds progress to
+/// the nearest point for the chosen level. The host validates everything before
+/// changing state and requires the owning logical-server thread.
+pub fn set_experience(handle: PlayerHandle, level: u32, progress: f32) -> SjmlResult<()> {
+    if level > MAX_PLAYER_EXPERIENCE_LEVEL
+        || !progress.is_finite()
+        || !(0.0..1.0).contains(&progress)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "experience level must be 0..20,000 and progress must be finite in [0, 1)",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the handle and scalar values remain valid throughout this synchronous bounded call.
+        let status = unsafe {
+            imported_set_experience(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                level as i32,
+                progress.to_bits() as i32,
+            )
+        };
+        status_result(status, "host rejected the player experience change")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -228,6 +584,63 @@ pub fn teleport(handle: PlayerHandle, destination: PlayerTeleport) -> SjmlResult
     }
 }
 
+/// Reads the velocity and rotation of the live server player identified by this login-session handle.
+///
+/// Requires `entity.read`. Client instances, static registration, and stale login sessions are denied.
+pub fn motion(handle: PlayerHandle) -> SjmlResult<PlayerMotion> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output(
+            (4 + 3 * core::mem::size_of::<f64>() + 2 * core::mem::size_of::<f32>()) as u32,
+            |output, capacity| {
+                // SAFETY: the encoded handle and output stay live during this synchronous import.
+                unsafe {
+                    imported_motion(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Replaces all velocity components for a live server player.
+///
+/// Requires `entity.read` and `player.motion.write`. Every component must be finite and within
+/// ±64 blocks per tick. The host revalidates the live session and synchronizes motion to clients.
+pub fn set_velocity(handle: PlayerHandle, velocity: PlayerVelocity) -> SjmlResult<()> {
+    velocity.validate()?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let encoded_velocity = to_bytes(&velocity)?;
+        // SAFETY: both bounded stable values remain live during this synchronous host call.
+        let status = unsafe {
+            imported_set_velocity(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                encoded_velocity.as_ptr() as usize as u32 as i32,
+                encoded_velocity.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the player velocity mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn read_output<T: StableDecode>(
     capacity: u32,
@@ -268,7 +681,9 @@ fn unsupported_target() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_effect, teleport, PlayerTeleport, MAX_TELEPORT_COORDINATE};
+    use super::{
+        MAX_TELEPORT_COORDINATE, PlayerTeleport, PlayerVitals, apply_effect, teleport, vitals,
+    };
     use crate::{ErrorCode, PlayerHandle};
 
     #[test]
@@ -350,6 +765,67 @@ mod tests {
             )
             .unwrap_err()
             .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn vitals_rejects_non_finite_or_out_of_range_host_values() {
+        for vitals in [
+            PlayerVitals {
+                health: f32::NAN,
+                max_health: 20.0,
+                food_level: 20,
+                saturation: 5.0,
+                experience_level: 3,
+                experience_progress: 0.5,
+            },
+            PlayerVitals {
+                health: 10.0,
+                max_health: 0.0,
+                food_level: 20,
+                saturation: 5.0,
+                experience_level: 3,
+                experience_progress: 0.5,
+            },
+            PlayerVitals {
+                health: 10.0,
+                max_health: 20.0,
+                food_level: 21,
+                saturation: 5.0,
+                experience_level: 3,
+                experience_progress: 0.5,
+            },
+            PlayerVitals {
+                health: 10.0,
+                max_health: 20.0,
+                food_level: 20,
+                saturation: f32::INFINITY,
+                experience_level: 3,
+                experience_progress: 0.5,
+            },
+            PlayerVitals {
+                health: 10.0,
+                max_health: 20.0,
+                food_level: 20,
+                saturation: 5.0,
+                experience_level: 3,
+                experience_progress: f32::NAN,
+            },
+        ] {
+            assert_eq!(
+                vitals.validate().unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn vitals_requires_the_wasm_host() {
+        assert_eq!(
+            vitals(PlayerHandle::new(1, 2, 3, 4).unwrap())
+                .unwrap_err()
+                .code(),
             ErrorCode::UnknownErrorCode
         );
     }

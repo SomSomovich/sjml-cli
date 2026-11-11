@@ -15,10 +15,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host ABI is `1.35.0`. ABI compatibility is major-version based:
+The current host ABI is `1.36.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.35.0` therefore accepts
-`1.0.x` through `1.35.0` (including existing ABI 1.32, 1.33, and 1.34 guests), but rejects a
+minor/patch version is equal or newer. A host at ABI `1.36.0` therefore accepts
+`1.0.x` through `1.36.0` (including earlier ABI 1.32–1.35 guests), but rejects a
 later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -43,9 +43,19 @@ inventory transfers. Chat uses `client.chat.modify`; transfers require
 [inventory mutations](INVENTORY_MUTATIONS.md). Live-client rendering and remote
 multiplayer behavior still require verification.
 
-SDK 0.43.0 adds bounded same-dimension player teleports, capability-gated
+SDK 0.43.0 added bounded same-dimension player teleports, capability-gated
 non-player entity removal, weather snapshots and mutations for loaded worlds,
-and vanilla stonecutting recipes. The current host is 0.45.0 / ABI 1.35.0.
+and vanilla stonecutting recipes. At that checkpoint, the host was 0.45.0 / ABI 1.35.0.
+
+SDK 0.44.0 adds read-only player vitals, bounded player game-mode changes,
+loaded-world biome and daylight-cycle time access, bounded server-player motion
+reads and velocity changes, smithing-transform recipe registration, and the non-cancellable
+`player.respawned` event. The current host is 0.46.0 / ABI 1.36.0. Game-mode
+changes require `entity.read` and `player.game_mode.write`; setting daylight
+time requires `world.read` and `world.write`. See [player vitals](PLAYER_VITALS.md),
+[player game mode](PLAYER_GAME_MODE.md), [world biomes](WORLD_BIOMES.md),
+[world time](WORLD_TIME.md), [player motion](PLAYER_MOTION.md),
+[smithing transform recipes](SMITHING_TRANSFORM.md), and [player respawn events](PLAYER_RESPAWNED_EVENT.md).
 
 Client modules have HUD, bounded typed OpenGL, camera-relative world-render,
 active-screen input, native chat layout control, and global no-screen input APIs

@@ -1,13 +1,13 @@
 //! Bounded active-screen mouse, keyboard, and character callbacks for client guest modules.
 
+#[cfg(target_arch = "wasm32")]
+use crate::StableDecode;
 use crate::abi::EventSubscriptionHandle;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
-#[cfg(target_arch = "wasm32")]
-use crate::StableDecode;
+use crate::{ErrorCode, SjmlError, SjmlResult};
 #[cfg(target_arch = "wasm32")]
 use crate::{from_bytes, to_bytes};
-use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// Maximum number of active-screen input callbacks owned by one guest module.
 pub const MAX_SCREEN_INPUT_SUBSCRIPTIONS: usize = 256;
@@ -351,7 +351,7 @@ fn unsupported() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ScreenInputEvent, MAX_SCREEN_INPUT_COORDINATE};
+    use super::{MAX_SCREEN_INPUT_COORDINATE, ScreenInputEvent};
 
     #[test]
     fn validates_bounded_click_and_key_events() {
@@ -373,40 +373,48 @@ mod tests {
 
     #[test]
     fn rejects_non_finite_coordinates_and_unknown_modifiers() {
-        assert!(ScreenInputEvent::MouseButtonPressed {
-            mouse_x: f32::NAN,
-            mouse_y: 0.0,
-            button: 0,
-            modifiers: 0,
-        }
-        .validate()
-        .is_err());
-        assert!(ScreenInputEvent::KeyPressed {
-            key_code: 65_536,
-            scan_code: 1,
-            modifiers: 0,
-            repeat: false,
-        }
-        .validate()
-        .is_err());
-        assert!(ScreenInputEvent::KeyPressed {
-            key_code: 1,
-            scan_code: 1,
-            modifiers: 0x40,
-            repeat: false,
-        }
-        .validate()
-        .is_err());
+        assert!(
+            ScreenInputEvent::MouseButtonPressed {
+                mouse_x: f32::NAN,
+                mouse_y: 0.0,
+                button: 0,
+                modifiers: 0,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ScreenInputEvent::KeyPressed {
+                key_code: 65_536,
+                scan_code: 1,
+                modifiers: 0,
+                repeat: false,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ScreenInputEvent::KeyPressed {
+                key_code: 1,
+                scan_code: 1,
+                modifiers: 0x40,
+                repeat: false,
+            }
+            .validate()
+            .is_err()
+        );
         let typed = ScreenInputEvent::CharacterTyped {
             code_unit: 0xd83d,
             modifiers: 0x01,
         };
         assert_eq!(typed.validate().unwrap(), typed);
-        assert!(ScreenInputEvent::CharacterTyped {
-            code_unit: b'a' as u16,
-            modifiers: 0x40,
-        }
-        .validate()
-        .is_err());
+        assert!(
+            ScreenInputEvent::CharacterTyped {
+                code_unit: b'a' as u16,
+                modifiers: 0x40,
+            }
+            .validate()
+            .is_err()
+        );
     }
 }

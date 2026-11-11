@@ -17,6 +17,16 @@ fn native_entity_api_reports_unsupported_imports() {
         entity::discard(handle).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );
+    assert_eq!(
+        entity::velocity(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_velocity(handle, entity::EntityVelocity::new(0.0, 0.1, 0.0).unwrap())
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
 }
 
 #[test]
@@ -48,5 +58,24 @@ fn entity_snapshot_uses_schema_v1_stable_field_encoding() {
     assert_eq!(
         from_bytes::<entity::EntitySnapshot>(&encoded).unwrap(),
         snapshot
+    );
+}
+
+#[test]
+fn entity_velocity_uses_schema_v1_little_endian_component_encoding() {
+    let velocity = entity::EntityVelocity {
+        x: 1.25,
+        y: -2.5,
+        z: 3.75,
+    };
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    for component in [velocity.x, velocity.y, velocity.z] {
+        expected.extend_from_slice(&component.to_le_bytes());
+    }
+    assert_eq!(expected.len(), 28);
+    assert_eq!(to_bytes(&velocity).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<entity::EntityVelocity>(&expected).unwrap(),
+        velocity
     );
 }

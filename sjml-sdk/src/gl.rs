@@ -1,8 +1,8 @@
 //! Bounded, typed OpenGL bridge for runtime modules with `client.render.opengl`.
 
+use crate::abi::{GlResourceHandle, RenderResourceHandle};
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
-use crate::abi::{GlResourceHandle, RenderResourceHandle};
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
 pub const MAX_GL_BATCH_BYTES: usize = 1024 * 1024;

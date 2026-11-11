@@ -25,7 +25,7 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes SDK 0.43.0 and core ABI 1.35.0.
+unverified. This guide describes SDK 0.44.0 and core ABI 1.36.0.
 Save-scoped storage uses the current server save. Physical-client modules also
 have a separate `ClientProfile` scope backed by per-mod local configuration
 files; they cannot access server save scopes.
@@ -46,6 +46,18 @@ includes the server-authoritative `PlayerMoved` event and bounded
 contracts are [entity removal](ENTITY_REMOVAL.md),
 [player teleport](PLAYER_TELEPORT.md), [world weather](WORLD_WEATHER.md), and
 [stonecutting recipes](STONECUTTING.md).
+
+SDK 0.44.0 adds read-only `player::vitals` and `world::biome_at` queries,
+`player::game_mode` and `player::set_game_mode`, `world::day_time` and
+`world::set_time`, bounded `player::motion` reads and velocity changes, a
+smithing-transform recipe declaration, and the server-side `PlayerRespawned`
+notification. These APIs require the existing `entity.read`/`world.read` grants, plus
+`player.game_mode.write` to change a player's mode and `world.write` to change
+daylight-cycle time and `player.motion.write` to set player velocity. See [player vitals](PLAYER_VITALS.md),
+[player game mode](PLAYER_GAME_MODE.md), [world biomes](WORLD_BIOMES.md),
+[world time](WORLD_TIME.md), [player motion](PLAYER_MOTION.md),
+[smithing transform recipes](SMITHING_TRANSFORM.md), and
+[player respawn events](PLAYER_RESPAWNED_EVENT.md).
 
 Client modules can subscribe to bounded active-screen mouse-click, key-press,
 and typed-character events through `screen_input::subscribe`. This requires a
@@ -112,7 +124,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.43.0"
+sjml-sdk = "0.44.0"
 ```
 
 For development against this checkout, use
@@ -125,34 +137,34 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.43.0/sjml/). The exact
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.44.0/sjml/). The exact
 function signatures and public types there are the reference for Rust callers.
 
 | Module | Main API |
 | --- | --- |
-| [`abi`](https://docs.rs/sjml-sdk/0.43.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
-| [`batch`](https://docs.rs/sjml-sdk/0.43.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
-| [`block_entity`](https://docs.rs/sjml-sdk/0.43.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
-| [`client_chat`](https://docs.rs/sjml-sdk/0.43.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
-| [`client_input`](https://docs.rs/sjml-sdk/0.43.0/sjml/client_input/) | Global key and mouse-button events when no screen is open. |
-| [`entity`](https://docs.rs/sjml-sdk/0.43.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, effect application, and bounded discard. |
-| [`entity_data`](https://docs.rs/sjml-sdk/0.43.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.43.0/sjml/events/) | Typed lifecycle, world, player movement, entity, inventory, and resource events. |
-| [`gl`](https://docs.rs/sjml-sdk/0.43.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
-| [`host`](https://docs.rs/sjml-sdk/0.43.0/sjml/host/) | ABI version query and host logging. |
-| [`inventory`](https://docs.rs/sjml-sdk/0.43.0/sjml/inventory/) | Detached snapshots, component updates, and bounded slot-to-slot transfers. |
-| [`menu`](https://docs.rs/sjml-sdk/0.43.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
-| [`network`](https://docs.rs/sjml-sdk/0.43.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
-| [`player`](https://docs.rs/sjml-sdk/0.43.0/sjml/player/) | Online player handles, detached snapshots, effects, and same-dimension teleport. |
-| [`recipe`](https://docs.rs/sjml-sdk/0.43.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
-| [`registry`](https://docs.rs/sjml-sdk/0.43.0/sjml/registry/) | Static item, block, entity, fluid, shaped/shapeless/cooking/stonecutting recipes, and related declarations. |
-| [`render`](https://docs.rs/sjml-sdk/0.43.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
-| [`screen_input`](https://docs.rs/sjml-sdk/0.43.0/sjml/screen_input/) | Bounded mouse, key, and text events delivered to the active screen. |
-| [`storage`](https://docs.rs/sjml-sdk/0.43.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
-| [`task`](https://docs.rs/sjml-sdk/0.43.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
-| [`widgets`](https://docs.rs/sjml-sdk/0.43.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
-| [`world`](https://docs.rs/sjml-sdk/0.43.0/sjml/world/) | Loaded-world handles, block snapshots, bounded updates, and weather state/control. |
-| [`prelude`](https://docs.rs/sjml-sdk/0.43.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
+| [`abi`](https://docs.rs/sjml-sdk/0.44.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
+| [`batch`](https://docs.rs/sjml-sdk/0.44.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
+| [`block_entity`](https://docs.rs/sjml-sdk/0.44.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
+| [`client_chat`](https://docs.rs/sjml-sdk/0.44.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
+| [`client_input`](https://docs.rs/sjml-sdk/0.44.0/sjml/client_input/) | Global key and mouse-button events when no screen is open. |
+| [`entity`](https://docs.rs/sjml-sdk/0.44.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, effect application, and bounded discard. |
+| [`entity_data`](https://docs.rs/sjml-sdk/0.44.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
+| [`events`](https://docs.rs/sjml-sdk/0.44.0/sjml/events/) | Typed lifecycle, world, player movement/respawn, entity, inventory, and resource events. |
+| [`gl`](https://docs.rs/sjml-sdk/0.44.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
+| [`host`](https://docs.rs/sjml-sdk/0.44.0/sjml/host/) | ABI version query and host logging. |
+| [`inventory`](https://docs.rs/sjml-sdk/0.44.0/sjml/inventory/) | Detached snapshots, component updates, and bounded slot-to-slot transfers. |
+| [`menu`](https://docs.rs/sjml-sdk/0.44.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
+| [`network`](https://docs.rs/sjml-sdk/0.44.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
+| [`player`](https://docs.rs/sjml-sdk/0.44.0/sjml/player/) | Online player handles, detached snapshots, vitals, game mode, motion, effects, and same-dimension teleport. |
+| [`recipe`](https://docs.rs/sjml-sdk/0.44.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
+| [`registry`](https://docs.rs/sjml-sdk/0.44.0/sjml/registry/) | Static item, block, entity, fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipes, and related declarations. |
+| [`render`](https://docs.rs/sjml-sdk/0.44.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
+| [`screen_input`](https://docs.rs/sjml-sdk/0.44.0/sjml/screen_input/) | Bounded mouse, key, and text events delivered to the active screen. |
+| [`storage`](https://docs.rs/sjml-sdk/0.44.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
+| [`task`](https://docs.rs/sjml-sdk/0.44.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
+| [`widgets`](https://docs.rs/sjml-sdk/0.44.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
+| [`world`](https://docs.rs/sjml-sdk/0.44.0/sjml/world/) | Loaded-world handles, block snapshots, bounded updates, weather, and daylight-cycle time. |
+| [`prelude`](https://docs.rs/sjml-sdk/0.44.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
 
 Stable codecs (`StableEncode`, `StableDecode`, `Encoder`, and `Decoder`) are
 re-exported at the crate root; the implementation module is intentionally
@@ -187,6 +199,7 @@ fn initialize() -> SjmlResult<()> {
     let _joined = events::subscribe("player.joined", EventPriority::Normal)?;
     let _left = events::subscribe("player.left", EventPriority::Normal)?;
     let _moved = events::subscribe("player.moved", EventPriority::Normal)?;
+    let _respawned = events::subscribe("player.respawned", EventPriority::Normal)?;
     let _death = events::subscribe("entity.death", EventPriority::Normal)?;
     let _spawned = events::subscribe("entity.spawned", EventPriority::Normal)?;
     let _effect_tick = events::subscribe("entity.effect.tick", EventPriority::Normal)?;
@@ -533,7 +546,7 @@ calling `sjml_v1_dealloc` exactly once. The core Java `CompiledModule` provides
 this bounded callback transport. NeoForge invokes only callbacks with an
 active runtime subscription. It dispatches the unit-valued `server.started`
 and `server.stopping` exports, the `player.joined`, `player.left`,
-`player.moved`, `entity.death`, `entity.spawned`, and `entity.effect.tick` exports, the
+`player.moved`, `player.respawned`, `entity.death`, `entity.spawned`, and `entity.effect.tick` exports, the
 `block.place`, `player.interacted`, `entity.damaged`, `world.loaded`, and
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`
 exports, and the
@@ -545,6 +558,11 @@ events accept the SDK's schema-v1 `PlayerJoined` or `PlayerLeft` record with
 yaw and pitch values. The host emits it after meaningful server-side movement;
 see [player movement](PLAYER_MOVED_EVENT.md) for sampling thresholds and
 lifecycle.
+`player.respawned` accepts schema-v1 `PlayerRespawned` with the player's
+canonical UUID, profile name, destination dimension, finite respawn coordinates,
+and an `end_conquered` flag. It is emitted after placement on the logical
+server and cannot cancel or change respawn. See
+[player respawn events](PLAYER_RESPAWNED_EVENT.md).
 `entity.death` accepts schema-v1 `EntityDeath` with `entity_id`,
 `entity_type_id`, and `dimension_id` stable strings followed by finite
 little-endian `f64` coordinates `x`, `y`, and `z`. The guest callback cannot
@@ -909,7 +927,8 @@ ID such as `minecraft:iron_ingot` or `c:ingots/iron` for vanilla or another
 mod's content. The host writes
 these declarations to an always-enabled generated server data pack, where
 Minecraft's vanilla `minecraft:crafting_shapeless`,
-`minecraft:crafting_shaped`, and `minecraft:stonecutting` serializers load them
+`minecraft:crafting_shaped`, `minecraft:stonecutting`, and
+`minecraft:smithing_transform` serializers load them
 on resource reload. Shapeless
 recipes have one to nine item or tag ingredients. Shaped recipes use one to
 three rows of equal width with one to three cells; uppercase letters select
@@ -918,11 +937,12 @@ one item or tag binding. Both crafting families yield one to 64 items. A
 stonecutting recipe accepts one item or tag input and yields one to 64 items.
 Its path is 1–128 lowercase ASCII characters; item and encoded ingredient IDs
 are limited to 256 ASCII bytes, including the `#` prefix on a tag. Vanilla
-recipe IDs are unique across shapeless, shaped, cooking, and
-stonecutting families; registration has a 256-entry aggregate per-module
+recipe IDs are unique across shapeless, shaped, cooking, stonecutting, and
+smithing-transform families; registration has a 256-entry aggregate per-module
 content limit and a 4,096-recipe-declaration global limit. See
-[stonecutting recipes](STONECUTTING.md) for its API, permission, and ABI
-details. The Rust function is `registry::register_stonecutting_recipe(path:
+[stonecutting recipes](STONECUTTING.md) and
+[smithing transform recipes](SMITHING_TRANSFORM.md) for their API, permission,
+and ABI details. The Rust function is `registry::register_stonecutting_recipe(path:
 &str, definition: registry::StonecuttingRecipeDefinition) -> SjmlResult<()>`.
 Use
 `RecipeIngredient::item("minecraft:stick")` or
@@ -1330,6 +1350,17 @@ fn read_overworld() -> SjmlResult<Option<i64>> {
 }
 ```
 
+`world::game_time` reads the elapsed server tick counter. `world::day_time`
+reads the daylight-cycle clock, which can pause when `doDaylightCycle` is
+disabled. Change that clock with `world::set_time(handle, ticks)`; it requires
+both `world.read` and `world.write`, accepts 0 through 1,000,000,000,000 ticks,
+and does not load a dimension or chunk. Setting daylight time does not change
+`game_time` or the daylight-cycle gamerule. See [world time](WORLD_TIME.md).
+`world::biome_at(handle, BlockPos { x, y, z })` returns a canonical biome ID
+for an already-loaded position, or `None` when the chunk is unloaded or the Y
+coordinate is outside build height. It requires only `world.read` and never
+loads a chunk. See [world biomes](WORLD_BIOMES.md).
+
 Weather is read as a detached value and changed with a bounded vanilla preset:
 
 ```rust
@@ -1535,6 +1566,24 @@ current `x`, `y`, and `z` coordinates as `f64`. Handles are scoped to one
 active module and login session. They survive respawn and dimension changes,
 then become stale as logout begins. Module/runtime close invalidates all
 remaining handles.
+
+`player::vitals(handle)` returns a detached `PlayerVitals` record with health,
+maximum health, food level, saturation, experience level, and progress toward
+the next level. It requires `entity.read`; client modules cannot query server
+players. The host revalidates the handle and login session on each call. This
+API is read-only. See [player vitals](PLAYER_VITALS.md).
+
+`player::game_mode(handle)` reads one of the detached `PlayerGameMode` values:
+`Survival`, `Creative`, `Adventure`, or `Spectator`. Changing it with
+`player::set_game_mode(handle, mode)` also requires the separately requested
+and granted `player.game_mode.write` capability. The host applies changes only
+to that live server login session, not the world's default game mode. See
+[player game mode](PLAYER_GAME_MODE.md).
+
+`player::motion(handle)` reads a live server player's velocity and yaw/pitch
+rotation. `player::set_velocity(handle, velocity)` sets bounded velocity and
+requires the additional `player.motion.write` capability. Velocity components
+are limited to ±64 blocks per tick. See [player motion](PLAYER_MOTION.md).
 
 `player::teleport(handle: PlayerHandle, destination: player::PlayerTeleport) ->
 SjmlResult<()>` sends an authoritative same-dimension move. Create the

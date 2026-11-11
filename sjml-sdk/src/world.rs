@@ -4,14 +4,14 @@
 //! limited to 1,024 live worlds.
 
 #[cfg(target_arch = "wasm32")]
+use crate::Decoder;
+#[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::{BlockPos, Direction};
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
-#[cfg(target_arch = "wasm32")]
-use crate::Decoder;
 use crate::{
-    ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle, MAX_STRING_BYTES,
+    ErrorCode, MAX_STRING_BYTES, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
 };
 
 const MAX_RESOURCE_ID_BYTES: usize = 256;
@@ -22,6 +22,8 @@ pub const MAX_WORLD_BLOCK_STATES: usize = 1024;
 pub const MAX_WORLD_RAY_DISTANCE: f64 = 128.0;
 /// Maximum absolute coordinate accepted for a raycast endpoint or hit location.
 pub const MAX_WORLD_RAY_COORDINATE: f64 = 30_000_000.0;
+/// Maximum absolute block coordinate accepted for x/z world queries.
+pub const MAX_WORLD_BLOCK_COORDINATE: i32 = 30_000_000;
 /// Maximum encoded optional raycast hit, including the stable snapshot headers.
 pub const MAX_WORLD_RAYCAST_RESPONSE_BYTES: usize = 65_857;
 /// Maximum number of block positions visited by one collision query.
@@ -30,6 +32,32 @@ pub const MAX_WORLD_COLLISION_BLOCKS: usize = 4096;
 pub const MAX_WORLD_ENTITY_TYPE_ID_BYTES: usize = 256;
 /// Maximum duration accepted by [`set_weather`], in ticks (24 in-game hours).
 pub const MAX_WEATHER_DURATION_TICKS: u32 = 1_728_000;
+/// Maximum day-time value accepted by [`set_time`].
+pub const MAX_WORLD_DAY_TIME_TICKS: i64 = 1_000_000_000_000;
+
+/// Runtime heightmap used by [`heightmap`]. ABI values are stable for world-v1.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(i32)]
+pub enum HeightmapType {
+    /// Highest non-air block.
+    WorldSurface = 0,
+    /// Highest block that blocks motion.
+    OceanFloor = 1,
+    /// Highest motion-blocking block or fluid.
+    MotionBlocking = 2,
+    /// Highest motion-blocking block or fluid, excluding leaves.
+    MotionBlockingNoLeaves = 3,
+}
+
+/// Detached sky and emitted block-light levels at a loaded position (each in 0..=15).
+#[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct LightSnapshot {
+    /// Sky light. Dimensions without sky lighting usually report zero.
+    pub sky: u8,
+    /// Block-emitted light.
+    pub block: u8,
+}
 
 /// Detached weather timers and current precipitation state for one loaded dimension.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
@@ -197,10 +225,44 @@ extern "C" {
     fn imported_dimension_id(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "game_time"]
     fn imported_game_time(handle: i32, length: i32, output: i32) -> i32;
+    #[link_name = "day_time"]
+    fn imported_day_time(handle: i32, length: i32, output: i32) -> i32;
+    #[link_name = "biome_at"]
+    fn imported_biome_at(
+        handle: i32,
+        handle_length: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "heightmap"]
+    fn imported_heightmap(
+        handle: i32,
+        handle_length: i32,
+        heightmap_type: i32,
+        x: i32,
+        z: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "light_at"]
+    fn imported_light_at(
+        handle: i32,
+        handle_length: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
     #[link_name = "weather"]
     fn imported_weather(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_weather"]
     fn imported_set_weather(handle: i32, length: i32, condition: i32, duration_ticks: i32) -> i32;
+    #[link_name = "set_time"]
+    fn imported_set_time(handle: i32, length: i32, day_time_low: i32, day_time_high: i32) -> i32;
     #[link_name = "block_states"]
     fn imported_block_states(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "raycast"]
@@ -325,6 +387,149 @@ pub fn game_time(handle: WorldHandle) -> SjmlResult<i64> {
     }
 }
 
+/// Reads the current absolute daylight-cycle time in ticks for a loaded world.
+///
+/// Requires `world.read`. Unlike [`game_time`], this value follows the daylight-cycle gamerule and
+/// may stop advancing when that rule is disabled. This method never loads a dimension or chunk.
+pub fn day_time(handle: WorldHandle) -> SjmlResult<i64> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output(8, |output, _| {
+            // SAFETY: the stable handle encoding and 8-byte output remain live for this call.
+            unsafe { imported_day_time(encoded.as_ptr() as usize as u32 as i32, 24, output) }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the canonical biome ID at a loaded world position. Returns `None` when the position is
+/// outside build height or its chunk is not already loaded; the call never loads a chunk.
+pub fn biome_at(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<String>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        let id: String = read_output((4 + MAX_RESOURCE_ID_BYTES) as u32, |output, capacity| {
+            // SAFETY: the handle and scalar position remain live for this synchronous import.
+            unsafe {
+                imported_biome_at(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    position.x,
+                    position.y,
+                    position.z,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if id.is_empty() {
+            return Ok(None);
+        }
+        validate_resource_id(&id, "biome")?;
+        Ok(Some(id))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads a vanilla runtime heightmap value at block x/z coordinates.
+///
+/// Requires `world.read` and a valid module-scoped handle. The four runtime maps are available;
+/// world-generation-only maps are intentionally excluded. Coordinates outside +/-30,000,000 are
+/// rejected. An unloaded chunk or a chunk without the requested primed map returns `None`; no
+/// chunk is requested or generated. The value is the highest Y included by the selected map
+/// (`min_build_height - 1` for a fully empty column).
+pub fn heightmap(
+    world: WorldHandle,
+    heightmap_type: HeightmapType,
+    x: i32,
+    z: i32,
+) -> SjmlResult<Option<i32>> {
+    if !(-MAX_WORLD_BLOCK_COORDINATE..=MAX_WORLD_BLOCK_COORDINATE).contains(&x)
+        || !(-MAX_WORLD_BLOCK_COORDINATE..=MAX_WORLD_BLOCK_COORDINATE).contains(&z)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "world x/z coordinates must be within +/-30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        read_output(1 + 4, |output, capacity| {
+            // SAFETY: the encoded handle and fixed optional-i32 output stay live for this call.
+            unsafe {
+                imported_heightmap(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    heightmap_type as i32,
+                    x,
+                    z,
+                    output,
+                    capacity,
+                )
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, heightmap_type);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads sky and block light at a loaded world position. Requires `world.read` and never loads a
+/// chunk. Returns `None` outside build height or when the position's chunk is not already loaded.
+/// x/z coordinates outside +/-30,000,000 are rejected; returned light values are each 0..=15.
+pub fn light_at(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<LightSnapshot>> {
+    if !(-MAX_WORLD_BLOCK_COORDINATE..=MAX_WORLD_BLOCK_COORDINATE).contains(&position.x)
+        || !(-MAX_WORLD_BLOCK_COORDINATE..=MAX_WORLD_BLOCK_COORDINATE).contains(&position.z)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "world x/z coordinates must be within +/-30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        let light: Option<LightSnapshot> = read_output(1 + 4 + 2, |output, capacity| {
+            // SAFETY: the handle, coordinates, and fixed output stay live for this call.
+            unsafe {
+                imported_light_at(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    position.x,
+                    position.y,
+                    position.z,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if light.is_some_and(|value| value.sky > 15 || value.block > 15) {
+            return Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "host returned a light level outside 0..=15",
+            ));
+        }
+        Ok(light)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
 /// Reads the current weather state and timers of a loaded dimension. Requires `world.read` and
 /// executes on the owning logical-server thread.
 pub fn weather(handle: WorldHandle) -> SjmlResult<WeatherSnapshot> {
@@ -401,6 +606,47 @@ pub fn set_weather(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (handle, condition);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the absolute daylight-cycle time for a loaded world.
+///
+/// Requires both `world.read` (for the handle) and `world.write`. Values from zero through
+/// [`MAX_WORLD_DAY_TIME_TICKS`] are accepted. This does not change `game_time` or the daylight-cycle
+/// gamerule; when that gamerule is enabled, `day_time` resumes advancing on the next world tick.
+/// The operation is server-thread-only and never loads a dimension or chunk.
+pub fn set_time(handle: WorldHandle, day_time: i64) -> SjmlResult<()> {
+    if !(0..=MAX_WORLD_DAY_TIME_TICKS).contains(&day_time) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "day time must be within 0..=1000000000000 ticks",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the stable handle and split i64 argument remain valid for this synchronous call.
+        let status = unsafe {
+            imported_set_time(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                day_time as u32 as i32,
+                (day_time >> 32) as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the world time update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, day_time);
         Err(unsupported_target())
     }
 }
@@ -956,10 +1202,11 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        collides, play_sound, raycast, set_block, spawn_entity, spawn_particle, Aabb,
-        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, RaycastBlockMode, RaycastFluidMode,
-        RaycastHit, RaycastPoint, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
-        WorldEntitySpawnRequest, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
+        Aabb, BlockStateBatch, BlockStateQuery, BlockStateSnapshot, MAX_WEATHER_DURATION_TICKS,
+        MAX_WORLD_DAY_TIME_TICKS, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
+        WeatherCondition, WeatherSnapshot, WorldCollisionQuery, WorldEntitySpawnRequest,
+        WorldRaycastQuery, collides, day_time, play_sound, raycast, set_block, set_time,
+        spawn_entity, spawn_particle,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -1005,6 +1252,31 @@ mod tests {
         }
         assert_eq!(
             super::set_weather(handle, WeatherCondition::Clear, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn day_time_read_and_set_time_validate_the_mutation_bound_before_host_access() {
+        let handle = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            day_time(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        for day_time in [-1, MAX_WORLD_DAY_TIME_TICKS + 1] {
+            assert_eq!(
+                set_time(handle, day_time).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_time(handle, 0).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_time(handle, MAX_WORLD_DAY_TIME_TICKS)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

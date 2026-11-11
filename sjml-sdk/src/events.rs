@@ -4,9 +4,9 @@ use crate::abi::EventSubscriptionHandle;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::BlockPos;
+use crate::{ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
 #[cfg(target_arch = "wasm32")]
 use crate::{from_bytes, to_bytes};
-use crate::{ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
 
 /// Default `server.tick` subscription cadence, in server ticks.
 pub const DEFAULT_SERVER_TICK_INTERVAL: u32 = 20;
@@ -37,6 +37,26 @@ pub struct PlayerMoved {
     pub yaw: f32,
     /// Player pitch in degrees after movement was processed.
     pub pitch: f32,
+}
+
+/// Synchronous, non-cancellable snapshot emitted after a logical-server player respawn.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerRespawned {
+    /// Canonical UUID string of the player who respawned.
+    pub player_id: String,
+    /// Current in-game profile name of the player.
+    pub display_name: String,
+    /// Resource location of the level where the player respawned.
+    pub dimension_id: String,
+    /// Player X coordinate after respawn placement.
+    pub x: f64,
+    /// Player Y coordinate after respawn placement.
+    pub y: f64,
+    /// Player Z coordinate after respawn placement.
+    pub z: f64,
+    /// Whether this respawn followed completion of the End credits.
+    pub end_conquered: bool,
 }
 
 /// Synchronous, observation-only snapshot of a logical-server player interaction attempt.
@@ -438,13 +458,13 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
-        EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle,
-        MAX_SERVER_TICK_INTERVAL,
+        BlockBreak, BlockPlace, EffectTickEvent, EntityDamaged, EntityDeath, EntitySpawned,
+        EventPriority, InventoryChanged, MAX_SERVER_TICK_INTERVAL, PlayerInteracted, PlayerMoved,
+        PlayerRespawned, ResourcesReloaded, ServerTick, WorldLifecycle, subscribe,
+        subscribe_with_interval, unsubscribe,
     };
-    use crate::inventory::BlockPos;
     use crate::ErrorCode;
+    use crate::inventory::BlockPos;
     use crate::{from_bytes, to_bytes};
 
     #[test]
@@ -462,6 +482,22 @@ mod tests {
 
         let encoded = to_bytes(&event).unwrap();
         assert_eq!(from_bytes::<PlayerMoved>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn player_respawned_snapshot_round_trips_identity_position_and_end_state() {
+        let event = PlayerRespawned {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            display_name: "Alice".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            end_conquered: true,
+        };
+
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(from_bytes::<PlayerRespawned>(&encoded).unwrap(), event);
     }
 
     #[test]

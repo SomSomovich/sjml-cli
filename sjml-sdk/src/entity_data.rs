@@ -367,8 +367,8 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_removed_response, decode_value_response, encode_request, read, remove, set,
         MAX_ENTITY_DATA_VALUE_BYTES, MAX_READ_RESPONSE_BYTES, OP_GET, OP_REMOVE, OP_SET,
+        decode_removed_response, decode_value_response, encode_request, read, remove, set,
     };
     use crate::{EntityHandle, ErrorCode};
 

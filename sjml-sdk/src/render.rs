@@ -1,12 +1,12 @@
 //! Runtime client-render subscriptions and bounded GUI/world command batches.
 
+#[cfg(target_arch = "wasm32")]
+use crate::StableDecode;
 use crate::abi::EventSubscriptionHandle;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
-#[cfg(target_arch = "wasm32")]
-use crate::StableDecode;
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// Maximum draw commands accepted during one callback.
@@ -1433,18 +1433,24 @@ mod tests {
         assert_eq!(bytes[17], 3); // package-font selector follows the text string
         let sprite_tag = 8 + 1 + 4 + 4 + 1 + 4 + "fonts/pixel".len() + 8 + 4 + 1;
         assert_eq!(bytes[sprite_tag], 6);
-        assert!(bytes
-            .windows("hud/status.png".len())
-            .any(|window| window == "hud/status.png".as_bytes()));
+        assert!(
+            bytes
+                .windows("hud/status.png".len())
+                .any(|window| window == "hud/status.png".as_bytes())
+        );
 
         assert!(RenderFont::package("../foreign").is_err());
         assert!(RenderFont::package("fonts/pixel.json").is_err());
-        assert!(context
-            .draw_sprite("../outside.png", 0.0, 0.0, 8.0, 8.0, (16, 16))
-            .is_err());
-        assert!(context
-            .draw_sprite("hud/icon.png", 0.0, 0.0, 8.0, 8.0, (4097, 16))
-            .is_err());
+        assert!(
+            context
+                .draw_sprite("../outside.png", 0.0, 0.0, 8.0, 8.0, (16, 16))
+                .is_err()
+        );
+        assert!(
+            context
+                .draw_sprite("hud/icon.png", 0.0, 0.0, 8.0, 8.0, (4097, 16))
+                .is_err()
+        );
     }
 
     #[test]

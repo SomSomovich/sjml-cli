@@ -2,7 +2,7 @@
 //!
 //! These functions are valid only from `#[mod_register]`. They stage bounded
 //! item, block, block-entity, generic entity and its attributes, creative-tab,
-//! fluid, shaped/shapeless/cooking recipe, particle, sound, bounded attribute
+//! fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipe, particle, sound, bounded attribute
 //! effect and its optional tick callback, and string data component declarations; they do not mutate world
 //! state or registries directly.
 
@@ -481,6 +481,16 @@ pub struct StonecuttingRecipeDefinition {
     pub output_count: u32,
 }
 
+/// Template, base, addition, and output for one vanilla smithing transform recipe.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SmithingTransformRecipeDefinition {
+    pub template: RecipeIngredient,
+    pub base: RecipeIngredient,
+    pub addition: RecipeIngredient,
+    pub output_item: String,
+    pub output_count: u32,
+}
+
 /// A bounded vanilla base attribute supported by a generic SJML living entity.
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -681,6 +691,20 @@ extern "C" {
         output_count: i32,
         ingredient_item_pointer: i32,
         ingredient_item_length: i32,
+    ) -> i32;
+    #[link_name = "register_smithing_transform_recipe"]
+    fn imported_register_smithing_transform_recipe(
+        path_pointer: i32,
+        path_length: i32,
+        template_pointer: i32,
+        template_length: i32,
+        base_pointer: i32,
+        base_length: i32,
+        addition_pointer: i32,
+        addition_length: i32,
+        output_item_pointer: i32,
+        output_item_length: i32,
+        output_count: i32,
     ) -> i32;
     #[link_name = "register_entity"]
     fn imported_register_entity(
@@ -1316,6 +1340,59 @@ pub fn register_stonecutting_recipe(
     }
 }
 
+/// Stages a vanilla smithing transform recipe using one item or item tag per slot.
+///
+/// Result counts are limited to 1–64. The recipe is written to SJML's generated
+/// server data pack and loaded by Minecraft's normal recipe reload flow.
+pub fn register_smithing_transform_recipe(
+    path: &str,
+    definition: SmithingTransformRecipeDefinition,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    if path.len() > 128 || path == "." || path == ".." {
+        return Err(invalid_argument(
+            "smithing transform recipe path must be at most 128 bytes and cannot be . or ..",
+        ));
+    }
+    if !(1..=64).contains(&definition.output_count) {
+        return Err(invalid_argument(
+            "smithing transform output count must be between 1 and 64",
+        ));
+    }
+    validate_recipe_item_id(&definition.output_item)?;
+    let template = encode_recipe_ingredient(&definition.template)?;
+    let base = encode_recipe_ingredient(&definition.base)?;
+    let addition = encode_recipe_ingredient(&definition.addition)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies all bounded UTF-8 slices before returning.
+        let status = unsafe {
+            imported_register_smithing_transform_recipe(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                template.as_ptr() as usize as u32 as i32,
+                template.len() as u32 as i32,
+                base.as_ptr() as usize as u32 as i32,
+                base.len() as u32 as i32,
+                addition.as_ptr() as usize as u32 as i32,
+                addition.len() as u32 as i32,
+                definition.output_item.as_ptr() as usize as u32 as i32,
+                definition.output_item.len() as u32 as i32,
+                definition.output_count as i32,
+            )
+        };
+        return status_result(
+            status,
+            "host rejected the smithing transform recipe declaration",
+        );
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (template, base, addition);
+        Err(unsupported_target())
+    }
+}
+
 fn validate_recipe_item_id(item_id: &str) -> SjmlResult<()> {
     if item_id.is_empty()
         || item_id.len() > MAX_RECIPE_ITEM_ID_BYTES
@@ -1331,7 +1408,7 @@ fn validate_recipe_item_id(item_id: &str) -> SjmlResult<()> {
         Some(_) => {
             return Err(invalid_argument(
                 "recipe item ID must contain at most one namespace separator",
-            ))
+            ));
         }
         None => (None, item_id),
     };
@@ -2119,7 +2196,7 @@ fn decode_custom_registry_value_response(bytes: &[u8]) -> SjmlResult<Option<Stri
         _ => {
             return Err(invalid_argument(
                 "custom registry value response has an invalid option tag",
-            ))
+            ));
         }
     };
     if initialized_length > bytes.len() {
@@ -2315,26 +2392,36 @@ mod tests {
             .add_cuboid([-0.5, 0.0, -0.5], [0.5, 1.0, 0.5], 0xFFFF_0080)
             .unwrap();
         assert_eq!(entity.cuboid_count(), 1);
-        assert!(entity
-            .add_cuboid([0.0; 3], [f32::INFINITY, 1.0, 1.0], 0)
-            .is_err());
-        assert!(entity
-            .add_cuboid([0.5, 0.0, 0.0], [-0.5, 1.0, 1.0], 0)
-            .is_err());
-        assert!(entity
-            .add_cuboid([-4.1, 0.0, 0.0], [0.0, 1.0, 1.0], 0)
-            .is_err());
+        assert!(
+            entity
+                .add_cuboid([0.0; 3], [f32::INFINITY, 1.0, 1.0], 0)
+                .is_err()
+        );
+        assert!(
+            entity
+                .add_cuboid([0.5, 0.0, 0.0], [-0.5, 1.0, 1.0], 0)
+                .is_err()
+        );
+        assert!(
+            entity
+                .add_cuboid([-4.1, 0.0, 0.0], [0.0, 1.0, 1.0], 0)
+                .is_err()
+        );
 
         let mut block_entity = BlockEntityModelDefinition::new();
         block_entity
             .add_cuboid([0.0; 3], [1.0; 3], 0xFF20_C0FF)
             .unwrap();
-        assert!(block_entity
-            .add_cuboid([-0.01, 0.0, 0.0], [0.5; 3], 0)
-            .is_err());
-        assert!(block_entity
-            .add_cuboid([0.0; 3], [1.01, 1.0, 1.0], 0)
-            .is_err());
+        assert!(
+            block_entity
+                .add_cuboid([-0.01, 0.0, 0.0], [0.5; 3], 0)
+                .is_err()
+        );
+        assert!(
+            block_entity
+                .add_cuboid([0.0; 3], [1.01, 1.0, 1.0], 0)
+                .is_err()
+        );
 
         let mut full = EntityModelDefinition::new();
         for _ in 0..MAX_BOUND_MODEL_CUBOIDS {
@@ -2459,15 +2546,17 @@ mod tests {
         assert_eq!(model.cuboid_animations, [None, Some(child)]);
         assert!(model.set_cuboid_animation(2, child).is_err());
         assert!(model.clear_cuboid_animation(2).is_err());
-        assert!(model
-            .set_cuboid_animation(
-                0,
-                ModelAnimation {
-                    pivot: [4.01, 0.0, 0.0],
-                    ..child
-                }
-            )
-            .is_err());
+        assert!(
+            model
+                .set_cuboid_animation(
+                    0,
+                    ModelAnimation {
+                        pivot: [4.01, 0.0, 0.0],
+                        ..child
+                    }
+                )
+                .is_err()
+        );
         model.clear_cuboid_animation(1).unwrap();
         assert_eq!(model.cuboid_animations, [None, None]);
 
@@ -2475,15 +2564,17 @@ mod tests {
         block_model
             .add_cuboid([0.0, 0.0, 0.0], [0.5, 0.5, 0.5], 0)
             .unwrap();
-        assert!(block_model
-            .set_cuboid_animation(
-                0,
-                ModelAnimation {
-                    pivot: [-0.01, 0.5, 0.5],
-                    ..child
-                }
-            )
-            .is_err());
+        assert!(
+            block_model
+                .set_cuboid_animation(
+                    0,
+                    ModelAnimation {
+                        pivot: [-0.01, 0.5, 0.5],
+                        ..child
+                    }
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -2492,21 +2583,27 @@ mod tests {
             ModelAnimation::sine_rotation(ModelAnimationAxis::X, [0.0, 0.5, 0.0], 12.0, 20, 19)
                 .unwrap();
         assert!(EntityModelDefinition::new().set_animation(valid).is_ok());
-        assert!(BlockEntityModelDefinition::new()
-            .set_animation(valid)
-            .is_ok());
-        assert!(BlockEntityModelDefinition::new()
-            .set_animation(ModelAnimation {
-                pivot: [-0.01, 0.5, 0.5],
-                ..valid
-            })
-            .is_err());
-        assert!(EntityModelDefinition::new()
-            .set_animation(ModelAnimation {
-                pivot: [4.01, 0.0, 0.0],
-                ..valid
-            })
-            .is_err());
+        assert!(
+            BlockEntityModelDefinition::new()
+                .set_animation(valid)
+                .is_ok()
+        );
+        assert!(
+            BlockEntityModelDefinition::new()
+                .set_animation(ModelAnimation {
+                    pivot: [-0.01, 0.5, 0.5],
+                    ..valid
+                })
+                .is_err()
+        );
+        assert!(
+            EntityModelDefinition::new()
+                .set_animation(ModelAnimation {
+                    pivot: [4.01, 0.0, 0.0],
+                    ..valid
+                })
+                .is_err()
+        );
         for invalid in [
             ModelAnimation {
                 amplitude_degrees: f32::NAN,
@@ -3183,6 +3280,56 @@ mod tests {
         }
         assert_eq!(
             register_stonecutting_recipe("..", valid)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument,
+        );
+    }
+
+    #[test]
+    fn smithing_transform_recipe_bounds_and_ingredients_are_validated_before_host_access() {
+        let valid = SmithingTransformRecipeDefinition {
+            template: RecipeIngredient::tag("minecraft:smithing_templates"),
+            base: RecipeIngredient::item("minecraft:diamond_sword"),
+            addition: RecipeIngredient::item("minecraft:netherite_ingot"),
+            output_item: "minecraft:netherite_sword".into(),
+            output_count: 1,
+        };
+        assert_eq!(
+            register_smithing_transform_recipe("netherite_sword", valid.clone())
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+        );
+        for definition in [
+            SmithingTransformRecipeDefinition { output_count: 0, ..valid.clone() },
+            SmithingTransformRecipeDefinition { output_count: 65, ..valid.clone() },
+            SmithingTransformRecipeDefinition {
+                template: RecipeIngredient::tag("invalid tag"),
+                ..valid.clone()
+            },
+            SmithingTransformRecipeDefinition {
+                base: RecipeIngredient::item("bad item id"),
+                ..valid.clone()
+            },
+            SmithingTransformRecipeDefinition {
+                addition: RecipeIngredient::tag("bad tag id"),
+                ..valid.clone()
+            },
+            SmithingTransformRecipeDefinition {
+                output_item: "bad item id".into(),
+                ..valid.clone()
+            },
+        ] {
+            assert_eq!(
+                register_smithing_transform_recipe("netherite_sword", definition)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument,
+            );
+        }
+        assert_eq!(
+            register_smithing_transform_recipe("..", valid)
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument,

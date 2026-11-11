@@ -21,7 +21,9 @@ impl ChannelRef {
     /// References an explicitly named owner; foreign subscriptions require `network.external`.
     pub fn new(package_id: &str, module_id: &str, name: &str) -> SjmlResult<Self> {
         if !valid_owner(package_id) || !valid_owner(module_id) {
-            return Err(invalid("network owner must contain 1..=64 lowercase ASCII letters, digits, '_' or '-', starting with a letter"));
+            return Err(invalid(
+                "network owner must contain 1..=64 lowercase ASCII letters, digits, '_' or '-', starting with a letter",
+            ));
         }
         validate_channel(name)?;
         Ok(Self {
@@ -96,7 +98,9 @@ fn validate_channel(name: &str) -> SjmlResult<()> {
                 })
         })
     {
-        return Err(invalid("network channel must contain 1..=128 lowercase ASCII letters, digits, '_', '-' or '.'; each dot-separated segment must start with a letter"));
+        return Err(invalid(
+            "network channel must contain 1..=128 lowercase ASCII letters, digits, '_', '-' or '.'; each dot-separated segment must start with a letter",
+        ));
     }
     Ok(())
 }
@@ -723,7 +727,7 @@ impl NetworkContext {
         for handle in handles {
             match crate::player::snapshot(handle) {
                 Ok(snapshot) if snapshot.uuid.parse::<Uuid>()? == uuid => {
-                    return Ok(Some(Player { handle }))
+                    return Ok(Some(Player { handle }));
                 }
                 Ok(_) => {}
                 Err(error) if error.code() == ErrorCode::StaleHandle => {}

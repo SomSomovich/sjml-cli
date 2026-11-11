@@ -21,8 +21,8 @@ use std::time::Duration;
 
 mod compute;
 mod service;
-pub use compute::{spawn_compute, ComputeFuture, MAX_COMPUTE_BYTES};
-pub use service::{service_call, ServiceCallFuture};
+pub use compute::{ComputeFuture, MAX_COMPUTE_BYTES, spawn_compute};
+pub use service::{ServiceCallFuture, service_call};
 
 /// Yields the current guest task and asks the host to schedule its next poll.
 ///
@@ -449,7 +449,7 @@ pub extern "C" fn cancel_export(task_id: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{cancel, poll_future, GuestTaskId, LocalExecutor, LocalFuture, WakeBridge};
+    use super::{GuestTaskId, LocalExecutor, LocalFuture, WakeBridge, cancel, poll_future};
     use crate::ErrorCode;
     use core::future::Future;
     use core::pin::Pin;

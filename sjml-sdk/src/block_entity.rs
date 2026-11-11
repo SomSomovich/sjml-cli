@@ -1,12 +1,13 @@
 //! Read-only block-entity snapshots. NBT requires the separate `block_entity.nbt.read` grant.
-#[cfg(target_arch = "wasm32")]
-use crate::{
-    abi::{allocate_host_input, deallocate_host_input},
-    to_bytes, Decoder,
-};
 use crate::{
     BlockEntityHandle, BlockPos, Direction, ErrorCode, InventorySnapshot, SjmlError, SjmlResult,
     StableDecode, StableEncode, WorldHandle,
+};
+#[cfg(target_arch = "wasm32")]
+use crate::{
+    Decoder,
+    abi::{allocate_host_input, deallocate_host_input},
+    to_bytes,
 };
 
 /// Detached values describing a loaded block entity and its current block state.

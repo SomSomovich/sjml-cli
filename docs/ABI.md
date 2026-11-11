@@ -6,12 +6,16 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.35.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.36.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.35.0 adds
-bounded entity removal, same-dimension player teleport, loaded-world weather
-read/write, and vanilla stonecutting recipe declarations.
+incompatible. Build metadata does not affect version ordering. ABI 1.36.0 adds
+read-only player vitals, bounded server-player game-mode changes, loaded-world
+biome and daylight-time queries, daylight-time writes, bounded player motion
+reads and velocity writes, smithing-transform recipes, and the non-cancellable
+`player.respawned` event. ABI 1.35.0 added bounded entity removal,
+same-dimension player teleport, loaded-world weather read/write, and vanilla
+stonecutting recipe declarations.
 
 ## Guest instruction budget
 
@@ -130,6 +134,7 @@ subscription. It dispatches the non-cancellable unit-valued
 `sjml_v1_event_server.started` and `sjml_v1_event_server.stopping` exports,
 plus the non-cancellable `sjml_v1_event_player.joined`,
 `sjml_v1_event_player.left`, `sjml_v1_event_player.moved`,
+`sjml_v1_event_player.respawned`,
 `sjml_v1_event_entity.death`, and
 `sjml_v1_event_entity.spawned`, `sjml_v1_event_entity.effect.tick`,
 `sjml_v1_event_block.place`, `sjml_v1_event_player.interacted`,
@@ -143,9 +148,16 @@ version `1`, then a stable UTF-8 string containing the canonical UUID, then a
 stable UTF-8 string containing the profile name. `player.moved` receives
 schema-v1 `PlayerMoved`: the same identity strings, a stable UTF-8 dimension
 ID, finite little-endian `f64` position coordinates, then finite `f32` yaw and
-pitch values. All sixteen notifications run
+pitch values. All seventeen notifications run
 only after explicit subscription, synchronously on the owning logical-server
-thread. The module must request `events.subscribe` in its manifest and receive
+thread. `player.respawned` receives schema-v1 `PlayerRespawned`: little-endian
+version `1`, stable strings in order (`player_id` canonical UUID,
+`display_name`, and `dimension_id`), finite little-endian `f64` respawn
+coordinates `x`, `y`, and `z`, then a stable boolean byte `end_conquered`.
+NeoForge dispatches after the player has been placed in the respawned level;
+the event cannot alter or cancel respawn. It requires only `events.subscribe`
+and runs on the owning logical-server thread. The module must request
+`events.subscribe` in its manifest and receive
 an administrator grant. Subscriptions run by priority, with equal priorities
 preserving module activation order and per-module registration order. Callback
 failures disable only the affected module.
@@ -264,7 +276,7 @@ event.
 The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
-`player.moved`,
+`player.moved`, `player.respawned`,
 `entity.death`, `entity.spawned`, `entity.effect.tick`, `block.break`,
 `block.place`, `player.interacted`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`.
@@ -366,6 +378,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_shaped_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, pattern_ptr: i32, pattern_len: i32, key_pairs_ptr: i32, key_pairs_len: i32) -> i32` | Stage a bounded 1–3 by 1–3 shaped recipe with uppercase-symbol item or item-tag bindings. |
 | `sjml_registry_v1.register_cooking_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_token_ptr: i32, ingredient_token_len: i32, kind: i32, experience_bits: i32, cooking_time: i32) -> i32` | Stage a vanilla cooking recipe with an item or item-tag input. |
 | `sjml_registry_v1.register_stonecutting_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_token_ptr: i32, ingredient_token_len: i32) -> i32` | Stage one vanilla stonecutting recipe with one item or item-tag input. |
+| `sjml_registry_v1.register_smithing_transform_recipe` | `(path_ptr: i32, path_len: i32, template_ptr: i32, template_len: i32, base_ptr: i32, base_len: i32, addition_ptr: i32, addition_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32) -> i32` | Stage a vanilla smithing transform with template, base, and addition item or item-tag inputs. |
 | `sjml_registry_v1.register_recipe_serializer` | `(path_ptr: i32, path_len: i32) -> i32` | Register a guest callback serializer for package-owned crafting recipe JSON. |
 | `sjml_registry_v1.register_particle` | `(path_ptr: i32, path_len: i32) -> i32` | Stage a simple particle type using the vanilla `minecraft:generic_0` sprite fallback. |
 | `sjml_registry_v1.register_particle_visual` | `(path_ptr: i32, path_len: i32, texture_ptr: i32, texture_len: i32, scale_bits: i32) -> i32` | Stage a simple particle with a package-owned `particle/` atlas resource and a scale from 0.05 through 4.0. |
@@ -474,18 +487,21 @@ The block and fluid registry events can arrive in either order; the host keeps
 their supplier links valid and emits the bucket only after both phases. If
 another mod owns the generated `_block` ID, the host uses `_liquid` when that
 fallback ID is available.
-Shapeless, shaped, cooking, and stonecutting recipes are emitted into an always-enabled generated
+Shapeless, shaped, cooking, stonecutting, and smithing-transform recipes are emitted into an always-enabled generated
 server data pack and decoded by Minecraft's vanilla
 `minecraft:crafting_shapeless`, `minecraft:crafting_shaped`, `minecraft:smelting`,
-`minecraft:blasting`, `minecraft:smoking`, `minecraft:campfire_cooking`, and
-`minecraft:stonecutting` serializers. Stonecutting takes exactly one item or
+`minecraft:blasting`, `minecraft:smoking`, `minecraft:campfire_cooking`,
+`minecraft:stonecutting`, and `minecraft:smithing_transform` serializers. Stonecutting takes exactly one item or
 item-tag ingredient; its path is 1–128 lowercase ASCII content-path characters,
 item and encoded ingredient IDs are at most 256 UTF-8 bytes (including `#` for
 a tag), and output count is 1–64. Vanilla recipe IDs must be unique across
-shapeless, shaped, cooking, and stonecutting families. The host limits recipe
+shapeless, shaped, cooking, stonecutting, and smithing families. Smithing
+transform recipes accept one template, one base, and one addition item or tag.
+The host limits recipe
 declarations to 256 aggregate content entries per module and 4,096 recipes
-globally. See [stonecutting recipes](STONECUTTING.md) for the Rust helper and
-exact token convention.
+globally. See [stonecutting recipes](STONECUTTING.md) and
+[smithing transform recipes](SMITHING_TRANSFORM.md) for their Rust helpers and
+input conventions.
 The path, output-item ID, and ingredient token are passed as separate UTF-8
 pointer/length spans; a tag token includes its leading `#`. The declaration
 requires requested and granted `content.register` and is accepted only during
@@ -844,7 +860,7 @@ server instances fail closed.
 ABI v1 provides the following synchronous `sjml_world_v1` imports. All parameters
 and statuses are `i32`; zero is success and nonzero values use the error table.
 World reads require the requested and granted `world.read` capability. Block
-mutation, weather changes, and particle spawning additionally require
+and time mutation, weather changes, and particle spawning additionally require
 requested and granted `world.write`. Static
 registration binds the signatures but every call during `mod_register` returns
 `PERMISSION_DENIED`.
@@ -855,6 +871,9 @@ registration binds the signatures but every call during `mod_register` returns
 | `loaded` | `out_ptr, out_capacity` | Stable `Vec<WorldHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `dimension_id` | `handle_ptr, handle_len, out_ptr, out_capacity` | Stable `String`: little-endian u32 UTF-8 length, then bytes |
 | `game_time` | `handle_ptr, handle_len, out_ptr` | Little-endian signed i64 |
+| `day_time` | `handle_ptr, handle_len, out_ptr` | Little-endian signed i64 |
+| `biome_at` | `handle_ptr, handle_len, x, y, z, out_ptr, out_capacity` | Stable `Option<String>`: u32 UTF-8 length (`0` means unavailable), then canonical biome ID bytes |
+| `set_time` | `handle_ptr, handle_len, day_time_low, day_time_high` | Set absolute daylight-cycle time; status only |
 | `block_states` | `query_ptr, query_len, out_ptr, out_capacity` | Stable ordered `Vec<Option<BlockStateSnapshot>>` |
 | `raycast` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<RaycastHit>` for one bounded segment |
 | `collides` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<bool>` for one bounded axis-aligned box |
@@ -873,12 +892,19 @@ invalid UTF-8 returns `INVALID_UTF8`. Unknown or unloaded IDs return `None`.
 
 Output buffers belong to the guest and stay live for the synchronous call.
 `get` requires capacity at least 25; `loaded` requires at least `4 + 24 * count`;
-`dimension_id` requires `4 + utf8_length`; `game_time` needs 8 writable bytes.
+`dimension_id` requires `4 + utf8_length`; `game_time` and `day_time` need 8
+writable bytes. `set_time` reconstructs a little-endian signed `i64` from the
+two `i32` words `day_time_low` and `day_time_high`.
+`biome_at` takes signed block coordinates and writes a length-prefixed UTF-8
+biome ID of at most 256 bytes; a zero length means the position is outside
+build height or belongs to an unloaded chunk. It requires `world.read`, checks
+the owning logical-server thread and loaded-world handle, and never loads a
+chunk. See [world biome lookup](WORLD_BIOMES.md).
 The complete declared capacity is bounds checked. Only the encoded value is
 written; the remaining capacity is padding, not part of its stable encoding.
 Insufficient capacity returns `PAYLOAD_TOO_LARGE` before handle allocation.
-The SDK allocates 25, 24,580, 65,540 and 8 bytes respectively. The string limit
-remains 65,536 UTF-8 bytes. `weather` requires the 24-byte world handle and an
+The SDK allocates 25, 24,580, 65,540, and 8 bytes for each time query. The
+string limit remains 65,536 UTF-8 bytes. `weather` requires the 24-byte world handle and an
 output capacity of at least 18 bytes. Its output is exactly little-endian
 `u32 schema=1`, `u8 raining` (0 or 1), `u8 thundering` (0 or 1), then
 `u32 clear_time`, `u32 rain_time`, and `u32 thunder_time`, each timer in ticks.
@@ -890,6 +916,12 @@ condition tag is `0=clear`, `1=rain`, or `2=thunder`, and duration is
 run synchronously on its owning server thread, and never load dimensions or
 chunks. Static-registration and client calls fail closed with
 `PERMISSION_DENIED`. See [world weather](WORLD_WEATHER.md).
+`day_time` requires requested and granted `world.read`; `set_time` requires
+both `world.read` and `world.write`. The time value must be from 0 through
+1,000,000,000,000 inclusive. These operations resolve only an already-loaded
+world, run on its owning logical-server thread, and never load dimensions or
+chunks. `set_time` changes the daylight-cycle clock, not `game_time` or the
+`doDaylightCycle` gamerule. See [world time](WORLD_TIME.md).
 
 Each active module owns one world handle registry with a 1,024-live-handle
 quota. `get` and `loaded` share handles. `loaded` sorts all currently loaded
@@ -997,6 +1029,11 @@ signatures but calls return `PERMISSION_DENIED`.
 | --- | --- | --- |
 | `online` | `out_ptr, out_capacity` | Stable `Vec<PlayerHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `PlayerSnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `profile_name`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
+| `vitals` | `handle_ptr, handle_len, out_ptr, out_capacity` | 28-byte `PlayerVitals`: u32 schema `1`, `f32 health`, `f32 max_health`, `u32 food_level`, `f32 saturation`, `u32 experience_level`, `f32 experience_progress` |
+| `game_mode` | `handle_ptr, handle_len, out_ptr, out_capacity` | Eight bytes: u32 schema `1`, u32 mode (`0=Survival`, `1=Creative`, `2=Adventure`, `3=Spectator`) |
+| `set_game_mode` | `handle_ptr, handle_len, mode_u32` | Set the current login session's game mode; status only |
+| `motion` | `handle_ptr, handle_len, out_ptr, out_capacity` | 36-byte schema-v1 player motion: u32 schema, three f64 velocity components, f32 yaw, f32 pitch |
+| `set_velocity` | `handle_ptr, handle_len, velocity_ptr, velocity_len` | Set three bounded f64 velocity components from a 28-byte schema-v1 record; status only |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to the current player for that login session; status only |
 | `teleport` | `(handle_ptr: i32, handle_len: i32, destination_ptr: i32, destination_len: i32) -> i32` | Teleport the current player session within its current dimension; status only |
 
@@ -1005,7 +1042,9 @@ dimension IDs are canonical `namespace:path`. Each stable string is limited to
 65,536 UTF-8 bytes. The SDK reserves `4 + 24 * 1024` bytes for enumeration and
 `4 + 3 * (4 + 65,536) + 24` bytes for a snapshot. The complete declared output
 capacity is bounds checked; insufficient capacity returns
-`PAYLOAD_TOO_LARGE` before new enumeration handles are allocated.
+`PAYLOAD_TOO_LARGE` before new enumeration handles are allocated. `vitals`
+requires a 28-byte output buffer; `game_mode` requires eight bytes;
+`motion` requires a 36-byte output buffer.
 
 Each module owns a 1,024-live-handle quota. Enumeration sorts by UUID and
 returns the complete list or an error. Every snapshot validates capability,
@@ -1031,6 +1070,27 @@ chunk is already loaded. It does not load chunks or change dimensions. Calls
 require an active server-player session and the owning server thread. Static
 registration and client calls return `PERMISSION_DENIED`. See
 [player teleport](PLAYER_TELEPORT.md).
+`vitals` returns only a detached read snapshot and requires `entity.read`. The
+host validates the same module-owned login-session handle and owning server
+thread on every call. Health and maximum health must be finite and at most
+1,000,000, maximum health must be positive, food level must be 0–20,
+saturation 0–20, experience level at most 1,000,000, and experience progress
+0–1. Invalid host-side values return `INVALID_ARGUMENT`; client and static
+registration calls fail closed. See [player vitals](PLAYER_VITALS.md).
+`game_mode` returns the detached stable mode value and requires `entity.read`.
+`set_game_mode` also requires the separately requested and granted
+`player.game_mode.write` capability. The host validates the same live player
+login-session handle and owning server thread; only the four built-in modes
+are accepted. It changes that player's mode without changing the world's
+default mode. Static registration and client calls fail closed. See
+[player game mode](PLAYER_GAME_MODE.md).
+`motion` requires `entity.read` and returns the current velocity and yaw/pitch
+rotation of the active login session. `set_velocity` additionally requires the
+separately requested and granted `player.motion.write` capability and accepts
+only finite components within ±64 blocks per tick. The host synchronizes
+motion to the player and validates the owning server thread and live session.
+Static registration and client calls fail closed. See
+[player motion](PLAYER_MOTION.md).
 
 ## Loaded non-player entities
 

@@ -1,13 +1,13 @@
 //! Bounded global keyboard and mouse-button callbacks for client guests.
 
+#[cfg(target_arch = "wasm32")]
+use crate::StableDecode;
 use crate::abi::EventSubscriptionHandle;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
-#[cfg(target_arch = "wasm32")]
-use crate::StableDecode;
+use crate::{ErrorCode, SjmlError, SjmlResult};
 #[cfg(target_arch = "wasm32")]
 use crate::{from_bytes, to_bytes};
-use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// Maximum number of global client input callbacks owned by one module.
 pub const MAX_CLIENT_INPUT_SUBSCRIPTIONS: usize = 256;
@@ -422,35 +422,43 @@ mod tests {
 
     #[test]
     fn rejects_invalid_code_action_and_modifier_values() {
-        assert!(ClientInputEvent::Key {
-            key_code: 65_536,
-            scan_code: 0,
-            action: ClientInputAction::Press,
-            modifiers: 0,
-        }
-        .validate()
-        .is_err());
-        assert!(ClientInputEvent::MouseButton {
-            button: 32,
-            action: ClientInputAction::Press,
-            modifiers: 0,
-        }
-        .validate()
-        .is_err());
-        assert!(ClientInputEvent::MouseButton {
-            button: 0,
-            action: ClientInputAction::Repeat,
-            modifiers: 0,
-        }
-        .validate()
-        .is_err());
-        assert!(ClientInputEvent::Key {
-            key_code: 1,
-            scan_code: 1,
-            action: ClientInputAction::Press,
-            modifiers: 0x40,
-        }
-        .validate()
-        .is_err());
+        assert!(
+            ClientInputEvent::Key {
+                key_code: 65_536,
+                scan_code: 0,
+                action: ClientInputAction::Press,
+                modifiers: 0,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ClientInputEvent::MouseButton {
+                button: 32,
+                action: ClientInputAction::Press,
+                modifiers: 0,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ClientInputEvent::MouseButton {
+                button: 0,
+                action: ClientInputAction::Repeat,
+                modifiers: 0,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ClientInputEvent::Key {
+                key_code: 1,
+                scan_code: 1,
+                action: ClientInputAction::Press,
+                modifiers: 0x40,
+            }
+            .validate()
+            .is_err()
+        );
     }
 }

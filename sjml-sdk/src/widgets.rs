@@ -49,7 +49,7 @@
 //! }
 //! ```
 
-use crate::render::{RenderContext, MAX_RENDER_TEXT_BYTES, MAX_TOOLTIP_BYTES};
+use crate::render::{MAX_RENDER_TEXT_BYTES, MAX_TOOLTIP_BYTES, RenderContext};
 use crate::screen_input::ScreenInputEvent;
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
@@ -712,12 +712,12 @@ fn invalid(message: &'static str) -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, GLFW_KEY_BACKSPACE,
-        GLFW_KEY_ENTER, GLFW_KEY_LEFT, MAX_TEXT_FIELD_BYTES,
+        Button, GLFW_KEY_BACKSPACE, GLFW_KEY_ENTER, GLFW_KEY_LEFT, MAX_TEXT_FIELD_BYTES,
+        ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect,
     };
+    use crate::ErrorCode;
     use crate::render::MAX_TOOLTIP_BYTES;
     use crate::screen_input::ScreenInputEvent;
-    use crate::ErrorCode;
 
     fn rect() -> WidgetRect {
         WidgetRect::new(10.0, 20.0, 120.0, 18.0).unwrap()
@@ -782,16 +782,18 @@ mod tests {
             .code(),
             ErrorCode::InvalidArgument
         );
-        assert!(Tooltip::new(
-            WidgetRect {
-                x: 0.0,
-                y: 0.0,
-                width: 0.0,
-                height: 1.0,
-            },
-            "tip",
-        )
-        .is_err());
+        assert!(
+            Tooltip::new(
+                WidgetRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.0,
+                    height: 1.0,
+                },
+                "tip",
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -813,26 +815,30 @@ mod tests {
             );
             assert_eq!(bar.fraction(), 0.0, "failed updates preserve the old value");
         }
-        assert!(ProgressBar::new(
-            WidgetRect {
-                x: 0.0,
-                y: 0.0,
-                width: 10.0,
-                height: 0.0,
-            },
-            0.5,
-        )
-        .is_err());
-        assert!(ProgressBar::new(
-            WidgetRect {
-                x: 1_048_576.0,
-                y: 0.0,
-                width: 1.0,
-                height: 1.0,
-            },
-            0.5,
-        )
-        .is_err());
+        assert!(
+            ProgressBar::new(
+                WidgetRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 10.0,
+                    height: 0.0,
+                },
+                0.5,
+            )
+            .is_err()
+        );
+        assert!(
+            ProgressBar::new(
+                WidgetRect {
+                    x: 1_048_576.0,
+                    y: 0.0,
+                    width: 1.0,
+                    height: 1.0,
+                },
+                0.5,
+            )
+            .is_err()
+        );
         assert_eq!(
             ProgressBar::new(rect(), f32::NAN).unwrap_err().code(),
             ErrorCode::InvalidArgument
