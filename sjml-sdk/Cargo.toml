@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Rust guest SDK for the Somuch Java Mod Loader ABI"
 repository.workspace = true
 documentation = "https://docs.rs/sjml-sdk"
+readme = "README.md"
 
 [lib]
 name = "sjml"

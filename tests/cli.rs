@@ -242,6 +242,56 @@ fn packages_are_reproducible_sorted_and_checksum_every_payload() {
 }
 
 #[test]
+fn package_distribution_accepts_every_supported_mode_and_rejects_unknown_modes() {
+    let tmp = sandbox();
+    for distribution in ["optional", "server_only", "client_only", "both_required"] {
+        let project = tmp.path().join(distribution);
+        fs::create_dir_all(&project).unwrap();
+        raw_project(&project);
+        let manifest_path = project.join("sjml.toml");
+        let manifest = fs::read_to_string(&manifest_path).unwrap();
+        fs::write(
+            &manifest_path,
+            manifest.replace(
+                "name = 'Demo'",
+                &format!("name = 'Demo'\ndistribution = '{distribution}'"),
+            ),
+        )
+        .unwrap();
+        ok(run(&[
+            "package",
+            "--no-build",
+            "--project",
+            project.to_str().unwrap(),
+            "--output",
+            project.join("output.sjml").to_str().unwrap(),
+        ]));
+    }
+
+    let invalid = tmp.path().join("invalid_distribution");
+    fs::create_dir_all(&invalid).unwrap();
+    raw_project(&invalid);
+    let manifest_path = invalid.join("sjml.toml");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        &manifest_path,
+        manifest.replace("name = 'Demo'", "name = 'Demo'\ndistribution = 'sometimes'"),
+    )
+    .unwrap();
+    fails(
+        run(&[
+            "package",
+            "--no-build",
+            "--project",
+            invalid.to_str().unwrap(),
+            "--output",
+            invalid.join("output.sjml").to_str().unwrap(),
+        ]),
+        "mod.distribution",
+    );
+}
+
+#[test]
 fn inspect_rejects_traversal_bad_checksums_and_missing_modules() {
     let tmp = sandbox();
     let file = tmp.path().join("invalid.sjml");

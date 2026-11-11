@@ -63,7 +63,7 @@ enum Commands {
 struct PackageArgs {
     #[command(flatten)]
     project: ProjectArgs,
-    /// Output archive (default: <project>/dist/<id>-<version>.sjml).
+    /// Output archive (default: package-id-version.sjml in the project's dist directory).
     #[arg(long)]
     output: Option<PathBuf>,
     /// Package existing declared WASM files without invoking Cargo.

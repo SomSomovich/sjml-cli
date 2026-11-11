@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Procedural macros for the Somuch Java Mod Loader Rust SDK"
 repository.workspace = true
 documentation = "https://docs.rs/sjml-macros"
+readme = "README.md"
 
 [lib]
 proc-macro = true

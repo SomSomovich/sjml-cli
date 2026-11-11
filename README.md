@@ -23,10 +23,10 @@ From this repository, install the binary with:
 cargo install --path .
 ```
 
-After the CLI package is published, users will be able to install it from
-crates.io with `cargo install sjml-cli`. To publish the guest SDK as well,
-publish `sjml-macros` first, then `sjml-sdk`; the SDK depends on the macro crate.
-The CLI can be published independently.
+The CLI is published on crates.io as `sjml-cli`; install it with
+`cargo install sjml-cli`. To publish the guest SDK as well, publish
+`sjml-macros` first, then `sjml-sdk`; the SDK depends on the macro crate. The
+CLI can be released independently.
 
 Create a project in a new directory named after the mod:
 
@@ -55,6 +55,16 @@ Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
 "0.40.0"`; that crate must be available from a configured Cargo registry.
 Until the SDK crates are published, use `--sdk-path` when you need to compile
 the generated project.
+
+## Documentation
+
+- [Rust SDK guide](docs/SDK_GUIDE.md) and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.40.0/sjml/)
+- [WebAssembly ABI v1](docs/ABI.md)
+- [Project configuration and capability grants](docs/PROJECT_CONFIGURATION.md)
+- [Complete manifest schema](docs/MANIFEST_SCHEMA.md) and [`.sjml` archive format](docs/FORMAT.md)
+- [Compatibility and host support](docs/COMPATIBILITY.md)
+- [Networking](docs/NETWORKING.md), [storage](docs/STORAGE.md), [async services](docs/ASYNC_MODEL.md), and [client rendering/OpenGL](docs/RENDERING.md)
+- [Security boundaries](docs/SECURITY.md), [module lifecycle](docs/MODULE_LIFECYCLE.md), [block entities](docs/BLOCK_ENTITIES.md), [particles](docs/PARTICLES.md), and [worker compute](docs/WORKER_COMPUTE.md)
 
 ## Commands
 

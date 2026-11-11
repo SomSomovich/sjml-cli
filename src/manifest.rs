@@ -247,6 +247,7 @@ impl Manifest {
                 "description",
                 "license",
                 "metadata",
+                "distribution",
             ],
             "mod",
         )?;
@@ -265,6 +266,11 @@ impl Manifest {
             table(v, "mod.metadata")?;
             metadata(v, 0, &mut 0)?;
         }
+        require(
+            ["optional", "server_only", "client_only", "both_required"]
+                .contains(&optional_text(info, "distribution")?.unwrap_or("optional")),
+            "mod.distribution: must be optional, server_only, client_only, or both_required",
+        )?;
         let runtime = table(field(root, "runtime")?, "runtime")?;
         keys(runtime, &["abi", "minecraft", "sjml"], "runtime")?;
         require(
