@@ -124,7 +124,7 @@ pub use abi::{
 };
 pub use batch::{Batch, BatchValue, CallResult};
 pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
-pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent};
+pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle};
 pub use entity::EntitySnapshot;
 pub use error::{ErrorCode, SjmlError, SjmlResult};
@@ -133,7 +133,10 @@ pub use gl::{
     GlDepthFunction, GlExecutionReport, GlFramebufferAttachment, GlIndexType, GlPrimitiveMode,
     GlResourceDescriptor, GlScalarType,
 };
-pub use inventory::{BlockPos, Direction, InventorySnapshot, ItemStackDescriptor};
+pub use inventory::{
+    BlockPos, Direction, InventoryEndpoint, InventorySnapshot, ItemStackDescriptor,
+    MAX_ITEM_TRANSFER_COUNT,
+};
 pub use menu::{MenuAction, MenuDefinition, MenuItem};
 pub use network::{
     ChannelRef, LogicalSide, NetworkContext, NetworkContextSnapshot, NetworkDirection,
@@ -180,7 +183,7 @@ pub mod prelude {
     };
     pub use crate::batch::{self, Batch, BatchValue, CallResult};
     pub use crate::block_entity::{self, BlockEntity, BlockEntitySnapshot, NbtValue};
-    pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent};
+    pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
     pub use crate::client_input;
     pub use crate::client_input::{
         ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
@@ -197,9 +200,9 @@ pub mod prelude {
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
         EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerJoined, PlayerLeft, ResourcesReloaded, ServerTick, WorldLifecycle,
-        DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT,
-        MAX_SERVER_TICK_INTERVAL,
+        PlayerInteracted, PlayerJoined, PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick,
+        WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -209,7 +212,10 @@ pub mod prelude {
     };
     pub use crate::host::{self, LogLevel};
     pub use crate::inventory;
-    pub use crate::inventory::{BlockPos, Direction, InventorySnapshot, ItemStackDescriptor};
+    pub use crate::inventory::{
+        BlockPos, Direction, InventoryEndpoint, InventorySnapshot, ItemStackDescriptor,
+        MAX_ITEM_TRANSFER_COUNT,
+    };
     pub use crate::menu;
     pub use crate::menu::{MenuAction, MenuDefinition, MenuItem};
     pub use crate::network;

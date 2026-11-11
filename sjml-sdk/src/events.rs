@@ -17,6 +17,28 @@ pub const MAX_INVENTORY_CHANGE_COUNT: i32 = 4_096;
 /// Maximum player inventory slot index represented by `inventory.changed`.
 pub const MAX_INVENTORY_CHANGE_SLOT: i32 = 255;
 
+/// Synchronous, non-cancellable snapshot emitted after meaningful logical-server player movement.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerMoved {
+    /// Canonical UUID string of the player who moved.
+    pub player_id: String,
+    /// Current in-game profile name of the player.
+    pub display_name: String,
+    /// Resource location of the level where the player is currently located.
+    pub dimension_id: String,
+    /// Player X coordinate after movement was processed.
+    pub x: f64,
+    /// Player Y coordinate after movement was processed.
+    pub y: f64,
+    /// Player Z coordinate after movement was processed.
+    pub z: f64,
+    /// Player yaw in degrees after movement was processed.
+    pub yaw: f32,
+    /// Player pitch in degrees after movement was processed.
+    pub pitch: f32,
+}
+
 /// Synchronous, observation-only snapshot of a logical-server player interaction attempt.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -418,11 +440,29 @@ mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
         EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
-        PlayerInteracted, ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        PlayerInteracted, PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle,
+        MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
     use crate::{from_bytes, to_bytes};
+
+    #[test]
+    fn player_moved_snapshot_round_trips_detached_position_and_look() {
+        let event = PlayerMoved {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            display_name: "Alice".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            yaw: 90.0,
+            pitch: -15.5,
+        };
+
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(from_bytes::<PlayerMoved>(&encoded).unwrap(), event);
+    }
 
     #[test]
     fn block_break_snapshot_round_trips_signed_coordinates() {

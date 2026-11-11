@@ -15,10 +15,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host ABI is `1.33.0`. ABI compatibility is major-version based:
+The current host ABI is `1.34.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.33.0` therefore accepts
-`1.0.x` through `1.33.0` (including existing ABI 1.32 guests), but rejects a
+minor/patch version is equal or newer. A host at ABI `1.34.0` therefore accepts
+`1.0.x` through `1.34.0` (including existing ABI 1.32 and 1.33 guests), but rejects a
 later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -35,11 +35,13 @@ use separate `entity.data.read` and `entity.data.write` grants and are stored in
 the entity's persistent NBT. World reads do not load dimensions or chunks;
 block-state batches are limited to 1,024 positions and 1 MiB of encoded output.
 
-SDK 0.41.0 adds client-only native chat layout control under ABI 1.33.0. It
-requires the separately requested and granted `client.chat.modify` capability.
-Local layout persistence uses the existing client-profile storage API. See
-[Native client chat layout](CHAT.md). Live-client wrapping, hit testing, input,
-suggestions, and persistence still require verification.
+SDK 0.42.0 adds generic native chat panel styling under ABI 1.34.0, plus the
+server-authoritative `player.moved` notification and bounded slot-to-slot block
+inventory transfers. Chat uses `client.chat.modify`; transfers require
+`world.read` and `inventory.write`. See [Native client chat](CHAT.md),
+[movement event](PLAYER_MOVED_EVENT.md), and
+[inventory mutations](INVENTORY_MUTATIONS.md). Live-client rendering and remote
+multiplayer behavior still require verification.
 
 Client modules have HUD, bounded typed OpenGL, camera-relative world-render,
 active-screen input, native chat layout control, and global no-screen input APIs

@@ -6,7 +6,7 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.33.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.34.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
 incompatible. Build metadata does not affect version ordering.
@@ -127,17 +127,21 @@ subscribe it. NeoForge invokes only callbacks with an active runtime
 subscription. It dispatches the non-cancellable unit-valued
 `sjml_v1_event_server.started` and `sjml_v1_event_server.stopping` exports,
 plus the non-cancellable `sjml_v1_event_player.joined`,
-`sjml_v1_event_player.left`, `sjml_v1_event_entity.death`, and
+`sjml_v1_event_player.left`, `sjml_v1_event_player.moved`,
+`sjml_v1_event_entity.death`, and
 `sjml_v1_event_entity.spawned`, `sjml_v1_event_entity.effect.tick`,
 `sjml_v1_event_block.place`, `sjml_v1_event_player.interacted`,
 `sjml_v1_event_entity.damaged`, `sjml_v1_event_world.loaded`,
 `sjml_v1_event_world.unloaded`, `sjml_v1_event_server.tick`,
 `sjml_v1_event_inventory.changed`, and `sjml_v1_event_resources.reloaded`
 exports. The
-player events receive their SDK schema-v1 identity record (`PlayerJoined` or
-`PlayerLeft`): little-endian
+player join/leave events receive their SDK schema-v1 identity record
+(`PlayerJoined` or `PlayerLeft`): little-endian
 version `1`, then a stable UTF-8 string containing the canonical UUID, then a
-stable UTF-8 string containing the profile name. All fifteen notifications run
+stable UTF-8 string containing the profile name. `player.moved` receives
+schema-v1 `PlayerMoved`: the same identity strings, a stable UTF-8 dimension
+ID, finite little-endian `f64` position coordinates, then finite `f32` yaw and
+pitch values. All sixteen notifications run
 only after explicit subscription, synchronously on the owning logical-server
 thread. The module must request `events.subscribe` in its manifest and receive
 an administrator grant. Subscriptions run by priority, with equal priorities
@@ -258,6 +262,7 @@ event.
 The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
+`player.moved`,
 `entity.death`, `entity.spawned`, `entity.effect.tick`, `block.break`,
 `block.place`, `player.interacted`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`.
@@ -743,9 +748,9 @@ are 0–65,535; key modifier bits are limited to the six standard GLFW flags.
 Mouse events report Shift, Control, and Alt. A
 module may hold 256 active input subscriptions.
 
-## Native client chat layout imports
+## Native client chat imports
 
-ABI 1.33.0 adds client-only `sjml_client_chat_v1` imports. Each operation
+ABI 1.34.0 adds client-only `sjml_client_chat_v1` imports. Each operation
 requires requested and currently granted `client.chat.modify`, the client main
 thread, and runtime phase. Static registration and dedicated-server instances
 fail closed. Only the active exclusive controller can query or update geometry.
@@ -756,6 +761,8 @@ fail closed. Only the active exclusive controller can query or update geometry.
 | `unsubscribe` | `(i32 handle_ptr, i32 handle_len) -> i32` |
 | `layout` | `(i32 handle_ptr, i32 handle_len, i32 output_layout_ptr) -> i32` |
 | `set_layout` | `(i32 handle_ptr, i32 handle_len, i32 layout_ptr, i32 layout_len, i32 output_layout_ptr) -> i32` |
+| `get_theme` | `(i32 handle_ptr, i32 handle_len, i32 output_theme_ptr) -> i32` |
+| `set_theme` | `(i32 handle_ptr, i32 handle_len, i32 theme_ptr, i32 theme_len, i32 output_theme_ptr) -> i32` |
 
 Zero status means success; nonzero is a stable ABI error. Subscription output
 is the existing 24-byte ResourceHandle encoding with handle kind `13`.
@@ -765,6 +772,12 @@ Coordinates must be finite and dimensions finite positive. The host returns a
 rectangle clamped to the viewport and a 120×56 minimum reduced to fit smaller
 viewports. A competing controller returns `REGISTRATION_LIMIT_REACHED` (34).
 Runtime closure or unsubscription invalidates the controller and callback route.
+
+Theme inputs and outputs use a fixed 92-byte little-endian representation:
+schema `u32=1`, five ARGB `u32` values (panel, header, accent, separator,
+title), title byte length `u32`, then a 64-byte UTF-8 title field padded with
+zeroes. The title is limited to 64 bytes and control characters are rejected.
+Invalid schema, UTF-8, size, or nonzero padding returns `INVALID_TRANSFER`.
 
 The guest exports `sjml_v1_client_chat_dispatch(pointer:u32, length:u32)->u64`.
 It uses the standard packed ByteSpan response framing: success contains one
@@ -1126,6 +1139,17 @@ bytes. Static `mod_register` calls are denied, and the host binds each import
 only when its complete capability set is requested and granted. The write
 grant is not scoped to particular blocks or items, so it permits a module to
 change its own registered component on any reachable container slot.
+
+The `transfer` import requires both `world.read` and `inventory.write` and moves
+items between two loaded block item-handler slots in one host call. Its 15
+`i32` arguments contain the 24-byte world handle, source position and optional
+side, source slot, destination position and optional side, destination slot,
+requested count, and output span. Count is limited to 1–64. The output is a
+little-endian `u32` count of moved items. The host preflights extraction and
+insertion with simulation, then performs the transfer on the owning server
+thread. It never loads chunks or exposes an item stack to the guest. See
+[inventory mutation details](INVENTORY_MUTATIONS.md) for limits and rollback
+behavior.
 
 ## Read-only block entities
 

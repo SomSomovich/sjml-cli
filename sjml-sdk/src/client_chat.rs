@@ -13,6 +13,134 @@ pub struct ChatLayout {
     height: f32,
 }
 
+/// Generic colors and short heading for the native chat panel controlled by this module.
+/// Colors use Minecraft's packed ARGB convention. The title is limited to 64 UTF-8 bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatTheme {
+    panel_background: u32,
+    header_background: u32,
+    accent_color: u32,
+    separator_color: u32,
+    title_color: u32,
+    title: String,
+}
+
+impl ChatTheme {
+    pub const MAX_TITLE_BYTES: usize = 64;
+    #[cfg(any(target_arch = "wasm32", test))]
+    const SCHEMA_VERSION: u32 = 1;
+    #[cfg(any(target_arch = "wasm32", test))]
+    const ENCODED_BYTES: usize = 92;
+
+    pub fn new(
+        panel_background: u32,
+        header_background: u32,
+        accent_color: u32,
+        separator_color: u32,
+        title_color: u32,
+        title: impl Into<String>,
+    ) -> SjmlResult<Self> {
+        let title = title.into();
+        if title.len() > Self::MAX_TITLE_BYTES {
+            return Err(invalid("chat theme title exceeds 64 UTF-8 bytes"));
+        }
+        if title.chars().any(char::is_control) {
+            return Err(invalid(
+                "chat theme title must not contain control characters",
+            ));
+        }
+        Ok(Self {
+            panel_background,
+            header_background,
+            accent_color,
+            separator_color,
+            title_color,
+            title,
+        })
+    }
+
+    pub fn default_theme() -> Self {
+        Self {
+            panel_background: 0x4511_1923,
+            header_background: 0x6023_3040,
+            accent_color: 0xff55_d6c2,
+            separator_color: 0xb950_6478,
+            title_color: 0xfff0_f5fa,
+            title: "CHAT".into(),
+        }
+    }
+
+    pub const fn panel_background(&self) -> u32 {
+        self.panel_background
+    }
+    pub const fn header_background(&self) -> u32 {
+        self.header_background
+    }
+    pub const fn accent_color(&self) -> u32 {
+        self.accent_color
+    }
+    pub const fn separator_color(&self) -> u32 {
+        self.separator_color
+    }
+    pub const fn title_color(&self) -> u32 {
+        self.title_color
+    }
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableEncode for ChatTheme {
+    fn encode(&self, encoder: &mut crate::Encoder) -> SjmlResult<()> {
+        encoder.write_u32(Self::SCHEMA_VERSION)?;
+        encoder.write_u32(self.panel_background)?;
+        encoder.write_u32(self.header_background)?;
+        encoder.write_u32(self.accent_color)?;
+        encoder.write_u32(self.separator_color)?;
+        encoder.write_u32(self.title_color)?;
+        encoder.write_length(self.title.len())?;
+        encoder.write_raw(self.title.as_bytes())?;
+        let padding = [0u8; Self::MAX_TITLE_BYTES];
+        encoder.write_raw(&padding[..Self::MAX_TITLE_BYTES - self.title.len()])
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for ChatTheme {
+    fn decode(decoder: &mut crate::Decoder<'_>) -> SjmlResult<Self> {
+        if decoder.read_u32()? != Self::SCHEMA_VERSION {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported chat theme schema",
+            ));
+        }
+        let panel_background = decoder.read_u32()?;
+        let header_background = decoder.read_u32()?;
+        let accent_color = decoder.read_u32()?;
+        let separator_color = decoder.read_u32()?;
+        let title_color = decoder.read_u32()?;
+        let title_length = decoder.read_length(Self::MAX_TITLE_BYTES)?;
+        let title_and_padding = decoder.read_raw(Self::MAX_TITLE_BYTES)?;
+        if title_and_padding[title_length..]
+            .iter()
+            .any(|byte| *byte != 0)
+        {
+            return Err(invalid("chat theme title padding must be zero"));
+        }
+        let title = std::str::from_utf8(&title_and_padding[..title_length])
+            .map_err(|_| invalid("chat theme title is not valid UTF-8"))?;
+        Self::new(
+            panel_background,
+            header_background,
+            accent_color,
+            separator_color,
+            title_color,
+            title,
+        )
+    }
+}
+
 impl ChatLayout {
     /// Checks finite coordinates and finite, strictly positive dimensions.
     /// Negative positions are allowed as requests; the host returns the clamped rectangle.
@@ -125,6 +253,16 @@ extern "C" {
         layout_pointer: i32,
         layout_length: i32,
         output_layout: i32,
+    ) -> i32;
+    #[link_name = "get_theme"]
+    fn imported_get_theme(handle_pointer: i32, handle_length: i32, output_theme: i32) -> i32;
+    #[link_name = "set_theme"]
+    fn imported_set_theme(
+        handle_pointer: i32,
+        handle_length: i32,
+        theme_pointer: i32,
+        theme_length: i32,
+        output_theme: i32,
     ) -> i32;
 }
 
@@ -287,6 +425,33 @@ pub fn set_layout(handle: ChatLayoutHandle, layout: ChatLayout) -> SjmlResult<Ch
     }
 }
 
+/// Reads this module's current native-chat theme. Requires `client.chat.modify`.
+pub fn theme(handle: ChatLayoutHandle) -> SjmlResult<ChatTheme> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        query_theme(handle, None)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported())
+    }
+}
+
+/// Applies colors and a short heading to the generic native-chat panel.
+/// This styles the host panel; Minecraft message rendering and filtering remain vanilla.
+pub fn set_theme(handle: ChatLayoutHandle, theme: ChatTheme) -> SjmlResult<ChatTheme> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        query_theme(handle, Some(theme))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, theme);
+        Err(unsupported())
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn query_layout(handle: ChatLayoutHandle, requested: Option<ChatLayout>) -> SjmlResult<ChatLayout> {
     CALLBACKS.with(|state| state.borrow().id(handle))?;
@@ -319,6 +484,40 @@ fn query_layout(handle: ChatLayoutHandle, requested: Option<ChatLayout>) -> Sjml
     }
     host_status(status)?;
     Ok(from_bytes::<WireLayout>(&output)?.0)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn query_theme(handle: ChatLayoutHandle, requested: Option<ChatTheme>) -> SjmlResult<ChatTheme> {
+    CALLBACKS.with(|state| state.borrow().id(handle))?;
+    let handle_bytes = crate::to_bytes(&handle.0)?;
+    let mut output = [0u8; ChatTheme::ENCODED_BYTES];
+    let status = if let Some(theme) = requested {
+        let theme_bytes = crate::to_bytes(&theme)?;
+        // SAFETY: all buffers are initialized and live for this synchronous host call.
+        unsafe {
+            imported_set_theme(
+                handle_bytes.as_ptr() as i32,
+                handle_bytes.len() as i32,
+                theme_bytes.as_ptr() as i32,
+                theme_bytes.len() as i32,
+                output.as_mut_ptr() as i32,
+            )
+        }
+    } else {
+        // SAFETY: stable handle and writable output remain live during this synchronous call.
+        unsafe {
+            imported_get_theme(
+                handle_bytes.as_ptr() as i32,
+                handle_bytes.len() as i32,
+                output.as_mut_ptr() as i32,
+            )
+        }
+    };
+    if is_expired(status) {
+        CALLBACKS.with(|state| state.borrow_mut().remove(handle));
+    }
+    host_status(status)?;
+    from_bytes(&output)
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -787,5 +986,45 @@ mod tests {
             layout
         );
         assert!(crate::from_bytes::<WireLayout>(&floats(&[0.0, 0.0, 0.0, 100.0])).is_err());
+    }
+
+    #[test]
+    fn chat_theme_is_fixed_size_unicode_safe_and_round_trips() {
+        let theme = ChatTheme::new(1, 2, 3, 4, 5, "Привет 🟢").unwrap();
+        let encoded = crate::to_bytes(&theme).unwrap();
+        assert_eq!(ChatTheme::ENCODED_BYTES, encoded.len());
+        assert_eq!(theme, crate::from_bytes::<ChatTheme>(&encoded).unwrap());
+        assert_eq!("Привет 🟢", theme.title());
+        assert_eq!(
+            ChatTheme::default_theme(),
+            crate::from_bytes::<ChatTheme>(&crate::to_bytes(&ChatTheme::default_theme()).unwrap())
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn chat_theme_rejects_oversize_control_invalid_schema_utf8_and_padding() {
+        assert!(ChatTheme::new(1, 2, 3, 4, 5, "я".repeat(33)).is_err());
+        assert!(ChatTheme::new(1, 2, 3, 4, 5, "line\nbreak").is_err());
+        let theme = ChatTheme::default_theme();
+        let valid = crate::to_bytes(&theme).unwrap();
+
+        let mut bad_schema = valid.clone();
+        bad_schema[0] = 2;
+        assert_eq!(
+            crate::from_bytes::<ChatTheme>(&bad_schema)
+                .unwrap_err()
+                .code(),
+            ErrorCode::IncompatibleAbiVersion
+        );
+
+        let mut bad_utf8 = valid.clone();
+        bad_utf8[24..28].copy_from_slice(&1u32.to_le_bytes());
+        bad_utf8[28] = 0xff;
+        assert!(crate::from_bytes::<ChatTheme>(&bad_utf8).is_err());
+
+        let mut bad_padding = valid;
+        *bad_padding.last_mut().unwrap() = 1;
+        assert!(crate::from_bytes::<ChatTheme>(&bad_padding).is_err());
     }
 }

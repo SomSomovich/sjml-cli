@@ -1,4 +1,5 @@
 use sjml::events::{EffectTickEvent, EntityDeath, PlayerJoined, PlayerLeft, ResourcesReloaded};
+use sjml::prelude::PlayerMoved;
 use sjml::{
     command, event, from_bytes, mod_init, mod_shutdown, service, to_bytes, EntityHandle, ErrorCode,
     PlayerHandle, PlayerSnapshot, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
@@ -31,6 +32,11 @@ fn on_player_joined(message: PlayerMessage) -> SjmlResult<()> {
 #[event(name = "resources.reloaded")]
 fn on_resources_reloaded(event: ResourcesReloaded) -> SjmlResult<()> {
     assert_eq!(event.tick_count, 1234);
+    Ok(())
+}
+
+#[event(name = "player.moved")]
+fn on_player_moved(_: PlayerMoved) -> SjmlResult<()> {
     Ok(())
 }
 
@@ -108,6 +114,39 @@ fn player_left_event_record_uses_the_same_stable_player_identity_layout() {
     expected.extend_from_slice(b"Alice");
     assert_eq!(bytes, expected);
     assert_eq!(from_bytes::<PlayerLeft>(&bytes).unwrap(), value);
+}
+
+#[test]
+fn player_moved_event_record_has_the_documented_v1_field_order() {
+    let event = PlayerMoved {
+        player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+        display_name: "Alice".to_owned(),
+        dimension_id: "minecraft:overworld".to_owned(),
+        x: -1.5,
+        y: 64.0,
+        z: 2.25,
+        yaw: 90.0,
+        pitch: -15.5,
+    };
+
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    for field in [
+        event.player_id.as_str(),
+        event.display_name.as_str(),
+        event.dimension_id.as_str(),
+    ] {
+        expected.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        expected.extend_from_slice(field.as_bytes());
+    }
+    expected.extend_from_slice(&event.x.to_le_bytes());
+    expected.extend_from_slice(&event.y.to_le_bytes());
+    expected.extend_from_slice(&event.z.to_le_bytes());
+    expected.extend_from_slice(&event.yaw.to_le_bytes());
+    expected.extend_from_slice(&event.pitch.to_le_bytes());
+    assert_eq!(to_bytes(&event).unwrap(), expected);
+    let decoded = from_bytes::<PlayerMoved>(&expected).unwrap();
+    assert_eq!(decoded, event);
+    on_player_moved(decoded).unwrap();
 }
 
 #[test]

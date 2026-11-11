@@ -1,11 +1,11 @@
 # Native client chat layout
 
-SDK 0.41.0 adds `sjml::client_chat` for ABI 1.33.0 client modules. It controls
-Minecraft's native chat rectangle, including its input field. The host styles
-that rectangle with a translucent framed panel only while ChatScreen is open.
-When the screen is closed, the native chat render is hidden; message data,
-history, scrolling, links, and command suggestions remain native. This API does
-not expose messages or a replacement screen.
+SDK 0.42.0 adds `sjml::client_chat` for ABI 1.34.0 client modules. It controls
+Minecraft's native chat rectangle, including its input field. The host draws a
+generic framed panel that a module can style with `ChatTheme`. When the screen
+is closed, the native chat render is hidden; message data, history, scrolling,
+links, filtering, and command suggestions remain native. This API does not yet
+expose message content or a replacement screen.
 
 Request `client.chat.modify` in `sjml.toml` and grant the module in
 `config/sjml-permissions.toml`:
@@ -46,7 +46,27 @@ fn move_chat(handle: ChatLayoutHandle, x: f32, y: f32) -> SjmlResult<ChatLayout>
     let current = client_chat::layout(handle)?;
     client_chat::set_layout(handle, ChatLayout::new(x, y, current.width(), current.height())?)
 }
+
+fn style_chat(handle: ChatLayoutHandle) -> SjmlResult<ChatTheme> {
+    let theme = ChatTheme::new(
+        0xe51b2430, // panel background, packed ARGB
+        0xf02b3a4b, // header background
+        0xff55d6c2, // accent bar
+        0xff71869d, // panel separators and edge
+        0xfffff2da, // title color
+        "Public chat",
+    )?;
+    client_chat::set_theme(handle, theme)
+}
 ```
+
+`ChatTheme` uses five packed ARGB colors and a UTF-8 title of at most 64 bytes.
+The title cannot contain control characters. Its colors style the panel and
+heading around Minecraft's native messages; message components, signatures,
+filtering, links, hover text, and history retain vanilla behavior. The host
+starts with its neutral default theme and restores it when the controller is
+unsubscribed or its runtime closes. Save a theme through the existing client
+profile storage API if it should persist between sessions.
 
 There is one exclusive controller across client runtimes. A competing
 subscription returns `ErrorCode::RegistrationLimitReached`. Keep the returned
