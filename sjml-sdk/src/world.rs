@@ -18,6 +18,10 @@ const MAX_RESOURCE_ID_BYTES: usize = 256;
 
 /// Maximum number of positions accepted by one batched block-state query.
 pub const MAX_WORLD_BLOCK_STATES: usize = 1024;
+/// Maximum number of properties returned for a single loaded block state.
+pub const MAX_WORLD_BLOCK_PROPERTIES: usize = 64;
+/// Maximum output bytes reserved for one block-property snapshot.
+pub const MAX_WORLD_BLOCK_PROPERTIES_RESPONSE_BYTES: usize = 21_257;
 /// Maximum length of one raycast segment in blocks.
 pub const MAX_WORLD_RAY_DISTANCE: f64 = 128.0;
 /// Maximum absolute coordinate accepted for a raycast endpoint or hit location.
@@ -159,6 +163,14 @@ pub struct BlockStateSnapshot {
     pub state: String,
 }
 
+/// One immutable, detached, canonically named property on a loaded block state.
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockProperty {
+    pub name: String,
+    pub value: String,
+}
+
 /// Finite world-space point used by [`raycast`].
 #[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -240,6 +252,21 @@ struct BlockStateQuery {
 #[sjml(version = 1)]
 struct BlockStateBatch {
     states: Vec<Option<BlockStateSnapshot>>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct BlockPropertiesQuery {
+    world: WorldHandle,
+    position: BlockPos,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct BlockPropertiesResponse {
+    properties: Option<Vec<BlockProperty>>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -361,6 +388,8 @@ extern "C" {
     fn imported_set_daylight_cycle_enabled(handle: i32, length: i32, enabled: i32) -> i32;
     #[link_name = "block_states"]
     fn imported_block_states(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "block_properties"]
+    fn imported_block_properties(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "raycast"]
     fn imported_raycast(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "collides"]
@@ -1033,6 +1062,85 @@ pub fn block_states(
     }
 }
 
+/// Reads the canonically named state properties at one already-loaded block position.
+///
+/// Returns `None` when the position is outside build height or its chunk is not already loaded;
+/// this query never loads a chunk. Values are detached strings in lexicographic property-name
+/// order. The operation requires `world.read` and the logical server context.
+pub fn block_properties(
+    world: WorldHandle,
+    position: BlockPos,
+) -> SjmlResult<Option<Vec<BlockProperty>>> {
+    if position.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block x/z coordinates must be within ±30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&BlockPropertiesQuery { world, position })?;
+        let response: BlockPropertiesResponse = read_output(
+            MAX_WORLD_BLOCK_PROPERTIES_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the encoded query and owned output allocation remain live for this import.
+                unsafe {
+                    imported_block_properties(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        validate_block_properties(response.properties)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_block_properties(
+    properties: Option<Vec<BlockProperty>>,
+) -> SjmlResult<Option<Vec<BlockProperty>>> {
+    let Some(properties) = properties else {
+        return Ok(None);
+    };
+    if properties.len() > MAX_WORLD_BLOCK_PROPERTIES {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "host returned more than 64 block properties",
+        ));
+    }
+    let mut previous_name: Option<&str> = None;
+    for property in &properties {
+        if property.name.is_empty()
+            || property.name.len() > 64
+            || !property
+                .name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+            || property.value.is_empty()
+            || property.value.len() > 256
+            || property.value.chars().any(char::is_control)
+            || previous_name.is_some_and(|previous| previous >= property.name.as_str())
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned malformed or non-canonical block properties",
+            ));
+        }
+        previous_name = Some(&property.name);
+    }
+    Ok(Some(properties))
+}
+
 /// Clips a bounded ray against one loaded dimension. The module must request and receive
 /// `world.read`. Endpoints must be finite and within ±30,000,000, and their distance cannot
 /// exceed 128 blocks. The host checks every intersected chunk first and returns `Ok(None)` if any
@@ -1534,12 +1642,13 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        collides, day_time, daylight_cycle_enabled, play_sound, raycast, set_block,
+        block_properties, collides, day_time, daylight_cycle_enabled, play_sound, raycast, set_block,
         set_daylight_cycle_enabled, set_time, spawn_entity, spawn_particle, Aabb, BlockStateBatch,
-        BlockStateQuery, BlockStateSnapshot, DaylightCycleSnapshot, RaycastBlockMode,
+        BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateQuery,
+        BlockStateSnapshot, DaylightCycleSnapshot, RaycastBlockMode,
         RaycastFluidMode, RaycastHit, RaycastPoint, WeatherCondition, WeatherSnapshot,
         WorldCollisionQuery, WorldEntitySpawnRequest, WorldRaycastQuery,
-        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_DAY_TIME_TICKS,
+        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_DAY_TIME_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -1988,5 +2097,95 @@ mod tests {
         expected.extend_from_slice(&64.0_f64.to_le_bytes());
         expected.extend_from_slice(&(-2.25_f64).to_le_bytes());
         assert_eq!(crate::to_bytes(&request).unwrap(), expected);
+    }
+
+    #[test]
+    fn block_properties_query_matches_the_java_versioned_position_contract() {
+        let query = BlockPropertiesQuery {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            position: BlockPos { x: -3, y: 64, z: 8 },
+        };
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected.extend_from_slice(&64_i32.to_le_bytes());
+        expected.extend_from_slice(&8_i32.to_le_bytes());
+        assert_eq!(crate::to_bytes(&query).unwrap(), expected);
+    }
+
+    #[test]
+    fn block_property_value_has_a_stable_versioned_schema_and_host_values_are_checked() {
+        let property = BlockProperty {
+            name: "axis".to_owned(),
+            value: "x".to_owned(),
+        };
+        let encoded_property = crate::to_bytes(&property).unwrap();
+        let mut expected_property = 1_u32.to_le_bytes().to_vec();
+        expected_property.extend_from_slice(&4_u32.to_le_bytes());
+        expected_property.extend_from_slice(b"axis");
+        expected_property.extend_from_slice(&1_u32.to_le_bytes());
+        expected_property.extend_from_slice(b"x");
+        assert_eq!(encoded_property, expected_property);
+        assert_eq!(
+            crate::from_bytes::<BlockProperty>(&encoded_property).unwrap(),
+            property
+        );
+
+        let mut encoded_response = 1_u32.to_le_bytes().to_vec();
+        encoded_response.push(1);
+        encoded_response.extend_from_slice(&1_u32.to_le_bytes());
+        encoded_response.extend_from_slice(&encoded_property);
+        assert_eq!(
+            crate::from_bytes::<BlockPropertiesResponse>(&encoded_response)
+                .unwrap()
+                .properties,
+            Some(vec![property])
+        );
+
+        assert_eq!(
+            super::validate_block_properties(Some(vec![BlockProperty {
+                name: "UpperCase".to_owned(),
+                value: "x".to_owned(),
+            }]))
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            super::validate_block_properties(Some(vec![
+                BlockProperty { name: "axis".to_owned(), value: "x".to_owned() },
+                BlockProperty { name: "axis".to_owned(), value: "y".to_owned() },
+            ]))
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        let too_many = (0..=MAX_WORLD_BLOCK_PROPERTIES)
+            .map(|index| BlockProperty {
+                name: format!("property_{index:02}"),
+                value: "value".to_owned(),
+            })
+            .collect();
+        assert_eq!(
+            super::validate_block_properties(Some(too_many))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn block_property_queries_reject_out_of_range_coordinates_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            block_properties(world, BlockPos { x: i32::MIN, y: 0, z: 0 })
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
     }
 }

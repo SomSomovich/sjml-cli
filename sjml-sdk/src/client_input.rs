@@ -1,13 +1,13 @@
-//! Bounded global keyboard and mouse-button callbacks for client guests.
+//! Bounded global keyboard, mouse-button, and mouse-wheel callbacks for client guests.
 
-#[cfg(target_arch = "wasm32")]
-use crate::StableDecode;
 use crate::abi::EventSubscriptionHandle;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
-use crate::{ErrorCode, SjmlError, SjmlResult};
+#[cfg(target_arch = "wasm32")]
+use crate::StableDecode;
 #[cfg(target_arch = "wasm32")]
 use crate::{from_bytes, to_bytes};
+use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// Maximum number of global client input callbacks owned by one module.
 pub const MAX_CLIENT_INPUT_SUBSCRIPTIONS: usize = 256;
@@ -18,6 +18,39 @@ const HANDLE_BYTES: u32 = 24;
 
 /// Module-owned global client-input subscription handle.
 pub type ClientInputSubscriptionHandle = EventSubscriptionHandle;
+
+/// Module-owned global mouse-wheel subscription handle.
+pub type MouseScrollSubscriptionHandle = EventSubscriptionHandle;
+
+/// Bounded horizontal and vertical scroll movement reported outside screens on the client.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MouseScrollEvent {
+    pub delta_x: f64,
+    pub delta_y: f64,
+}
+
+impl MouseScrollEvent {
+    pub const MAX_DELTA: f64 = 64.0;
+
+    pub fn new(delta_x: f64, delta_y: f64) -> SjmlResult<Self> {
+        Self { delta_x, delta_y }.validate()
+    }
+
+    fn validate(self) -> SjmlResult<Self> {
+        if !self.delta_x.is_finite()
+            || !self.delta_y.is_finite()
+            || self.delta_x.abs() > Self::MAX_DELTA
+            || self.delta_y.abs() > Self::MAX_DELTA
+            || (self.delta_x == 0.0 && self.delta_y == 0.0)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "mouse scroll deltas must be finite, bounded, and non-zero",
+            ));
+        }
+        Ok(self)
+    }
+}
 
 /// A keyboard or mouse-button notification received on the client main thread.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,6 +162,10 @@ extern "C" {
     fn imported_subscribe(callback_id: i64, handle_output_pointer: i32) -> i32;
     #[link_name = "unsubscribe"]
     fn imported_unsubscribe(handle_pointer: i32, handle_length: i32) -> i32;
+    #[link_name = "subscribe_scroll"]
+    fn imported_subscribe_scroll(callback_id: i64, handle_output_pointer: i32) -> i32;
+    #[link_name = "unsubscribe_scroll"]
+    fn imported_unsubscribe_scroll(handle_pointer: i32, handle_length: i32) -> i32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -186,8 +223,64 @@ impl Callbacks {
 }
 
 #[cfg(target_arch = "wasm32")]
+type MouseScrollCallback =
+    std::rc::Rc<std::cell::RefCell<Box<dyn FnMut(MouseScrollEvent) -> SjmlResult<()>>>>;
+
+#[cfg(target_arch = "wasm32")]
+struct MouseScrollCallbackEntry {
+    callback: MouseScrollCallback,
+    handle: Option<MouseScrollSubscriptionHandle>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct MouseScrollCallbacks {
+    next: Option<u64>,
+    entries: std::collections::BTreeMap<u64, MouseScrollCallbackEntry>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl MouseScrollCallbacks {
+    fn insert<F>(&mut self, callback: F) -> SjmlResult<u64>
+    where
+        F: FnMut(MouseScrollEvent) -> SjmlResult<()> + 'static,
+    {
+        if self.entries.len() >= MAX_CLIENT_INPUT_SUBSCRIPTIONS {
+            return Err(SjmlError::new(
+                ErrorCode::RegistrationLimitReached,
+                "mouse scroll subscription limit reached",
+            ));
+        }
+        let id = self.next.unwrap_or(1);
+        self.next = id.checked_add(1);
+        self.entries.insert(
+            id,
+            MouseScrollCallbackEntry {
+                callback: std::rc::Rc::new(std::cell::RefCell::new(Box::new(callback))),
+                handle: None,
+            },
+        );
+        Ok(id)
+    }
+
+    fn get(&self, id: u64) -> SjmlResult<MouseScrollCallback> {
+        self.entries
+            .get(&id)
+            .map(|entry| entry.callback.clone())
+            .ok_or_else(|| {
+                SjmlError::new(
+                    ErrorCode::StaleHandle,
+                    "mouse scroll callback is not subscribed",
+                )
+            })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
     static CALLBACKS: std::cell::RefCell<Callbacks> = std::cell::RefCell::new(Callbacks::default());
+    static MOUSE_SCROLL_CALLBACKS: std::cell::RefCell<MouseScrollCallbacks> =
+        std::cell::RefCell::new(MouseScrollCallbacks::default());
     static DISPATCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -275,6 +368,106 @@ pub fn unsubscribe(handle: ClientInputSubscriptionHandle) -> SjmlResult<()> {
             ));
         }
         CALLBACKS.with(|registry| {
+            registry.borrow_mut().entries.remove(&callback_id);
+        });
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported())
+    }
+}
+
+/// Subscribes to horizontal and vertical mouse-wheel movement. The event is observational: the
+/// callback cannot consume or rewrite vanilla scroll input, and it runs only on the physical
+/// client's main thread outside screens.
+pub fn subscribe_scroll<F>(callback: F) -> SjmlResult<MouseScrollSubscriptionHandle>
+where
+    F: FnMut(MouseScrollEvent) -> SjmlResult<()> + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let callback_id =
+            MOUSE_SCROLL_CALLBACKS.with(|registry| registry.borrow_mut().insert(callback))?;
+        let output = allocate_host_input(HANDLE_BYTES);
+        if output == 0 {
+            MOUSE_SCROLL_CALLBACKS
+                .with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate mouse scroll subscription output",
+            ));
+        }
+        // SAFETY: initialize the complete live output allocation before the host writes the handle.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, HANDLE_BYTES as usize) };
+        // SAFETY: the exact output allocation remains live during the synchronous host import.
+        let status = unsafe { imported_subscribe_scroll(callback_id as i64, output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful call initialized the complete handle allocation.
+            from_bytes::<MouseScrollSubscriptionHandle>(unsafe {
+                core::slice::from_raw_parts(output as *const u8, HANDLE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected mouse scroll subscription",
+            ))
+        };
+        // SAFETY: release the exact allocation passed to the host import.
+        unsafe { deallocate_host_input(output, HANDLE_BYTES) };
+        match result {
+            Ok(handle) => {
+                MOUSE_SCROLL_CALLBACKS.with(|registry| {
+                    if let Some(entry) = registry.borrow_mut().entries.get_mut(&callback_id) {
+                        entry.handle = Some(handle);
+                    }
+                });
+                Ok(handle)
+            }
+            Err(error) => {
+                MOUSE_SCROLL_CALLBACKS
+                    .with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+                Err(error)
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = callback;
+        Err(unsupported())
+    }
+}
+
+/// Removes an active mouse-wheel subscription from the host and guest callback registry.
+pub fn unsubscribe_scroll(handle: MouseScrollSubscriptionHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let callback_id = MOUSE_SCROLL_CALLBACKS
+            .with(|registry| {
+                registry
+                    .borrow()
+                    .entries
+                    .iter()
+                    .find_map(|(&id, entry)| (entry.handle == Some(handle)).then_some(id))
+            })
+            .ok_or_else(|| {
+                SjmlError::new(
+                    ErrorCode::StaleHandle,
+                    "mouse scroll subscription is not active in this module",
+                )
+            })?;
+        let bytes = to_bytes(&handle)?;
+        // SAFETY: the stable handle bytes live for the complete synchronous host call.
+        let status =
+            unsafe { imported_unsubscribe_scroll(bytes.as_ptr() as i32, bytes.len() as i32) };
+        if status != 0 {
+            return Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected mouse scroll unsubscription",
+            ));
+        }
+        MOUSE_SCROLL_CALLBACKS.with(|registry| {
             registry.borrow_mut().entries.remove(&callback_id);
         });
         Ok(())
@@ -378,6 +571,75 @@ pub unsafe extern "C" fn dispatch(pointer: u32, length: u32) -> u64 {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+struct MouseScrollDelivery {
+    callback_id: u64,
+    event: MouseScrollEvent,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl StableDecode for MouseScrollDelivery {
+    fn decode(decoder: &mut crate::Decoder<'_>) -> SjmlResult<Self> {
+        if decoder.read_u32()? != CLIENT_INPUT_SCHEMA_VERSION {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported mouse scroll dispatch schema",
+            ));
+        }
+        let callback_id = decoder.read_u64()?;
+        if callback_id == 0 {
+            return Err(invalid("mouse scroll callback identity is zero"));
+        }
+        let event = MouseScrollEvent::new(decoder.read_f64()?, decoder.read_f64()?)?;
+        Ok(Self { callback_id, event })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl crate::StableEncode for MouseScrollDelivery {
+    fn encode(&self, encoder: &mut crate::Encoder) -> SjmlResult<()> {
+        encoder.write_u32(CLIENT_INPUT_SCHEMA_VERSION)?;
+        encoder.write_u64(self.callback_id)?;
+        encoder.write_f64(self.event.delta_x)?;
+        encoder.write_f64(self.event.delta_y)
+    }
+}
+
+/// Dispatches one observational mouse-wheel callback and returns an internal non-consuming bool.
+///
+/// # Safety
+/// The host must pass a live initialized guest allocation and keep it alive until return, then
+/// release the input and response with the paired ABI dealloc exports.
+#[cfg(target_arch = "wasm32")]
+#[export_name = "sjml_v1_client_mouse_scroll_dispatch"]
+pub unsafe extern "C" fn dispatch_scroll(pointer: u32, length: u32) -> u64 {
+    // SAFETY: the host guarantees the input allocation's initialized live span.
+    unsafe {
+        crate::abi::dispatch_payload(pointer, length, |delivery: MouseScrollDelivery| {
+            if DISPATCHING.with(|active| active.replace(true)) {
+                return Err(SjmlError::new(
+                    ErrorCode::ServiceBusy,
+                    "reentrant client input dispatch is forbidden",
+                ));
+            }
+            let result = (|| {
+                let callback = MOUSE_SCROLL_CALLBACKS
+                    .with(|registry| registry.borrow().get(delivery.callback_id))?;
+                let mut callback = callback.try_borrow_mut().map_err(|_| {
+                    SjmlError::new(
+                        ErrorCode::ServiceBusy,
+                        "mouse scroll callback is already active",
+                    )
+                })?;
+                callback(delivery.event)?;
+                Ok(false)
+            })();
+            DISPATCHING.with(|active| active.set(false));
+            result
+        })
+    }
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn invalid(message: &'static str) -> SjmlError {
     SjmlError::new(ErrorCode::InvalidArgument, message)
@@ -401,7 +663,7 @@ fn unsupported() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClientInputAction, ClientInputEvent};
+    use super::{ClientInputAction, ClientInputEvent, MouseScrollEvent};
 
     #[test]
     fn validates_key_and_mouse_actions_with_bounded_codes_and_modifiers() {
@@ -422,43 +684,46 @@ mod tests {
 
     #[test]
     fn rejects_invalid_code_action_and_modifier_values() {
-        assert!(
-            ClientInputEvent::Key {
-                key_code: 65_536,
-                scan_code: 0,
-                action: ClientInputAction::Press,
-                modifiers: 0,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            ClientInputEvent::MouseButton {
-                button: 32,
-                action: ClientInputAction::Press,
-                modifiers: 0,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            ClientInputEvent::MouseButton {
-                button: 0,
-                action: ClientInputAction::Repeat,
-                modifiers: 0,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            ClientInputEvent::Key {
-                key_code: 1,
-                scan_code: 1,
-                action: ClientInputAction::Press,
-                modifiers: 0x40,
-            }
-            .validate()
-            .is_err()
-        );
+        assert!(ClientInputEvent::Key {
+            key_code: 65_536,
+            scan_code: 0,
+            action: ClientInputAction::Press,
+            modifiers: 0,
+        }
+        .validate()
+        .is_err());
+        assert!(ClientInputEvent::MouseButton {
+            button: 32,
+            action: ClientInputAction::Press,
+            modifiers: 0,
+        }
+        .validate()
+        .is_err());
+        assert!(ClientInputEvent::MouseButton {
+            button: 0,
+            action: ClientInputAction::Repeat,
+            modifiers: 0,
+        }
+        .validate()
+        .is_err());
+        assert!(ClientInputEvent::Key {
+            key_code: 1,
+            scan_code: 1,
+            action: ClientInputAction::Press,
+            modifiers: 0x40,
+        }
+        .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn mouse_scroll_events_validate_both_axes_and_fractional_deltas() {
+        let event = MouseScrollEvent::new(-0.25, 1.5).unwrap();
+        assert_eq!(event.delta_x, -0.25);
+        assert_eq!(event.delta_y, 1.5);
+        assert!(MouseScrollEvent::new(f64::NAN, 0.0).is_err());
+        assert!(MouseScrollEvent::new(0.0, f64::INFINITY).is_err());
+        assert!(MouseScrollEvent::new(64.01, 0.0).is_err());
+        assert!(MouseScrollEvent::new(0.0, 0.0).is_err());
     }
 }

@@ -109,7 +109,7 @@ fn generated_project_builds_tests_packages_and_inspects_offline() {
     assert!(
         fs::read_to_string(project.join("sjml.toml"))
             .unwrap()
-            .contains("sjml = \"^0.48.0\"")
+            .contains("sjml = \"^0.49.0\"")
     );
     // Re-initialization must never overwrite user files.
     fs::write(project.join("keep.txt"), "owned").unwrap();
@@ -187,11 +187,11 @@ fn generated_default_template_tracks_current_sdk_host_and_abi_versions() {
     ]));
 
     let cargo_manifest = fs::read_to_string(project.join("Cargo.toml")).unwrap();
-    assert!(cargo_manifest.contains("sjml-sdk = \"0.44.0\""));
+    assert!(cargo_manifest.contains("sjml-sdk = \"0.47.0\""));
 
     let package_manifest = fs::read_to_string(project.join("sjml.toml")).unwrap();
-    assert!(package_manifest.contains("abi = \"^1.38.0\""));
-    assert!(package_manifest.contains("sjml = \"^0.48.0\""));
+    assert!(package_manifest.contains("abi = \"^1.39.0\""));
+    assert!(package_manifest.contains("sjml = \"^0.49.0\""));
 }
 
 #[test]

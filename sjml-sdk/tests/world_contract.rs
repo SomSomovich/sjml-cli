@@ -55,6 +55,12 @@ fn native_world_api_reports_unsupported_imports() {
             .code(),
         ErrorCode::UnknownErrorCode
     );
+    assert_eq!(
+        world::block_properties(handle, BlockPos { x: 1, y: 64, z: 2 })
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
 }
 
 #[test]

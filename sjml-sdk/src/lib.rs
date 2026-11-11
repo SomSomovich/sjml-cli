@@ -99,6 +99,7 @@ pub mod chat_messages;
 pub mod client_notifications;
 pub mod client_audio;
 pub mod entity;
+pub mod entity_attributes;
 pub mod entity_data;
 mod error;
 pub mod events;
@@ -108,6 +109,7 @@ pub mod inventory;
 pub mod menu;
 pub mod network;
 pub mod player;
+pub mod player_inventory;
 pub mod recipe;
 pub mod registry;
 pub mod render;
@@ -128,13 +130,17 @@ pub use abi::{
 pub use batch::{Batch, BatchValue, CallResult};
 pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
-pub use client_input::{ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle};
+pub use client_input::{
+    ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle, MouseScrollEvent,
+    MouseScrollSubscriptionHandle,
+};
 pub use client_notifications::NotificationKind;
 pub use client_audio::SoundCategory;
 pub use chat_messages::{
     ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
 };
 pub use entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
+pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
@@ -154,6 +160,7 @@ pub use player::{
     MAX_PLAYER_VELOCITY_COMPONENT, PlayerAbilities, PlayerEquipment, PlayerEquipmentStack,
     PlayerGameMode, PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
 };
+pub use player_inventory::MAX_PLAYER_INVENTORY_SLOTS;
 pub use recipe::{
     CraftingSlot, RECIPE_CALLBACK_SCHEMA_VERSION, RecipeEvaluation, RecipeMatchInput,
 };
@@ -203,8 +210,9 @@ pub mod prelude {
     pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
     pub use crate::client_input;
     pub use crate::client_input::{
-        ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
-        MAX_CLIENT_INPUT_SUBSCRIPTIONS,
+        ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle, MouseScrollEvent,
+        MouseScrollSubscriptionHandle, MAX_CLIENT_INPUT_SUBSCRIPTIONS, subscribe_scroll,
+        unsubscribe_scroll,
     };
     pub use crate::chat_messages;
     pub use crate::chat_messages::{
@@ -216,6 +224,8 @@ pub mod prelude {
     pub use crate::client_audio::SoundCategory;
     pub use crate::entity;
     pub use crate::entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
+    pub use crate::entity_attributes;
+    pub use crate::entity_attributes::{AttributeValues, LivingAttribute};
     pub use crate::entity_data;
     pub use crate::entity_data::{
         ENTITY_DATA_MISSING, MAX_ENTITY_DATA_KEY_BYTES, MAX_ENTITY_DATA_VALUE_BYTES,
@@ -254,6 +264,8 @@ pub mod prelude {
         MAX_PLAYER_VELOCITY_COMPONENT, PlayerAbilities, PlayerEquipment, PlayerEquipmentStack,
         PlayerGameMode, PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
     };
+    pub use crate::player_inventory;
+    pub use crate::player_inventory::MAX_PLAYER_INVENTORY_SLOTS;
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
     pub use crate::registry::{

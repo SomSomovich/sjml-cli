@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.46.0"
+sjml-sdk = "0.47.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -53,6 +53,14 @@ to loaded world-border settings. See
 [client audio](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_AUDIO.md),
 and [world border](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_BORDER.md).
 
+SDK 0.47.0 adds observational mouse-wheel subscriptions, read-only player
+inventory snapshots, bounded reads and base-value writes for selected vanilla
+living-entity attributes, and loaded block-state property snapshots. See
+[mouse-wheel input](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_INPUT_SCROLL.md),
+[player inventory](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_INVENTORY.md),
+[live entity attributes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_ATTRIBUTES.md),
+and [block-state properties](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_BLOCK_PROPERTIES.md).
+
 ```rust
 use sjml::prelude::*;
 
@@ -65,7 +73,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.46.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.47.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

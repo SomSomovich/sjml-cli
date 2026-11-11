@@ -25,7 +25,7 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes SDK 0.46.0 and core ABI 1.38.0.
+unverified. This guide describes SDK 0.47.0 and core ABI 1.39.0.
 Save-scoped storage uses the current server save. Physical-client modules also
 have a separate `ClientProfile` scope backed by per-mod local configuration
 files; they cannot access server save scopes.
@@ -77,6 +77,15 @@ audio require `client.chat.send` and `client.audio.play`; world-border reads
 require `world.read` and its setters also require `world.write`. See
 [player abilities](PLAYER_ABILITIES.md), [client chat messages](CLIENT_CHAT_MESSAGES.md),
 [client-local audio](CLIENT_AUDIO.md), and [world border](WORLD_BORDER.md).
+
+SDK 0.47.0 adds global mouse-wheel subscriptions, detached player-inventory
+snapshots, live read/write access to six allowlisted vanilla entity attributes,
+and loaded block-state property snapshots. These use `client.input`,
+`entity.read` with `inventory.read`, `entity.read` with
+`entity.attributes.write`, and `world.read`, respectively. See
+[mouse-wheel input](CLIENT_INPUT_SCROLL.md), [player inventory](PLAYER_INVENTORY.md),
+[live entity attributes](ENTITY_ATTRIBUTES.md), and
+[block-state properties](WORLD_BLOCK_PROPERTIES.md).
 
 Client modules can subscribe to bounded active-screen mouse-click, key-press,
 and typed-character events through `screen_input::subscribe`. This requires a
@@ -172,7 +181,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.46.0"
+sjml-sdk = "0.47.0"
 ```
 
 For development against this checkout, use
@@ -185,37 +194,39 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.46.0/sjml/). The exact
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.47.0/sjml/). The exact
 function signatures and public types there are the reference for Rust callers.
 
 | Module | Main API |
 | --- | --- |
-| [`abi`](https://docs.rs/sjml-sdk/0.46.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
-| [`batch`](https://docs.rs/sjml-sdk/0.46.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
-| [`block_entity`](https://docs.rs/sjml-sdk/0.46.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
-| [`client_chat`](https://docs.rs/sjml-sdk/0.46.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
-| [`client_input`](https://docs.rs/sjml-sdk/0.46.0/sjml/client_input/) | Global key and mouse-button events when no screen is open. |
-| [`chat_messages`](https://docs.rs/sjml-sdk/0.46.0/sjml/chat_messages/) | Local chat-message snapshots and separately capability-gated display filtering. |
-| [`client_notifications`](https://docs.rs/sjml-sdk/0.46.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
-| [`client_audio`](https://docs.rs/sjml-sdk/0.46.0/sjml/client_audio/) | Bounded client-local sound playback through Minecraft's sound manager. |
-| [`entity`](https://docs.rs/sjml-sdk/0.46.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, effect application, and bounded discard. |
-| [`entity_data`](https://docs.rs/sjml-sdk/0.46.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.46.0/sjml/events/) | Typed lifecycle, world, player movement/respawn, entity, inventory, and resource events. |
-| [`gl`](https://docs.rs/sjml-sdk/0.46.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
-| [`host`](https://docs.rs/sjml-sdk/0.46.0/sjml/host/) | ABI version query and host logging. |
-| [`inventory`](https://docs.rs/sjml-sdk/0.46.0/sjml/inventory/) | Detached snapshots, component updates, and bounded slot-to-slot transfers. |
-| [`menu`](https://docs.rs/sjml-sdk/0.46.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
-| [`network`](https://docs.rs/sjml-sdk/0.46.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
-| [`player`](https://docs.rs/sjml-sdk/0.46.0/sjml/player/) | Online player handles, detached snapshots, equipment, abilities, vitals, game mode, motion, effects, and same-dimension teleport. |
-| [`recipe`](https://docs.rs/sjml-sdk/0.46.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
-| [`registry`](https://docs.rs/sjml-sdk/0.46.0/sjml/registry/) | Static item, block, entity, fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipes, and related declarations. |
-| [`render`](https://docs.rs/sjml-sdk/0.46.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
-| [`screen_input`](https://docs.rs/sjml-sdk/0.46.0/sjml/screen_input/) | Bounded mouse, key, and text events delivered to the active screen. |
-| [`storage`](https://docs.rs/sjml-sdk/0.46.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
-| [`task`](https://docs.rs/sjml-sdk/0.46.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
-| [`widgets`](https://docs.rs/sjml-sdk/0.46.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
-| [`world`](https://docs.rs/sjml-sdk/0.46.0/sjml/world/) | Loaded-world handles, block snapshots, bounded updates, weather, border settings, daylight-cycle time, and gamerules. |
-| [`prelude`](https://docs.rs/sjml-sdk/0.46.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
+| [`abi`](https://docs.rs/sjml-sdk/0.47.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
+| [`batch`](https://docs.rs/sjml-sdk/0.47.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
+| [`block_entity`](https://docs.rs/sjml-sdk/0.47.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
+| [`client_chat`](https://docs.rs/sjml-sdk/0.47.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
+| [`client_input`](https://docs.rs/sjml-sdk/0.47.0/sjml/client_input/) | Global key, mouse-button, and observational mouse-wheel events when no screen is open. |
+| [`chat_messages`](https://docs.rs/sjml-sdk/0.47.0/sjml/chat_messages/) | Local chat-message snapshots and separately capability-gated display filtering. |
+| [`client_notifications`](https://docs.rs/sjml-sdk/0.47.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
+| [`client_audio`](https://docs.rs/sjml-sdk/0.47.0/sjml/client_audio/) | Bounded client-local sound playback through Minecraft's sound manager. |
+| [`entity`](https://docs.rs/sjml-sdk/0.47.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, effect application, and bounded discard. |
+| [`entity_attributes`](https://docs.rs/sjml-sdk/0.47.0/sjml/entity_attributes/) | Bounded reads and base-value writes for selected vanilla living-entity attributes. |
+| [`entity_data`](https://docs.rs/sjml-sdk/0.47.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
+| [`events`](https://docs.rs/sjml-sdk/0.47.0/sjml/events/) | Typed lifecycle, world, player movement/respawn, entity, inventory, and resource events. |
+| [`gl`](https://docs.rs/sjml-sdk/0.47.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
+| [`host`](https://docs.rs/sjml-sdk/0.47.0/sjml/host/) | ABI version query and host logging. |
+| [`inventory`](https://docs.rs/sjml-sdk/0.47.0/sjml/inventory/) | Detached block-inventory snapshots, component updates, and bounded slot-to-slot transfers. |
+| [`player_inventory`](https://docs.rs/sjml-sdk/0.47.0/sjml/player_inventory/) | Read-only detached snapshots of live player inventory slots. |
+| [`menu`](https://docs.rs/sjml-sdk/0.47.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
+| [`network`](https://docs.rs/sjml-sdk/0.47.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
+| [`player`](https://docs.rs/sjml-sdk/0.47.0/sjml/player/) | Online player handles, detached snapshots, equipment, abilities, vitals, game mode, motion, effects, and same-dimension teleport. |
+| [`recipe`](https://docs.rs/sjml-sdk/0.47.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
+| [`registry`](https://docs.rs/sjml-sdk/0.47.0/sjml/registry/) | Static item, block, entity, fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipes, and related declarations. |
+| [`render`](https://docs.rs/sjml-sdk/0.47.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
+| [`screen_input`](https://docs.rs/sjml-sdk/0.47.0/sjml/screen_input/) | Bounded mouse, key, and text events delivered to the active screen. |
+| [`storage`](https://docs.rs/sjml-sdk/0.47.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
+| [`task`](https://docs.rs/sjml-sdk/0.47.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
+| [`widgets`](https://docs.rs/sjml-sdk/0.47.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
+| [`world`](https://docs.rs/sjml-sdk/0.47.0/sjml/world/) | Loaded-world handles, block snapshots and properties, bounded updates, weather, border settings, daylight-cycle time, and gamerules. |
+| [`prelude`](https://docs.rs/sjml-sdk/0.47.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
 
 Stable codecs (`StableEncode`, `StableDecode`, `Encoder`, and `Decoder`) are
 re-exported at the crate root; the implementation module is intentionally
@@ -1504,6 +1515,14 @@ chunk is loaded. One call accepts at most 1,024 positions and returns detached
 The ABI bounds each encoded response to 1 MiB. Calls remain synchronous and
 require `world.read` on the owning server thread.
 
+Use `world::block_properties(world, position)` when you need the individual
+state properties instead of parsing the state text. It returns
+`Option<Vec<BlockProperty>>`: `None` means that the position is outside build
+height or in an unloaded chunk. A present list is sorted by canonical property
+name and contains at most 64 bounded `{ name, value }` strings. The call never
+loads a chunk and requires only `world.read`. See
+[`WORLD_BLOCK_PROPERTIES.md`](WORLD_BLOCK_PROPERTIES.md).
+
 For a line-of-sight query, choose the block collision shape and fluid policy
 explicitly:
 
@@ -1685,7 +1704,9 @@ imports. Each module has a 1,024 live-player handle quota. Enumeration is
 complete or returns `HandleTableFull`; no partial vector is returned.
 `player::apply_effect` resolves the current server player for the login session,
 so the handle remains valid through respawn. Duration is limited to 1–72,000
-ticks and amplifier to 0–255; the API does not expose player inventory.
+ticks and amplifier to 0–255; this effect operation does not expose inventory
+data. Use [`player_inventory::read`](PLAYER_INVENTORY.md) for a detached
+read-only player-inventory snapshot.
 
 ## Loaded entity snapshots and effect application
 

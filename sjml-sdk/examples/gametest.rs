@@ -673,19 +673,25 @@ fn inspect_block_batch(arguments: BlockBatchArguments) -> SjmlResult<String> {
             position,
         ],
     )?;
+    let properties = world::block_properties(world, position)?;
     if states.len() != 3
         || states[0]
             .as_ref()
-            .is_none_or(|state| state.block_id != "minecraft:stone")
+            .is_none_or(|state| state.block_id != "minecraft:oak_log")
         || states[1].is_some()
         || states[0] != states[2]
+        || properties.as_ref().is_none_or(|properties| {
+            !properties
+                .iter()
+                .any(|property| property.name == "axis" && property.value == "y")
+        })
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "ordered block-state batch contract failed",
+            "ordered block-state or property snapshot contract failed",
         ));
     }
-    Ok("ordered block-state batch succeeded".to_owned())
+    Ok("ordered block-state batch and property snapshot succeeded".to_owned())
 }
 
 #[command(name = "world.raycast.check")]
@@ -938,6 +944,17 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
             "player equipment snapshot did not match the GameTest fixture",
         ));
     }
+    let inventory = sjml::player_inventory::read(target_player)?;
+    if inventory.slots.len() != 41
+        || inventory.slots[0]
+            .as_ref()
+            .is_none_or(|stack| stack.item_id != "minecraft:diamond_sword")
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory snapshot did not match the GameTest hotbar fixture",
+        ));
+    }
     let original_abilities = player::abilities(target_player)?;
     if !original_abilities.may_fly {
         return Err(SjmlError::new(
@@ -1104,6 +1121,37 @@ fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
                 "the entity velocity GameTest pig is missing",
             )
         })?;
+    let original_max_health = sjml::entity_attributes::read(
+        pig_handle,
+        sjml::entity_attributes::LivingAttribute::MaxHealth,
+    )?;
+    let temporary_max_health = if original_max_health.base_value < 1024.0 {
+        original_max_health.base_value + 1.0
+    } else {
+        original_max_health.base_value - 1.0
+    };
+    let changed_max_health = (|| {
+        sjml::entity_attributes::set_base_value(
+            pig_handle,
+            sjml::entity_attributes::LivingAttribute::MaxHealth,
+            temporary_max_health,
+        )?;
+        sjml::entity_attributes::read(
+            pig_handle,
+            sjml::entity_attributes::LivingAttribute::MaxHealth,
+        )
+    })();
+    let restore_max_health = sjml::entity_attributes::set_base_value(
+        pig_handle,
+        sjml::entity_attributes::LivingAttribute::MaxHealth,
+        original_max_health.base_value,
+    );
+    let changed_max_health = changed_max_health?;
+    restore_max_health?;
+    let restored_max_health = sjml::entity_attributes::read(
+        pig_handle,
+        sjml::entity_attributes::LivingAttribute::MaxHealth,
+    )?;
     let original_velocity = entity::velocity(pig_handle)?;
     let temporary_y = if original_velocity.y <= MAX_ENTITY_VELOCITY_COMPONENT - 0.125 {
         original_velocity.y + 0.125
@@ -1138,6 +1186,8 @@ fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
         || !snapshots
             .iter()
             .any(|snapshot| snapshot.entity_type_id == "minecraft:pig")
+        || (changed_max_health.base_value - temporary_max_health).abs() > 0.0001
+        || (restored_max_health.base_value - original_max_health.base_value).abs() > 0.0001
         || changed_velocity != temporary_velocity
     {
         return Err(SjmlError::new(

@@ -6,10 +6,15 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.38.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.39.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.38.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.39.0 adds
+global client mouse-wheel notifications, read-only player inventory snapshots,
+bounded reads and base-value writes for six vanilla living-entity attributes,
+and loaded block-state property snapshots. These use `client.input`,
+`entity.read` plus `inventory.read`, `entity.read` plus
+`entity.attributes.write`, and `world.read`, respectively. ABI 1.38.0 adds
 read and bounded flight-state changes for server players, ordinary client chat
 sending through Minecraft's signed chat path, client-local sound playback, and
 read/write access to loaded world-border settings. These additions use
@@ -922,6 +927,16 @@ be consumed. Releases remain observable but cannot be consumed. A module may
 hold 256 active global input subscriptions. Static registration and dedicated
 server instances fail closed.
 
+Mouse-wheel subscriptions use `sjml_client_input_v1.subscribe_scroll` and
+`unsubscribe_scroll` with the same 24-byte module-scoped handles. The host
+dispatches schema `u32(1)`, callback ID `u64`, and two little-endian `f64`
+deltas through `sjml_v1_client_input_scroll_dispatch(pointer, length) -> i64`.
+Each delta is finite and bounded to ±64, and at least one must be non-zero.
+Callbacks are observational and cannot cancel vanilla scrolling. They share
+the `client.input` permission and 256-subscription per-module limit; static
+registration and dedicated servers fail closed. See
+[mouse-wheel input](CLIENT_INPUT_SCROLL.md).
+
 ## Logical-server worlds
 
 ABI v1 provides the following synchronous `sjml_world_v1` imports. All parameters
@@ -944,6 +959,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `set_time` | `handle_ptr, handle_len, day_time_low, day_time_high` | Set absolute daylight-cycle time; status only |
 | `set_daylight_cycle_enabled` | `handle_ptr, handle_len, enabled` | Set vanilla `doDaylightCycle`; `enabled` must be 0 or 1 |
 | `block_states` | `query_ptr, query_len, out_ptr, out_capacity` | Stable ordered `Vec<Option<BlockStateSnapshot>>` |
+| `block_properties` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<Vec<BlockProperty>>` at one loaded position |
 | `raycast` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<RaycastHit>` for one bounded segment |
 | `collides` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<bool>` for one bounded axis-aligned box |
 | `set_block` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len` | Replace one loaded position with the registered block's default state; status only |
@@ -1047,6 +1063,16 @@ coordinates. Positions outside build height and positions in unloaded chunks
 return `None`; the host checks chunk availability before reading and never
 loads one. Every query retains the world handle's module, context, permission,
 generation, and server-thread checks.
+
+`block_properties` reads one state at a time using schema `u32(1)`, the
+24-byte world handle, a position schema `u32(1)`, and signed `i32` x/y/z. The
+response is a versioned `Option<Vec<BlockProperty>>`; each detached property
+record contains a canonical lowercase name and a printable UTF-8 value. The
+list is sorted by property name and capped at 64 entries, with names limited to
+64 bytes and values to 256 bytes. Positions outside build height or in
+unloaded chunks return `None`; no chunk is loaded. This call uses the same
+`world.read` permission, server context, owner, generation, and thread checks as
+the block batch API.
 
 `raycast` is server-only and follows the world handle's `world.read`, module-owner,
 generation, and owning-server-thread checks. Its request is exactly 78 bytes:
@@ -1250,6 +1276,25 @@ immediately, so later use returns `STALE_HANDLE`. It never loads chunks. Static
 registration and client calls return `PERMISSION_DENIED`. See
 [entity removal](ENTITY_REMOVAL.md).
 
+## Live non-player entity attributes
+
+The `sjml_entity_v1.attribute` and `set_attribute_base` imports expose six
+allowlisted vanilla attributes for loaded living non-player entities. Reads
+require `entity.read`; writes also require `entity.attributes.write`.
+
+| Import | Parameters | Success output |
+| --- | --- | --- |
+| `attribute` | `handle_ptr, handle_len, attribute_id_ptr, attribute_id_len, out_ptr, out_capacity` | 20 bytes: schema `u32(1)`, base `f64`, effective `f64` |
+| `set_attribute_base` | `handle_ptr, handle_len, attribute_id_ptr, attribute_id_len, value_ptr, value_len` | Set an allowlisted base value from a 12-byte schema-v1 record; status only |
+
+The handle is exactly 24 bytes; IDs are canonical UTF-8 and are restricted to
+the SDK's fixed `LivingAttribute` set. The request carries schema `u32(1)` and
+a finite `f64` within the attribute-specific range. The host checks the live
+entity handle, logical-server context, owning server thread, living entity
+type, attribute presence, and capability grants on every call. A write changes
+only the base value; active modifiers remain in effect. Static registration
+and client calls fail closed. See [live entity attributes](ENTITY_ATTRIBUTES.md).
+
 ## Non-player entity attachments
 
 ABI v1 provides byte-only `sjml_entity_v1` imports for values saved in the
@@ -1291,7 +1336,7 @@ transfer. This API is distinct from `sjml_storage_v1` entity scope, which is a
 per-mod saved database keyed by UUID and is managed independently of the
 entity's own NBT.
 
-## Read-only block inventory snapshots
+## Read-only inventory snapshots
 
 ABI v1 provides the synchronous `sjml_inventory_v1.read` import. All parameters
 and the status are `i32`; zero is success and nonzero values use the error table.
@@ -1302,6 +1347,7 @@ Static registration binds the authorized signature but every call returns
 | Import | Parameters | Success output |
 | --- | --- | --- |
 | `read` | `world_ptr, world_len, position_ptr, position_len, side_ptr, side_len, out_ptr, out_capacity` | Stable `Option<InventorySnapshot>`: byte `0`, or byte `1`, snapshot schema version `1`, u32 slot count, then one `Option<ItemStackDescriptor>` per slot |
+| `read_player` | `player_ptr, player_len, out_ptr, out_capacity` | Stable `InventorySnapshot`: schema version `1`, u32 slot count, then one `Option<ItemStackDescriptor>` per slot |
 
 The world handle length must be 24 bytes. `BlockPos` is schema-v1 followed by
 three little-endian signed `i32` coordinates. `side` is stable
@@ -1331,6 +1377,14 @@ limited to 4,096 slots and 1 MiB; an oversized result returns
 `PAYLOAD_TOO_LARGE` without partial output. Each active module's world handle
 must pass the existing owner, context, kind, generation, `world.read`, and
 server-thread checks before slot access.
+
+`read_player` accepts a module-owned 24-byte live-player handle and requires
+both `entity.read` and `inventory.read`. It validates the login session and
+owning server thread, then returns detached slots in vanilla order (hotbar,
+main storage, armor, offhand). The response is limited to 128 slots and 1 MiB;
+it contains no components, NBT, or mutable stack references. It never mutates
+or synchronizes inventory. Static-registration and client calls fail closed.
+See [player inventory reads](PLAYER_INVENTORY.md).
 
 ## Module-owned string components on inventory items
 

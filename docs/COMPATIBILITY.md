@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host ABI is `1.38.0`. ABI compatibility is major-version based:
+The current host is `0.49.0` with ABI `1.39.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.38.0` therefore accepts
-`1.0.x` through `1.38.0` (including earlier ABI 1.32–1.37 guests), but rejects a
+minor/patch version is equal or newer. A host at ABI `1.39.0` therefore accepts
+`1.0.x` through `1.39.0` (including earlier ABI 1.32–1.38 guests), but rejects a
 later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -127,3 +127,5 @@ cargo build --manifest-path sjml-cli/Cargo.toml -p sjml-sdk --example guest \
 The CI matrix runs these Java and Rust checks on Linux, Windows, and macOS.
 Minecraft client, multiplayer, GPU, tick-rate, and frame-rate compatibility
 still requires a live run on each platform being claimed.
+
+Host 0.49.0 / ABI 1.39.0 adds observational global mouse-wheel input, read-only player-inventory snapshots, bounded live reads and base-value writes for six vanilla living-entity attributes, and loaded block-state property snapshots. These require `client.input`, `entity.read` plus `inventory.read`, `entity.read` plus `entity.attributes.write`, and `world.read`, respectively. SDK/macros 0.47.0 provides the Rust wrappers. See the focused API documents for each contract.
