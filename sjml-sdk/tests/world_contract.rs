@@ -38,6 +38,18 @@ fn native_world_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        world::daylight_cycle_enabled(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    for enabled in [false, true] {
+        assert_eq!(
+            world::set_daylight_cycle_enabled(handle, enabled)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+    assert_eq!(
         world::block_states(handle, &[BlockPos { x: 1, y: 64, z: 2 }])
             .unwrap_err()
             .code(),

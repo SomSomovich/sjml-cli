@@ -95,6 +95,8 @@ pub mod batch;
 pub mod block_entity;
 pub mod client_chat;
 pub mod client_input;
+pub mod chat_messages;
+pub mod client_notifications;
 pub mod entity;
 pub mod entity_data;
 mod error;
@@ -126,6 +128,10 @@ pub use batch::{Batch, BatchValue, CallResult};
 pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle};
+pub use client_notifications::NotificationKind;
+pub use chat_messages::{
+    ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
+};
 pub use entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use gl::{
@@ -143,8 +149,8 @@ pub use network::{
     NetworkSubscriptionHandle, Player as NetworkPlayer, Uuid,
 };
 pub use player::{
-    MAX_PLAYER_VELOCITY_COMPONENT, PlayerGameMode, PlayerMotion, PlayerSnapshot, PlayerVelocity,
-    PlayerVitals,
+    MAX_PLAYER_VELOCITY_COMPONENT, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode,
+    PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
 };
 pub use recipe::{
     CraftingSlot, RECIPE_CALLBACK_SCHEMA_VERSION, RecipeEvaluation, RecipeMatchInput,
@@ -195,6 +201,12 @@ pub mod prelude {
         ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
         MAX_CLIENT_INPUT_SUBSCRIPTIONS,
     };
+    pub use crate::chat_messages;
+    pub use crate::chat_messages::{
+        ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
+    };
+    pub use crate::client_notifications;
+    pub use crate::client_notifications::NotificationKind;
     pub use crate::entity;
     pub use crate::entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
     pub use crate::entity_data;
@@ -232,8 +244,8 @@ pub mod prelude {
     };
     pub use crate::player;
     pub use crate::player::{
-        MAX_PLAYER_VELOCITY_COMPONENT, PlayerGameMode, PlayerMotion, PlayerSnapshot,
-        PlayerVelocity, PlayerVitals,
+        MAX_PLAYER_VELOCITY_COMPONENT, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode,
+        PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
     };
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;

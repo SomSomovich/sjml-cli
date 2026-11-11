@@ -176,6 +176,13 @@ struct BlockStateBatch {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct DaylightCycleSnapshot {
+    enabled: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
 struct WorldRaycastQuery {
@@ -227,6 +234,9 @@ extern "C" {
     fn imported_game_time(handle: i32, length: i32, output: i32) -> i32;
     #[link_name = "day_time"]
     fn imported_day_time(handle: i32, length: i32, output: i32) -> i32;
+    #[link_name = "daylight_cycle_enabled"]
+    fn imported_daylight_cycle_enabled(handle: i32, length: i32, output: i32, capacity: i32)
+        -> i32;
     #[link_name = "biome_at"]
     fn imported_biome_at(
         handle: i32,
@@ -263,6 +273,8 @@ extern "C" {
     fn imported_set_weather(handle: i32, length: i32, condition: i32, duration_ticks: i32) -> i32;
     #[link_name = "set_time"]
     fn imported_set_time(handle: i32, length: i32, day_time_low: i32, day_time_high: i32) -> i32;
+    #[link_name = "set_daylight_cycle_enabled"]
+    fn imported_set_daylight_cycle_enabled(handle: i32, length: i32, enabled: i32) -> i32;
     #[link_name = "block_states"]
     fn imported_block_states(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "raycast"]
@@ -399,6 +411,34 @@ pub fn day_time(handle: WorldHandle) -> SjmlResult<i64> {
             // SAFETY: the stable handle encoding and 8-byte output remain live for this call.
             unsafe { imported_day_time(encoded.as_ptr() as usize as u32 as i32, 24, output) }
         })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads whether vanilla `doDaylightCycle` is enabled for a loaded world.
+///
+/// Requires `world.read` and a logical-server context. The value is the addressed world's
+/// persisted vanilla gamerule, read on the server thread; this call does not load a dimension.
+pub fn daylight_cycle_enabled(handle: WorldHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let snapshot: DaylightCycleSnapshot = read_output(5, |output, capacity| {
+            // SAFETY: the handle bytes and fixed versioned output buffer remain live through the import.
+            unsafe {
+                imported_daylight_cycle_enabled(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        Ok(snapshot.enabled)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -647,6 +687,40 @@ pub fn set_time(handle: WorldHandle, day_time: i64) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (handle, day_time);
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables vanilla `doDaylightCycle` for a loaded world.
+///
+/// Requires both `world.read` (for the world handle) and `world.write`. This changes the actual
+/// persisted Minecraft gamerule on the server thread; it does not change the current `day_time`.
+/// When disabled, daylight time stops advancing. Client and static registration contexts are
+/// rejected, and the host does not load a dimension or chunk.
+pub fn set_daylight_cycle_enabled(handle: WorldHandle, enabled: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and boolean argument remain valid for this synchronous call.
+        let status = unsafe {
+            imported_set_daylight_cycle_enabled(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                i32::from(enabled),
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the daylight-cycle gamerule update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, enabled);
         Err(unsupported_target())
     }
 }
@@ -1202,11 +1276,12 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        Aabb, BlockStateBatch, BlockStateQuery, BlockStateSnapshot, MAX_WEATHER_DURATION_TICKS,
-        MAX_WORLD_DAY_TIME_TICKS, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
-        WeatherCondition, WeatherSnapshot, WorldCollisionQuery, WorldEntitySpawnRequest,
-        WorldRaycastQuery, collides, day_time, play_sound, raycast, set_block, set_time,
-        spawn_entity, spawn_particle,
+        collides, day_time, daylight_cycle_enabled, play_sound, raycast, set_block,
+        set_daylight_cycle_enabled, set_time, spawn_entity, spawn_particle, Aabb, BlockStateBatch,
+        BlockStateQuery, BlockStateSnapshot, DaylightCycleSnapshot, RaycastBlockMode,
+        RaycastFluidMode, RaycastHit, RaycastPoint, WeatherCondition, WeatherSnapshot,
+        WorldCollisionQuery, WorldEntitySpawnRequest, WorldRaycastQuery,
+        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_DAY_TIME_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -1281,6 +1356,28 @@ mod tests {
                 .code(),
             ErrorCode::UnknownErrorCode
         );
+    }
+
+    #[test]
+    fn daylight_cycle_snapshot_has_a_versioned_boolean_contract() {
+        let enabled = crate::to_bytes(&DaylightCycleSnapshot { enabled: true }).unwrap();
+        assert_eq!(enabled, [1, 0, 0, 0, 1]);
+        let disabled = crate::to_bytes(&DaylightCycleSnapshot { enabled: false }).unwrap();
+        assert_eq!(disabled, [1, 0, 0, 0, 0]);
+        assert!(daylight_cycle_enabled(WorldHandle::new(1, 2, 3, 4).unwrap()).is_err());
+    }
+
+    #[test]
+    fn daylight_cycle_write_requires_the_wasm_host() {
+        let handle = WorldHandle::new(1, 2, 3, 4).unwrap();
+        for enabled in [false, true] {
+            assert_eq!(
+                set_daylight_cycle_enabled(handle, enabled)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::UnknownErrorCode
+            );
+        }
     }
 
     #[test]

@@ -22,7 +22,7 @@ distribution = "server_only"
 [runtime]
 abi = "^1.0"
 minecraft = "~1.21.1"
-sjml = "^0.46.0"
+sjml = "^0.47.0"
 
 [[modules]]
 id = "core"
@@ -73,9 +73,8 @@ paths, and non-canonical checksum declarations. Runtime compatibility ranges,
 dependency graphs, and requested permissions are consumed by later bootstrap
 stages; archive validation alone does not resolve or grant them. The portable
 core's `ModuleServiceRouter` consumes service export declarations when
-resolving calls. The current NeoForge adapter routes server-side service
-exports and calls through its async module runtime; client-side service
-providers and calls remain unavailable.
+resolving calls. The current NeoForge adapter does not connect that router to
+the in-game runtime.
 
 ### Package distribution
 

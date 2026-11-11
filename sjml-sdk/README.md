@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.44.0"
+sjml-sdk = "0.45.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -38,6 +38,14 @@ the non-cancellable `player.respawned` event. See
 [smithing transform recipes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SMITHING_TRANSFORM.md),
 and [player respawn events](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_RESPAWNED_EVENT.md).
 
+SDK 0.45.0 adds detached player equipment snapshots, `doDaylightCycle`
+gamerule access, client-local chat-message callbacks with capability-gated
+display filtering, and bounded client toast notifications. See
+[player equipment](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_EQUIPMENT.md),
+[daylight-cycle gamerule](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_DAYLIGHT_CYCLE.md),
+[client chat messages](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_CHAT_MESSAGES.md),
+and [client toast notifications](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_NOTIFICATIONS.md).
+
 ```rust
 use sjml::prelude::*;
 
@@ -50,7 +58,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.44.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.45.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

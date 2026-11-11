@@ -473,6 +473,7 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         .map(world::dimension_id)
         .collect::<SjmlResult<Vec<_>>>()?;
     let original_day_time = world::day_time(overworld)?;
+    let original_daylight_cycle = world::daylight_cycle_enabled(overworld)?;
     let first_player = player::online()?.into_iter().next().ok_or_else(|| {
         SjmlError::new(
             ErrorCode::InvalidArgument,
@@ -515,12 +516,20 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
     let restored_day_time = world::set_time(overworld, original_day_time);
     let observed_day_time = observed_day_time?;
     restored_day_time?;
+    world::set_daylight_cycle_enabled(overworld, !original_daylight_cycle)?;
+    let observed_daylight_cycle = world::daylight_cycle_enabled(overworld);
+    let restored_daylight_cycle =
+        world::set_daylight_cycle_enabled(overworld, original_daylight_cycle);
+    let observed_daylight_cycle = observed_daylight_cycle?;
+    restored_daylight_cycle?;
     if !loaded.contains(&overworld)
         || world::get("minecraft:overworld")? != Some(overworld)
         || world::dimension_id(overworld)? != "minecraft:overworld"
         || !ids.windows(2).all(|pair| pair[0] < pair[1])
         || world::game_time(overworld)? < 0
         || observed_day_time != changed_day_time
+        || observed_daylight_cycle == original_daylight_cycle
+        || world::daylight_cycle_enabled(overworld)? != original_daylight_cycle
         || biome_id
             .as_deref()
             .and_then(|id| id.split_once(':'))
@@ -732,13 +741,19 @@ fn spawn_test_entity(arguments: BlockMutationArguments) -> SjmlResult<String> {
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
-struct PlayerArguments {}
+struct PlayerArguments {
+    player_id: String,
+}
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
 struct MenuActionOpenArguments {
     player_id: String,
 }
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct MenuActionCheckArguments {}
 
 #[command(name = "menu.action.open")]
 fn open_menu_action(arguments: MenuActionOpenArguments) -> SjmlResult<String> {
@@ -765,7 +780,7 @@ fn open_menu_action(arguments: MenuActionOpenArguments) -> SjmlResult<String> {
 }
 
 #[command(name = "menu.action.check")]
-fn check_menu_action(_: PlayerArguments) -> SjmlResult<String> {
+fn check_menu_action(_: MenuActionCheckArguments) -> SjmlResult<String> {
     if SAW_MENU_ACTION.swap(false, Ordering::Relaxed) {
         Ok("menu.action callback delivered".to_owned())
     } else {
@@ -777,13 +792,23 @@ fn check_menu_action(_: PlayerArguments) -> SjmlResult<String> {
 }
 
 #[command(name = "player.inspect")]
-fn inspect_players(_: PlayerArguments) -> SjmlResult<String> {
+fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let players = player::online()?;
     let snapshots = players
         .iter()
         .copied()
         .map(player::snapshot)
         .collect::<SjmlResult<Vec<_>>>()?;
+    let target_index = snapshots
+        .iter()
+        .position(|snapshot| snapshot.uuid == arguments.player_id)
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "the GameTest player must be online",
+            )
+        })?;
+    let target_player = players[target_index];
     let vitals = players
         .iter()
         .copied()
@@ -794,31 +819,51 @@ fn inspect_players(_: PlayerArguments) -> SjmlResult<String> {
         .copied()
         .map(player::game_mode)
         .collect::<SjmlResult<Vec<_>>>()?;
-    let original_game_mode = *game_modes.first().ok_or_else(|| {
-        SjmlError::new(
+    let equipment = player::equipment(target_player)?;
+    if equipment
+        .main_hand
+        .as_ref()
+        .map(|stack| stack.item_id.as_str())
+        != Some("minecraft:diamond_sword")
+        || equipment
+            .off_hand
+            .as_ref()
+            .map(|stack| stack.item_id.as_str())
+            != Some("minecraft:shield")
+        || equipment.feet.as_ref().map(|stack| stack.item_id.as_str())
+            != Some("minecraft:iron_boots")
+        || equipment.legs.as_ref().map(|stack| stack.item_id.as_str())
+            != Some("minecraft:iron_leggings")
+        || equipment.chest.as_ref().map(|stack| stack.item_id.as_str())
+            != Some("minecraft:iron_chestplate")
+        || equipment.head.as_ref().map(|stack| stack.item_id.as_str())
+            != Some("minecraft:iron_helmet")
+    {
+        return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "the GameTest player must be online",
-        )
-    })?;
+            "player equipment snapshot did not match the GameTest fixture",
+        ));
+    }
+    let original_game_mode = game_modes[target_index];
     let temporary_game_mode = if original_game_mode == sjml::PlayerGameMode::Creative {
         sjml::PlayerGameMode::Adventure
     } else {
         sjml::PlayerGameMode::Creative
     };
-    player::set_game_mode(players[0], temporary_game_mode)?;
-    let observed_game_mode = player::game_mode(players[0]);
-    let restored_game_mode = player::set_game_mode(players[0], original_game_mode);
+    player::set_game_mode(target_player, temporary_game_mode)?;
+    let observed_game_mode = player::game_mode(target_player);
+    let restored_game_mode = player::set_game_mode(target_player, original_game_mode);
     let observed_game_mode = observed_game_mode?;
     restored_game_mode?;
-    let original_vitals = vitals[0];
-    let original_motion = player::motion(players[0])?;
+    let original_vitals = vitals[target_index];
+    let original_motion = player::motion(target_player)?;
     let temporary_velocity = player::PlayerVelocity::new(0.125, -0.25, 0.5)?;
     let temporary_motion = (|| {
-        player::set_velocity(players[0], temporary_velocity)?;
-        player::motion(players[0])
+        player::set_velocity(target_player, temporary_velocity)?;
+        player::motion(target_player)
     })();
     let restore_motion = player::set_velocity(
-        players[0],
+        target_player,
         player::PlayerVelocity::new(
             original_motion.velocity_x,
             original_motion.velocity_y,
@@ -827,7 +872,7 @@ fn inspect_players(_: PlayerArguments) -> SjmlResult<String> {
     );
     let temporary_motion = temporary_motion?;
     restore_motion?;
-    let restored_motion = player::motion(players[0])?;
+    let restored_motion = player::motion(target_player)?;
     let temporary_health = if original_vitals.health < original_vitals.max_health {
         (original_vitals.health + 0.5).min(original_vitals.max_health)
     } else {
@@ -845,27 +890,27 @@ fn inspect_players(_: PlayerArguments) -> SjmlResult<String> {
         original_vitals.experience_level + 1
     };
     let temporary_vitals = (|| {
-        player::set_health(players[0], temporary_health)?;
-        player::set_food(players[0], temporary_food, temporary_saturation)?;
-        player::set_experience(players[0], temporary_experience_level, 0.0)?;
-        player::vitals(players[0])
+        player::set_health(target_player, temporary_health)?;
+        player::set_food(target_player, temporary_food, temporary_saturation)?;
+        player::set_experience(target_player, temporary_experience_level, 0.0)?;
+        player::vitals(target_player)
     })();
     let restore_vitals = (|| {
-        player::set_health(players[0], original_vitals.health)?;
+        player::set_health(target_player, original_vitals.health)?;
         player::set_food(
-            players[0],
+            target_player,
             original_vitals.food_level,
             original_vitals.saturation,
         )?;
         player::set_experience(
-            players[0],
+            target_player,
             original_vitals.experience_level,
             original_vitals.experience_progress,
         )
     })();
     let temporary_vitals = temporary_vitals?;
     restore_vitals?;
-    let restored_vitals = player::vitals(players[0])?;
+    let restored_vitals = player::vitals(target_player)?;
     if snapshots.is_empty()
         || vitals.len() != snapshots.len()
         || game_modes.len() != snapshots.len()
@@ -939,7 +984,10 @@ fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
         .find(|(_, snapshot)| snapshot.entity_type_id == "minecraft:pig")
         .map(|(handle, _)| handle)
         .ok_or_else(|| {
-            SjmlError::new(ErrorCode::InvalidArgument, "the entity velocity GameTest pig is missing")
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "the entity velocity GameTest pig is missing",
+            )
         })?;
     let original_velocity = entity::velocity(pig_handle)?;
     let temporary_y = if original_velocity.y <= MAX_ENTITY_VELOCITY_COMPONENT - 0.125 {
@@ -947,11 +995,8 @@ fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
     } else {
         original_velocity.y - 0.125
     };
-    let temporary_velocity = EntityVelocity::new(
-        original_velocity.x,
-        temporary_y,
-        original_velocity.z,
-    )?;
+    let temporary_velocity =
+        EntityVelocity::new(original_velocity.x, temporary_y, original_velocity.z)?;
     let changed_velocity = (|| {
         entity::set_velocity(pig_handle, temporary_velocity)?;
         entity::velocity(pig_handle)

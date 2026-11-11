@@ -6,10 +6,18 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.36.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.37.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.36.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.37.0 adds
+`sjml_player_v1.equipment` for detached main-hand/offhand/armor snapshots,
+`sjml_world_v1.daylight_cycle_enabled` and `set_daylight_cycle_enabled` for the
+vanilla `doDaylightCycle` gamerule, a client-local chat-message callback ABI
+with independent `client.chat.observe` and `client.chat.filter` capabilities,
+and bounded client toast notifications through `sjml_client_ui_v1.notify` under
+`client.ui.notify`. These client APIs cannot alter server-authoritative state;
+chat filtering only hides local display insertion after Minecraft's secure-chat
+checks. ABI 1.36.0 adds
 read-only player vitals, bounded server-player game-mode changes, loaded-world
 biome and daylight-time queries, daylight-time writes, bounded player motion
 reads and velocity writes, smithing-transform recipes, and the non-cancellable
@@ -833,6 +841,39 @@ Callbacks are synchronous and reject reentrance with `SERVICE_BUSY` (31).
 See [Native client chat layout](CHAT.md) for typed APIs, persistence, and the
 live-client verification boundary. Existing ABI 1.32 guests remain supported.
 
+## Client chat-message observation and filtering
+
+ABI 1.37.0 adds `sjml_client_chat_messages_v1`. `subscribe` and `unsubscribe`
+require `client.chat.observe`, a physical-client runtime, and the client main
+thread. Each module runtime may register one callback; the host supports up to
+128 active runtimes and removes each route on unsubscribe, failure, or runtime
+close. The callback receives a bounded plain-text snapshot immediately before
+the local `ChatComponent` inserts a message. Minecraft's signature, blocked
+player, and secure-chat filtering have already run. The guest receives no
+signature, style, hover/click event, or Minecraft object. Text is limited to
+4,096 UTF-8 bytes and truncated at a code-point boundary.
+
+The guest exports `sjml_v1_client_chat_message_dispatch(pointer, length) ->
+i64`; its input is schema `u32=1`, callback ID `u64`, source `u8` (`0=player
+chat`, `1=system`), truncation `u8`, and a length-prefixed UTF-8 string. It
+returns one stable bool byte. `true` suppresses only this local chat-history
+insertion, and is honored only when the module separately requests and receives
+`client.chat.filter`; observation alone cannot hide messages. The host never
+rewrites or resends signed content or changes server state. See
+[client chat messages](CLIENT_CHAT_MESSAGES.md).
+
+## Client toast notifications
+
+ABI 1.37.0 adds `sjml_client_ui_v1.notify(title_ptr, title_len, body_ptr,
+body_len, kind, duration_ticks) -> i32`, available only to a physical-client
+runtime with requested and granted `client.ui.notify` and on the client main
+thread. Title and body are strict UTF-8, nonblank literal strings of at most
+128 bytes each and cannot contain control characters. `kind` is `0=info`,
+`1=success`, `2=warning`, or `3=error`; duration is 20–600 ticks. Calls are
+limited to six per module per 30 seconds, and repeated notices update one
+module-owned toast slot. Static-registration and server calls fail closed. See
+[client toast notifications](CLIENT_NOTIFICATIONS.md).
+
 ## Global client input imports
 
 Global key and mouse-button subscriptions are a separate API, available only
@@ -872,8 +913,10 @@ registration binds the signatures but every call during `mod_register` returns
 | `dimension_id` | `handle_ptr, handle_len, out_ptr, out_capacity` | Stable `String`: little-endian u32 UTF-8 length, then bytes |
 | `game_time` | `handle_ptr, handle_len, out_ptr` | Little-endian signed i64 |
 | `day_time` | `handle_ptr, handle_len, out_ptr` | Little-endian signed i64 |
+| `daylight_cycle_enabled` | `handle_ptr, handle_len, out_ptr, out_capacity` | Stable bool record: schema-v1 u32, bool u8 |
 | `biome_at` | `handle_ptr, handle_len, x, y, z, out_ptr, out_capacity` | Stable `Option<String>`: u32 UTF-8 length (`0` means unavailable), then canonical biome ID bytes |
 | `set_time` | `handle_ptr, handle_len, day_time_low, day_time_high` | Set absolute daylight-cycle time; status only |
+| `set_daylight_cycle_enabled` | `handle_ptr, handle_len, enabled` | Set vanilla `doDaylightCycle`; `enabled` must be 0 or 1 |
 | `block_states` | `query_ptr, query_len, out_ptr, out_capacity` | Stable ordered `Vec<Option<BlockStateSnapshot>>` |
 | `raycast` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<RaycastHit>` for one bounded segment |
 | `collides` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<bool>` for one bounded axis-aligned box |
@@ -921,7 +964,12 @@ both `world.read` and `world.write`. The time value must be from 0 through
 1,000,000,000,000 inclusive. These operations resolve only an already-loaded
 world, run on its owning logical-server thread, and never load dimensions or
 chunks. `set_time` changes the daylight-cycle clock, not `game_time` or the
-`doDaylightCycle` gamerule. See [world time](WORLD_TIME.md).
+`doDaylightCycle` gamerule. `daylight_cycle_enabled` requires `world.read` and
+returns exactly five bytes (`u32 schema=1`, then a boolean byte). The setter
+requires both `world.read` and `world.write`, accepts only integer 0 or 1, and
+changes the live world's persisted vanilla gamerule without changing the
+current day time. See [world time](WORLD_TIME.md) and
+[daylight-cycle gamerule](WORLD_DAYLIGHT_CYCLE.md).
 
 Each active module owns one world handle registry with a 1,024-live-handle
 quota. `get` and `loaded` share handles. `loaded` sorts all currently loaded
@@ -1030,6 +1078,7 @@ signatures but calls return `PERMISSION_DENIED`.
 | `online` | `out_ptr, out_capacity` | Stable `Vec<PlayerHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `PlayerSnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `profile_name`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
 | `vitals` | `handle_ptr, handle_len, out_ptr, out_capacity` | 28-byte `PlayerVitals`: u32 schema `1`, `f32 health`, `f32 max_health`, `u32 food_level`, `f32 saturation`, `u32 experience_level`, `f32 experience_progress` |
+| `equipment` | `handle_ptr, handle_len, out_ptr, out_capacity` | Stable `PlayerEquipment`: six optional slot records in main-hand, offhand, feet, legs, chest, head order |
 | `game_mode` | `handle_ptr, handle_len, out_ptr, out_capacity` | Eight bytes: u32 schema `1`, u32 mode (`0=Survival`, `1=Creative`, `2=Adventure`, `3=Spectator`) |
 | `set_game_mode` | `handle_ptr, handle_len, mode_u32` | Set the current login session's game mode; status only |
 | `motion` | `handle_ptr, handle_len, out_ptr, out_capacity` | 36-byte schema-v1 player motion: u32 schema, three f64 velocity components, f32 yaw, f32 pitch |
@@ -1044,7 +1093,13 @@ dimension IDs are canonical `namespace:path`. Each stable string is limited to
 capacity is bounds checked; insufficient capacity returns
 `PAYLOAD_TOO_LARGE` before new enumeration handles are allocated. `vitals`
 requires a 28-byte output buffer; `game_mode` requires eight bytes;
-`motion` requires a 36-byte output buffer.
+`motion` requires a 36-byte output buffer. `equipment` requires a 1,690-byte
+output buffer; it returns a schema-v1 record with six `Option` values in
+main-hand, offhand, feet, legs, chest, and head order. Each present stack is a
+schema-v1 record containing a length-prefixed item ID followed by count,
+maximum stack size, current damage, and maximum damage as little-endian u32s.
+The host caps IDs at 256 bytes, stack sizes at 4,096, and durability fields at
+1,000,000; client and static-registration calls fail closed.
 
 Each module owns a 1,024-live-handle quota. Enumeration sorts by UUID and
 returns the complete list or an error. Every snapshot validates capability,

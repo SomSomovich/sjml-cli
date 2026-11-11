@@ -5,14 +5,14 @@
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
 #[cfg(target_arch = "wasm32")]
-use crate::MAX_STRING_BYTES;
-#[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 #[cfg(target_arch = "wasm32")]
 use crate::entity::status_result;
-use crate::entity::{MAX_EFFECT_DURATION_TICKS, validate_effect_id};
+use crate::entity::{validate_effect_id, MAX_EFFECT_DURATION_TICKS};
 #[cfg(target_arch = "wasm32")]
-use crate::{Decoder, to_bytes};
+use crate::MAX_STRING_BYTES;
+#[cfg(target_arch = "wasm32")]
+use crate::{to_bytes, Decoder};
 use crate::{ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, StableEncode};
 
 /// Current identity, dimension, and coordinates of one online player.
@@ -49,6 +49,129 @@ pub struct PlayerVitals {
     pub experience_level: u32,
     /// Progress toward the next experience level, from zero through one.
     pub experience_progress: f32,
+}
+
+/// Maximum number of bytes in a canonical item registry ID returned for equipment.
+pub const MAX_PLAYER_EQUIPMENT_ITEM_ID_BYTES: usize = 256;
+/// Maximum stack size accepted in a detached equipment snapshot.
+pub const MAX_PLAYER_EQUIPMENT_STACK_SIZE: u32 = 4096;
+/// Maximum durability value accepted in a detached equipment snapshot.
+pub const MAX_PLAYER_EQUIPMENT_DAMAGE: u32 = 1_000_000;
+/// Maximum encoded size of all six equipment slots in schema v1.
+pub const MAX_PLAYER_EQUIPMENT_BYTES: u32 = 1690;
+
+/// Detached stack identity and durability data for an equipped item.
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerEquipmentStack {
+    /// Canonical lowercase namespace:path item registry ID.
+    pub item_id: String,
+    /// Current stack count.
+    pub count: u32,
+    /// Item stack's maximum size.
+    pub max_stack_size: u32,
+    /// Current durability damage; zero for items without durability.
+    pub damage: u32,
+    /// Maximum durability damage; zero for items without durability.
+    pub max_damage: u32,
+}
+
+impl PlayerEquipmentStack {
+    /// Builds a detached equipment value after validating its registry ID, stack size, and durability.
+    pub fn new(
+        item_id: impl Into<String>,
+        count: u32,
+        max_stack_size: u32,
+        damage: u32,
+        max_damage: u32,
+    ) -> SjmlResult<Self> {
+        let stack = Self {
+            item_id: item_id.into(),
+            count,
+            max_stack_size,
+            damage,
+            max_damage,
+        };
+        stack.validate()?;
+        Ok(stack)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        let Some((namespace, path)) = self.item_id.split_once(':') else {
+            return Err(invalid_equipment(
+                "item ID must be a canonical namespace:path value",
+            ));
+        };
+        if self.item_id.len() > MAX_PLAYER_EQUIPMENT_ITEM_ID_BYTES
+            || namespace.is_empty()
+            || path.is_empty()
+            || !namespace.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+            })
+            || !path.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
+            })
+        {
+            return Err(invalid_equipment(
+                "item ID must be a canonical namespace:path value",
+            ));
+        }
+        if self.count == 0
+            || self.count > MAX_PLAYER_EQUIPMENT_STACK_SIZE
+            || self.max_stack_size == 0
+            || self.max_stack_size > MAX_PLAYER_EQUIPMENT_STACK_SIZE
+            || self.count > self.max_stack_size
+            || self.max_damage > MAX_PLAYER_EQUIPMENT_DAMAGE
+            || self.damage > self.max_damage
+        {
+            return Err(invalid_equipment(
+                "equipment stack size or durability is outside the supported range",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Detached main-hand, offhand, and armor slots for one online player session.
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerEquipment {
+    /// Item held in the player's selected main-hand slot.
+    pub main_hand: Option<PlayerEquipmentStack>,
+    /// Item in the offhand slot.
+    pub off_hand: Option<PlayerEquipmentStack>,
+    /// Item in the feet armor slot.
+    pub feet: Option<PlayerEquipmentStack>,
+    /// Item in the legs armor slot.
+    pub legs: Option<PlayerEquipmentStack>,
+    /// Item in the chest armor slot.
+    pub chest: Option<PlayerEquipmentStack>,
+    /// Item in the head armor slot.
+    pub head: Option<PlayerEquipmentStack>,
+}
+
+impl PlayerEquipment {
+    #[cfg(target_arch = "wasm32")]
+    fn validate(&self) -> SjmlResult<()> {
+        for stack in [
+            &self.main_hand,
+            &self.off_hand,
+            &self.feet,
+            &self.legs,
+            &self.chest,
+            &self.head,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            stack.validate()?;
+        }
+        Ok(())
+    }
+}
+
+fn invalid_equipment(message: &str) -> SjmlError {
+    SjmlError::new(ErrorCode::InvalidArgument, message)
 }
 
 /// Maximum health value accepted by [`set_health`]. The host also limits it to the player's current maximum health.
@@ -234,6 +357,8 @@ extern "C" {
     fn imported_online(output: i32, capacity: i32) -> i32;
     #[link_name = "snapshot"]
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "equipment"]
+    fn imported_equipment(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "vitals"]
     fn imported_vitals(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "game_mode"]
@@ -613,6 +738,39 @@ pub fn motion(handle: PlayerHandle) -> SjmlResult<PlayerMotion> {
     }
 }
 
+/// Reads a detached snapshot of the main hand, offhand, and four armor slots.
+///
+/// Requires `entity.read` and a live player handle in a logical-server context.
+/// The six positions are fixed and never include the player's inventory contents.
+/// Each item is a detached ID/count/stack-limit/durability value; there is no
+/// item handle, mutable component access, or ability to copy stacks into the
+/// game. Static registration, client contexts, and stale sessions are denied.
+pub fn equipment(handle: PlayerHandle) -> SjmlResult<PlayerEquipment> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let equipment: PlayerEquipment =
+            read_output(MAX_PLAYER_EQUIPMENT_BYTES, |output, capacity| {
+                // SAFETY: the encoded handle and output buffer remain valid during this synchronous host import.
+                unsafe {
+                    imported_equipment(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            })?;
+        equipment.validate()?;
+        Ok(equipment)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 /// Replaces all velocity components for a live server player.
 ///
 /// Requires `entity.read` and `player.motion.write`. Every component must be finite and within
@@ -682,7 +840,7 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_TELEPORT_COORDINATE, PlayerTeleport, PlayerVitals, apply_effect, teleport, vitals,
+        apply_effect, teleport, vitals, PlayerTeleport, PlayerVitals, MAX_TELEPORT_COORDINATE,
     };
     use crate::{ErrorCode, PlayerHandle};
 
