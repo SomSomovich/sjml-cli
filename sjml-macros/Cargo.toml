@@ -1,0 +1,21 @@
+[package]
+name = "sjml-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Procedural macros for the Somuch Java Mod Loader Rust SDK"
+repository.workspace = true
+documentation = "https://docs.rs/sjml-macros"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full", "extra-traits"] }
+
+[dev-dependencies]
+proc-macro2 = "1"
+quote = "1"

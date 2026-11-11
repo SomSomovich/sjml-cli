@@ -484,6 +484,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sjml-macros"
+version = "0.40.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "sjml-sdk"
+version = "0.40.0"
+dependencies = [
+ "sjml-macros",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

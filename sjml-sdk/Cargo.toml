@@ -1,0 +1,24 @@
+[package]
+name = "sjml-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Rust guest SDK for the Somuch Java Mod Loader ABI"
+repository.workspace = true
+documentation = "https://docs.rs/sjml-sdk"
+
+[lib]
+name = "sjml"
+crate-type = ["rlib", "cdylib"]
+
+[[example]]
+name = "guest"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "gametest"
+crate-type = ["cdylib"]
+
+[dependencies]
+sjml-macros.workspace = true

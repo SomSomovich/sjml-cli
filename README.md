@@ -3,6 +3,12 @@
 `sjml-cli` is a Rust command-line tool for creating, checking, building, testing,
 and packaging Rust/WebAssembly mods for Somuch Java Mod Loader.
 
+This repository is a Cargo workspace. The root package is `sjml-cli`,
+`sjml-sdk/` contains the `sjml-sdk` guest API crate (imported in Rust as `sjml`),
+and `sjml-macros/` contains the procedural macros re-exported by the SDK. The
+macros are a separate package because Rust requires procedural macros to be
+compiled as their own crate.
+
 ## Install and create a project
 
 The CLI requires Rust and Cargo. Install the WebAssembly target once:
@@ -16,6 +22,11 @@ From this repository, install the binary with:
 ```sh
 cargo install --path .
 ```
+
+After the CLI package is published, users will be able to install it from
+crates.io with `cargo install sjml-cli`. To publish the guest SDK as well,
+publish `sjml-macros` first, then `sjml-sdk`; the SDK depends on the macro crate.
+The CLI can be published independently.
 
 Create a project in a new directory named after the mod:
 
@@ -67,5 +78,9 @@ The CLI validates package paths and WASM, writes packages deterministically,
 and refuses to overwrite project inputs with an archive. It does not launch
 Minecraft or hot-reload an archive in a running game; restart Minecraft after
 replacing a loaded package.
+
+To validate every package in this repository, run `cargo test --workspace`,
+`cargo clippy --workspace --all-targets -- -D warnings`, and
+`cargo check -p sjml-sdk --examples --target wasm32-unknown-unknown`.
 
 Run `sjml-cli --help` or `sjml-cli <command> --help` for the full option list.
