@@ -48,23 +48,23 @@ creates a Git repository with an initial `master` branch; Git must be installed.
 When developing against a local SJML checkout, pass the path to its SDK crate:
 
 ```sh
-sjml-cli init mymod --sdk-path /path/to/somuch-jml/sdk/sjml
+sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.42.0"`; that crate must be available from a configured Cargo registry.
+"0.43.0"`; that crate must be available from a configured Cargo registry.
 Until the SDK crates are published, use `--sdk-path` when you need to compile
 the generated project.
 
 ## Documentation
 
-- [Rust SDK guide](docs/SDK_GUIDE.md) and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.42.0/sjml/)
+- [Rust SDK guide](docs/SDK_GUIDE.md) and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.43.0/sjml/)
 - [WebAssembly ABI v1](docs/ABI.md)
 - [Project configuration and capability grants](docs/PROJECT_CONFIGURATION.md)
 - [Complete manifest schema](docs/MANIFEST_SCHEMA.md) and [`.sjml` archive format](docs/FORMAT.md)
 - [Compatibility and host support](docs/COMPATIBILITY.md)
 - [Networking](docs/NETWORKING.md), [storage](docs/STORAGE.md), [async services](docs/ASYNC_MODEL.md), and [client rendering/OpenGL](docs/RENDERING.md)
-- [Security boundaries](docs/SECURITY.md), [module lifecycle](docs/MODULE_LIFECYCLE.md), [block entities](docs/BLOCK_ENTITIES.md), [player movement](docs/PLAYER_MOVED_EVENT.md), [inventory transfers](docs/INVENTORY_MUTATIONS.md), [particles](docs/PARTICLES.md), and [worker compute](docs/WORKER_COMPUTE.md)
+- [Security boundaries](docs/SECURITY.md), [module lifecycle](docs/MODULE_LIFECYCLE.md), [block entities](docs/BLOCK_ENTITIES.md), [player movement](docs/PLAYER_MOVED_EVENT.md), [player teleport](docs/PLAYER_TELEPORT.md), [entity removal](docs/ENTITY_REMOVAL.md), [world weather](docs/WORLD_WEATHER.md), [stonecutting recipes](docs/STONECUTTING.md), [inventory transfers](docs/INVENTORY_MUTATIONS.md), [particles](docs/PARTICLES.md), and [worker compute](docs/WORKER_COMPUTE.md)
 
 ## Commands
 

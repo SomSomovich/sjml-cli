@@ -1,4 +1,5 @@
 use sjml::events::{EffectTickEvent, EntityDeath, PlayerJoined, PlayerLeft, ResourcesReloaded};
+use sjml::player::PlayerTeleport;
 use sjml::prelude::PlayerMoved;
 use sjml::{
     command, event, from_bytes, mod_init, mod_shutdown, service, to_bytes, EntityHandle, ErrorCode,
@@ -147,6 +148,31 @@ fn player_moved_event_record_has_the_documented_v1_field_order() {
     let decoded = from_bytes::<PlayerMoved>(&expected).unwrap();
     assert_eq!(decoded, event);
     on_player_moved(decoded).unwrap();
+}
+
+#[test]
+fn player_teleport_destination_has_the_documented_v1_field_order() {
+    let destination = PlayerTeleport {
+        x: -12.5,
+        y: 70.0,
+        z: 24.25,
+        yaw: 190.0,
+        pitch: -25.0,
+    };
+
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    expected.extend_from_slice(&destination.x.to_le_bytes());
+    expected.extend_from_slice(&destination.y.to_le_bytes());
+    expected.extend_from_slice(&destination.z.to_le_bytes());
+    expected.extend_from_slice(&destination.yaw.to_le_bytes());
+    expected.extend_from_slice(&destination.pitch.to_le_bytes());
+
+    assert_eq!(expected.len(), 36);
+    assert_eq!(to_bytes(&destination).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<PlayerTeleport>(&expected).unwrap(),
+        destination
+    );
 }
 
 #[test]

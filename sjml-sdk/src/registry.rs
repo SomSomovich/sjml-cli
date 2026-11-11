@@ -473,6 +473,14 @@ pub struct CookingRecipeDefinition {
     pub cooking_time: u32,
 }
 
+/// Input and output for one vanilla stonecutting recipe.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StonecuttingRecipeDefinition {
+    pub ingredient: RecipeIngredient,
+    pub output_item: String,
+    pub output_count: u32,
+}
+
 /// A bounded vanilla base attribute supported by a generic SJML living entity.
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -663,6 +671,16 @@ extern "C" {
         kind: i32,
         experience_bits: i32,
         cooking_time: i32,
+    ) -> i32;
+    #[link_name = "register_stonecutting_recipe"]
+    fn imported_register_stonecutting_recipe(
+        path_pointer: i32,
+        path_length: i32,
+        output_item_pointer: i32,
+        output_item_length: i32,
+        output_count: i32,
+        ingredient_item_pointer: i32,
+        ingredient_item_length: i32,
     ) -> i32;
     #[link_name = "register_entity"]
     fn imported_register_entity(
@@ -1245,6 +1263,51 @@ pub fn register_cooking_recipe(path: &str, definition: CookingRecipeDefinition) 
             )
         };
         return status_result(status, "host rejected the cooking recipe declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = ingredient;
+        Err(unsupported_target())
+    }
+}
+
+/// Stages a single-input vanilla stonecutting recipe.
+///
+/// The input may be an item or item tag, the result count is between 1 and 64,
+/// and unqualified IDs refer to this package and module. Registration uses
+/// Minecraft's vanilla stonecutting serializer during server data reload.
+pub fn register_stonecutting_recipe(
+    path: &str,
+    definition: StonecuttingRecipeDefinition,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    if path.len() > 128 || path == "." || path == ".." {
+        return Err(invalid_argument(
+            "recipe path must be at most 128 bytes and cannot be . or ..",
+        ));
+    }
+    if !(1..=64).contains(&definition.output_count) {
+        return Err(invalid_argument(
+            "recipe output count must be between 1 and 64",
+        ));
+    }
+    validate_recipe_item_id(&definition.output_item)?;
+    let ingredient = encode_recipe_ingredient(&definition.ingredient)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies these bounded UTF-8 slices before returning.
+        let status = unsafe {
+            imported_register_stonecutting_recipe(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                definition.output_item.as_ptr() as usize as u32 as i32,
+                definition.output_item.len() as u32 as i32,
+                definition.output_count as i32,
+                ingredient.as_ptr() as usize as u32 as i32,
+                ingredient.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the stonecutting recipe declaration");
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -3076,6 +3139,52 @@ mod tests {
         }
         assert_eq!(
             register_cooking_recipe("..", valid).unwrap_err().code(),
+            ErrorCode::InvalidArgument,
+        );
+    }
+
+    #[test]
+    fn stonecutting_recipe_bounds_are_validated_before_host_access() {
+        let valid = StonecuttingRecipeDefinition {
+            ingredient: RecipeIngredient::tag("c:stone"),
+            output_item: "minecraft:stone_slab".into(),
+            output_count: 2,
+        };
+        assert_eq!(
+            register_stonecutting_recipe("stone_slab", valid.clone())
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+        );
+        for definition in [
+            StonecuttingRecipeDefinition {
+                output_count: 0,
+                ..valid.clone()
+            },
+            StonecuttingRecipeDefinition {
+                output_count: 65,
+                ..valid.clone()
+            },
+            StonecuttingRecipeDefinition {
+                ingredient: RecipeIngredient::tag("invalid tag"),
+                ..valid.clone()
+            },
+            StonecuttingRecipeDefinition {
+                output_item: "bad id".into(),
+                ..valid.clone()
+            },
+        ] {
+            assert_eq!(
+                register_stonecutting_recipe("stone_slab", definition)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument,
+            );
+        }
+        assert_eq!(
+            register_stonecutting_recipe("..", valid)
+                .unwrap_err()
+                .code(),
             ErrorCode::InvalidArgument,
         );
     }

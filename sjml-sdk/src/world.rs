@@ -1,5 +1,5 @@
 //! Worlds on this module's owning logical server. Reads require requested and granted `world.read`;
-//! block mutations and particle spawning additionally require `world.write`. No call loads a
+//! world mutations, block mutations, and particle spawning additionally require `world.write`. No call loads a
 //! dimension or chunk. Client instances expose no server worlds. Handles are module-scoped and
 //! limited to 1,024 live worlds.
 
@@ -28,6 +28,33 @@ pub const MAX_WORLD_RAYCAST_RESPONSE_BYTES: usize = 65_857;
 pub const MAX_WORLD_COLLISION_BLOCKS: usize = 4096;
 /// Maximum bytes in one canonical entity registry ID accepted by [`spawn_entity`].
 pub const MAX_WORLD_ENTITY_TYPE_ID_BYTES: usize = 256;
+/// Maximum duration accepted by [`set_weather`], in ticks (24 in-game hours).
+pub const MAX_WEATHER_DURATION_TICKS: u32 = 1_728_000;
+
+/// Detached weather timers and current precipitation state for one loaded dimension.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct WeatherSnapshot {
+    /// Whether precipitation is currently active.
+    pub raining: bool,
+    /// Whether thunder is currently active.
+    pub thundering: bool,
+    /// Ticks until the current clear-weather period ends, or zero when inactive.
+    pub clear_time: u32,
+    /// Ticks until the rain state changes, or zero when inactive.
+    pub rain_time: u32,
+    /// Ticks until the thunder state changes, or zero when inactive.
+    pub thunder_time: u32,
+}
+
+/// Weather preset used by [`set_weather`].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u32)]
+pub enum WeatherCondition {
+    Clear = 0,
+    Rain = 1,
+    Thunder = 2,
+}
 
 /// Immutable, detached block identity and state value returned by [`block_states`].
 #[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
@@ -170,6 +197,10 @@ extern "C" {
     fn imported_dimension_id(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "game_time"]
     fn imported_game_time(handle: i32, length: i32, output: i32) -> i32;
+    #[link_name = "weather"]
+    fn imported_weather(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_weather"]
+    fn imported_set_weather(handle: i32, length: i32, condition: i32, duration_ticks: i32) -> i32;
     #[link_name = "block_states"]
     fn imported_block_states(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "raycast"]
@@ -290,6 +321,86 @@ pub fn game_time(handle: WorldHandle) -> SjmlResult<i64> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the current weather state and timers of a loaded dimension. Requires `world.read` and
+/// executes on the owning logical-server thread.
+pub fn weather(handle: WorldHandle) -> SjmlResult<WeatherSnapshot> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let snapshot: WeatherSnapshot = read_output(4 + 2 + 3 * 4, |output, capacity| {
+            // SAFETY: the encoded handle and fixed-size output allocation stay live for this call.
+            unsafe {
+                imported_weather(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    24,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if snapshot.clear_time > i32::MAX as u32
+            || snapshot.rain_time > i32::MAX as u32
+            || snapshot.thunder_time > i32::MAX as u32
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned a weather timer beyond the supported bound",
+            ));
+        }
+        Ok(snapshot)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets clear, rain, or thunder weather for a bounded duration in a loaded dimension.
+///
+/// Requires both `world.read` and `world.write`; the host never loads a dimension or chunk. A
+/// duration of 1 through 1,728,000 ticks is accepted. `Clear` schedules the clear-weather timer;
+/// `Rain` and `Thunder` set the requested weather and use that duration for the vanilla weather
+/// transition timer.
+pub fn set_weather(
+    handle: WorldHandle,
+    condition: WeatherCondition,
+    duration_ticks: u32,
+) -> SjmlResult<()> {
+    if !(1..=MAX_WEATHER_DURATION_TICKS).contains(&duration_ticks) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "weather duration must be within 1..=1728000 ticks",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the stable handle and scalar arguments remain valid for this synchronous import.
+        let status = unsafe {
+            imported_set_weather(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                condition as u32 as i32,
+                duration_ticks as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the world weather update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, condition);
         Err(unsupported_target())
     }
 }
@@ -847,9 +958,58 @@ mod tests {
     use super::{
         collides, play_sound, raycast, set_block, spawn_entity, spawn_particle, Aabb,
         BlockStateBatch, BlockStateQuery, BlockStateSnapshot, RaycastBlockMode, RaycastFluidMode,
-        RaycastHit, RaycastPoint, WorldCollisionQuery, WorldEntitySpawnRequest, WorldRaycastQuery,
+        RaycastHit, RaycastPoint, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
+        WorldEntitySpawnRequest, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
+
+    #[test]
+    fn weather_snapshot_has_a_versioned_little_endian_contract() {
+        let snapshot = WeatherSnapshot {
+            raining: true,
+            thundering: false,
+            clear_time: 0,
+            rain_time: 12_000,
+            thunder_time: 40,
+        };
+        let encoded = crate::to_bytes(&snapshot).unwrap();
+        assert_eq!(
+            encoded,
+            [
+                1, 0, 0, 0, // schema
+                1, 0, // rain, thunder
+                0, 0, 0, 0, // clear
+                0xe0, 0x2e, 0, 0, // rain
+                40, 0, 0, 0, // thunder
+            ]
+        );
+        assert_eq!(
+            WeatherSnapshot::decode(&mut crate::Decoder::new(&encoded).unwrap()).unwrap(),
+            snapshot
+        );
+    }
+
+    #[test]
+    fn set_weather_validates_duration_before_host_access() {
+        let handle = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(WeatherCondition::Clear as u32, 0);
+        assert_eq!(WeatherCondition::Rain as u32, 1);
+        assert_eq!(WeatherCondition::Thunder as u32, 2);
+        for duration in [0, MAX_WEATHER_DURATION_TICKS + 1] {
+            assert_eq!(
+                super::set_weather(handle, WeatherCondition::Rain, duration)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            super::set_weather(handle, WeatherCondition::Clear, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
 
     #[test]
     fn raycast_query_matches_the_java_little_endian_contract() {

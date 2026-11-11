@@ -96,6 +96,14 @@ fn register_test_content() -> SjmlResult<()> {
             }],
         },
     )?;
+    registry::register_stonecutting_recipe(
+        "gametest_stonecutting",
+        registry::StonecuttingRecipeDefinition {
+            ingredient: RecipeIngredient::item("minecraft:stone"),
+            output_item: "gametest_ruby".into(),
+            output_count: 2,
+        },
+    )?;
     for (path, kind) in [
         ("gametest_smelting", CookingRecipeKind::Smelting),
         ("gametest_blasting", CookingRecipeKind::Blasting),

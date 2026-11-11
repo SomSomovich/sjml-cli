@@ -46,6 +46,8 @@ extern "C" {
         duration_ticks: i32,
         amplifier: i32,
     ) -> i32;
+    #[link_name = "discard"]
+    fn imported_discard(handle: i32, handle_length: i32) -> i32;
 }
 
 /// Returns all loaded non-player entities across the server's loaded dimensions, including modded
@@ -130,6 +132,33 @@ pub fn apply_effect(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (handle, amplifier);
+        Err(unsupported_target())
+    }
+}
+
+/// Discards one loaded non-player entity.
+///
+/// The module must request and receive both `entity.read` and `entity.remove`.
+/// The host revalidates this handle on the owning server thread and revokes it
+/// immediately after the entity is discarded. Players, unloaded entities,
+/// client contexts, and static registration calls are rejected. The operation
+/// does not expose a Minecraft entity object to the guest.
+pub fn discard(handle: EntityHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the host decodes the fixed-width handle during this synchronous call.
+        let status = unsafe {
+            imported_discard(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the entity removal")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
         Err(unsupported_target())
     }
 }

@@ -1,5 +1,6 @@
 //! Scoped access to online player sessions on the owning logical server. Snapshots require requested
-//! and granted `entity.read`; effect application also requires `entity.effect.apply`. Player handles
+//! and granted `entity.read`; effect application also requires `entity.effect.apply`, and
+//! teleportation also requires `player.teleport`. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +32,63 @@ pub struct PlayerSnapshot {
     pub z: f64,
 }
 
+/// Absolute same-dimension destination for a server-authoritative player teleport.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerTeleport {
+    /// Destination X coordinate.
+    pub x: f64,
+    /// Destination Y coordinate; the host checks the current dimension's build height.
+    pub y: f64,
+    /// Destination Z coordinate.
+    pub z: f64,
+    /// Absolute yaw in degrees, limited to ±36,000.
+    pub yaw: f32,
+    /// Absolute pitch in degrees, limited to -90..=90.
+    pub pitch: f32,
+}
+
+impl PlayerTeleport {
+    /// Creates a bounded destination. The host additionally checks build height, world border,
+    /// and that the destination chunk is already loaded.
+    pub fn new(x: f64, y: f64, z: f64, yaw: f32, pitch: f32) -> SjmlResult<Self> {
+        let destination = Self {
+            x,
+            y,
+            z,
+            yaw,
+            pitch,
+        };
+        destination.validate()?;
+        Ok(destination)
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if !self.x.is_finite()
+            || !self.y.is_finite()
+            || !self.z.is_finite()
+            || self.x.abs() > MAX_TELEPORT_COORDINATE
+            || self.y.abs() > MAX_TELEPORT_COORDINATE
+            || self.z.abs() > MAX_TELEPORT_COORDINATE
+            || !self.yaw.is_finite()
+            || self.yaw.abs() > MAX_TELEPORT_YAW
+            || !self.pitch.is_finite()
+            || !(-90.0..=90.0).contains(&self.pitch)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "player teleport coordinates or rotation are outside the supported range",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Maximum absolute X, Y, or Z coordinate accepted by the teleport API.
+pub const MAX_TELEPORT_COORDINATE: f64 = 29_999_984.0;
+/// Maximum absolute yaw accepted by the teleport API.
+pub const MAX_TELEPORT_YAW: f32 = 36_000.0;
+
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_player_v1")]
 extern "C" {
@@ -46,6 +104,13 @@ extern "C" {
         effect_id_length: i32,
         duration_ticks: i32,
         amplifier: i32,
+    ) -> i32;
+    #[link_name = "teleport"]
+    fn imported_teleport(
+        handle: i32,
+        handle_length: i32,
+        destination: i32,
+        destination_length: i32,
     ) -> i32;
 }
 
@@ -133,6 +198,36 @@ pub fn apply_effect(
     }
 }
 
+/// Teleports an online player to an absolute position in their current dimension.
+///
+/// The module must request and receive both `entity.read` and `player.teleport`.
+/// The destination coordinates and rotation are bounded before host access. The host then checks
+/// the current dimension's build height and world border and rejects destinations in unloaded
+/// chunks; it never loads a chunk or transfers the player to another dimension.
+pub fn teleport(handle: PlayerHandle, destination: PlayerTeleport) -> SjmlResult<()> {
+    destination.validate()?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let encoded_destination = to_bytes(&destination)?;
+        // SAFETY: both stable buffers remain live during this synchronous bounded host import.
+        let status = unsafe {
+            imported_teleport(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                encoded_destination.as_ptr() as usize as u32 as i32,
+                encoded_destination.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the player teleport")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn read_output<T: StableDecode>(
     capacity: u32,
@@ -167,13 +262,13 @@ fn read_output<T: StableDecode>(
 fn unsupported_target() -> SjmlError {
     SjmlError::new(
         ErrorCode::UnknownErrorCode,
-        "player reads require the wasm32-unknown-unknown target",
+        "player operations require the wasm32-unknown-unknown target",
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::apply_effect;
+    use super::{apply_effect, teleport, PlayerTeleport, MAX_TELEPORT_COORDINATE};
     use crate::{ErrorCode, PlayerHandle};
 
     #[test]
@@ -201,6 +296,60 @@ mod tests {
             apply_effect(handle, "ruby_pack:content/power", 200, 0)
                 .unwrap_err()
                 .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn teleport_destination_rejects_non_finite_and_out_of_range_values() {
+        for destination in [
+            PlayerTeleport {
+                x: f64::NAN,
+                y: 64.0,
+                z: 0.0,
+                yaw: 0.0,
+                pitch: 0.0,
+            },
+            PlayerTeleport {
+                x: MAX_TELEPORT_COORDINATE + 1.0,
+                y: 64.0,
+                z: 0.0,
+                yaw: 0.0,
+                pitch: 0.0,
+            },
+            PlayerTeleport {
+                x: 0.0,
+                y: 64.0,
+                z: 0.0,
+                yaw: 0.0,
+                pitch: 91.0,
+            },
+            PlayerTeleport {
+                x: 0.0,
+                y: 64.0,
+                z: 0.0,
+                yaw: f32::INFINITY,
+                pitch: 0.0,
+            },
+        ] {
+            assert_eq!(
+                teleport(PlayerHandle::new(1, 2, 3, 4).unwrap(), destination)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn teleport_requires_wasm_host_after_local_validation() {
+        assert_eq!(
+            teleport(
+                PlayerHandle::new(1, 2, 3, 4).unwrap(),
+                PlayerTeleport::new(1.0, 64.0, -2.0, 180.0, 20.0).unwrap(),
+            )
+            .unwrap_err()
+            .code(),
             ErrorCode::UnknownErrorCode
         );
     }

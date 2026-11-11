@@ -11,7 +11,8 @@ WebAssembly guest example. It also provides read-only block-entity access and
 typed network channel APIs.
 
 The SDK provides world lookup, block-state snapshots and capability-gated
-block updates, player/entity snapshots, block
+block updates, weather snapshots and controls, player/entity snapshots and
+bounded entity removal, block
 inventory and block-entity snapshots, bounded NBT values, and typed network
 subscriptions/sends. It also provides typed persistent records and schema
 migrations through the storage module, plus runtime HUD and screen closure
@@ -24,7 +25,7 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified.
+unverified. This guide describes SDK 0.43.0 and core ABI 1.35.0.
 Save-scoped storage uses the current server save. Physical-client modules also
 have a separate `ClientProfile` scope backed by per-mod local configuration
 files; they cannot access server save scopes.
@@ -32,14 +33,19 @@ Most callback macros require synchronous functions; use `#[event_async]` for
 non-cancellable notifications or `task::spawn` to start owned async work from a
 synchronous callback. See [Client rendering](RENDERING.md).
 
-SDK 0.42.0 adds `client_chat::{subscribe, layout, set_layout, theme, set_theme,
+SDK 0.43.0 includes `client_chat::{subscribe, layout, set_layout, theme, set_theme,
 unsubscribe}` with typed `ChatLayout`, `ChatLayoutHandle`, `ChatScreenEvent`,
 and `ChatTheme` values. It requires the separately requested and granted
 `client.chat.modify` capability and runs callbacks on the client main thread.
-The same release adds the server-authoritative `PlayerMoved` event and bounded
+It also provides bounded entity removal, same-dimension player teleport,
+loaded-world weather read/write, and vanilla stonecutting recipes. The SDK
+includes the server-authoritative `PlayerMoved` event and bounded
 `inventory::transfer` operation. See [Native client chat](CHAT.md),
 [player movement](PLAYER_MOVED_EVENT.md), and
-[inventory transfers](INVENTORY_MUTATIONS.md) for their contracts.
+[inventory transfers](INVENTORY_MUTATIONS.md) for their contracts; the new
+contracts are [entity removal](ENTITY_REMOVAL.md),
+[player teleport](PLAYER_TELEPORT.md), [world weather](WORLD_WEATHER.md), and
+[stonecutting recipes](STONECUTTING.md).
 
 Client modules can subscribe to bounded active-screen mouse-click, key-press,
 and typed-character events through `screen_input::subscribe`. This requires a
@@ -106,7 +112,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.42.0"
+sjml-sdk = "0.43.0"
 ```
 
 For development against this checkout, use
@@ -119,34 +125,34 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.42.0/sjml/). The exact
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.43.0/sjml/). The exact
 function signatures and public types there are the reference for Rust callers.
 
 | Module | Main API |
 | --- | --- |
-| [`abi`](https://docs.rs/sjml-sdk/0.42.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
-| [`batch`](https://docs.rs/sjml-sdk/0.42.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
-| [`block_entity`](https://docs.rs/sjml-sdk/0.42.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
-| [`client_chat`](https://docs.rs/sjml-sdk/0.42.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
-| [`client_input`](https://docs.rs/sjml-sdk/0.42.0/sjml/client_input/) | Global key and mouse-button events when no screen is open. |
-| [`entity`](https://docs.rs/sjml-sdk/0.42.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, and effect application. |
-| [`entity_data`](https://docs.rs/sjml-sdk/0.42.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.42.0/sjml/events/) | Typed lifecycle, world, player movement, entity, inventory, and resource events. |
-| [`gl`](https://docs.rs/sjml-sdk/0.42.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
-| [`host`](https://docs.rs/sjml-sdk/0.42.0/sjml/host/) | ABI version query and host logging. |
-| [`inventory`](https://docs.rs/sjml-sdk/0.42.0/sjml/inventory/) | Detached snapshots, component updates, and bounded slot-to-slot transfers. |
-| [`menu`](https://docs.rs/sjml-sdk/0.42.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
-| [`network`](https://docs.rs/sjml-sdk/0.42.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
-| [`player`](https://docs.rs/sjml-sdk/0.42.0/sjml/player/) | Online player handles, detached snapshots, and supported effect operations. |
-| [`recipe`](https://docs.rs/sjml-sdk/0.42.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
-| [`registry`](https://docs.rs/sjml-sdk/0.42.0/sjml/registry/) | Static item, block, entity, fluid, recipe, sound, particle, effect, and related declarations. |
-| [`render`](https://docs.rs/sjml-sdk/0.42.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
-| [`screen_input`](https://docs.rs/sjml-sdk/0.42.0/sjml/screen_input/) | Bounded mouse, key, and text events delivered to the active screen. |
-| [`storage`](https://docs.rs/sjml-sdk/0.42.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
-| [`task`](https://docs.rs/sjml-sdk/0.42.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
-| [`widgets`](https://docs.rs/sjml-sdk/0.42.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
-| [`world`](https://docs.rs/sjml-sdk/0.42.0/sjml/world/) | Loaded-world handles, block-state snapshots, and capability-gated block updates. |
-| [`prelude`](https://docs.rs/sjml-sdk/0.42.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
+| [`abi`](https://docs.rs/sjml-sdk/0.43.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
+| [`batch`](https://docs.rs/sjml-sdk/0.43.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
+| [`block_entity`](https://docs.rs/sjml-sdk/0.43.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
+| [`client_chat`](https://docs.rs/sjml-sdk/0.43.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
+| [`client_input`](https://docs.rs/sjml-sdk/0.43.0/sjml/client_input/) | Global key and mouse-button events when no screen is open. |
+| [`entity`](https://docs.rs/sjml-sdk/0.43.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, effect application, and bounded discard. |
+| [`entity_data`](https://docs.rs/sjml-sdk/0.43.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
+| [`events`](https://docs.rs/sjml-sdk/0.43.0/sjml/events/) | Typed lifecycle, world, player movement, entity, inventory, and resource events. |
+| [`gl`](https://docs.rs/sjml-sdk/0.43.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
+| [`host`](https://docs.rs/sjml-sdk/0.43.0/sjml/host/) | ABI version query and host logging. |
+| [`inventory`](https://docs.rs/sjml-sdk/0.43.0/sjml/inventory/) | Detached snapshots, component updates, and bounded slot-to-slot transfers. |
+| [`menu`](https://docs.rs/sjml-sdk/0.43.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
+| [`network`](https://docs.rs/sjml-sdk/0.43.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
+| [`player`](https://docs.rs/sjml-sdk/0.43.0/sjml/player/) | Online player handles, detached snapshots, effects, and same-dimension teleport. |
+| [`recipe`](https://docs.rs/sjml-sdk/0.43.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
+| [`registry`](https://docs.rs/sjml-sdk/0.43.0/sjml/registry/) | Static item, block, entity, fluid, shaped/shapeless/cooking/stonecutting recipes, and related declarations. |
+| [`render`](https://docs.rs/sjml-sdk/0.43.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
+| [`screen_input`](https://docs.rs/sjml-sdk/0.43.0/sjml/screen_input/) | Bounded mouse, key, and text events delivered to the active screen. |
+| [`storage`](https://docs.rs/sjml-sdk/0.43.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
+| [`task`](https://docs.rs/sjml-sdk/0.43.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
+| [`widgets`](https://docs.rs/sjml-sdk/0.43.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
+| [`world`](https://docs.rs/sjml-sdk/0.43.0/sjml/world/) | Loaded-world handles, block snapshots, bounded updates, and weather state/control. |
+| [`prelude`](https://docs.rs/sjml-sdk/0.43.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
 
 Stable codecs (`StableEncode`, `StableDecode`, `Encoder`, and `Decoder`) are
 re-exported at the crate root; the implementation module is intentionally
@@ -880,6 +886,15 @@ registry::register_shaped_recipe(
         ],
     },
 )?;
+
+registry::register_stonecutting_recipe(
+    "ruby_slab",
+    registry::StonecuttingRecipeDefinition {
+        ingredient: RecipeIngredient::tag("c:stones/ruby"),
+        output_item: "ruby_slab".into(),
+        output_count: 2,
+    },
+)?;
 ```
 
 Custom registry tags are included as package data files under
@@ -893,12 +908,23 @@ An unqualified item or tag ID refers to the declaring module; use a namespaced
 ID such as `minecraft:iron_ingot` or `c:ingots/iron` for vanilla or another
 mod's content. The host writes
 these declarations to an always-enabled generated server data pack, where
-Minecraft's vanilla `minecraft:crafting_shapeless` and
-`minecraft:crafting_shaped` serializers load them on resource reload. Shapeless
+Minecraft's vanilla `minecraft:crafting_shapeless`,
+`minecraft:crafting_shaped`, and `minecraft:stonecutting` serializers load them
+on resource reload. Shapeless
 recipes have one to nine item or tag ingredients. Shaped recipes use one to
 three rows of equal width with one to three cells; uppercase letters select
 ingredients and spaces mark empty cells. Every used letter must have exactly
-one item or tag binding. Both families yield one to 64 items. Use
+one item or tag binding. Both crafting families yield one to 64 items. A
+stonecutting recipe accepts one item or tag input and yields one to 64 items.
+Its path is 1–128 lowercase ASCII characters; item and encoded ingredient IDs
+are limited to 256 ASCII bytes, including the `#` prefix on a tag. Vanilla
+recipe IDs are unique across shapeless, shaped, cooking, and
+stonecutting families; registration has a 256-entry aggregate per-module
+content limit and a 4,096-recipe-declaration global limit. See
+[stonecutting recipes](STONECUTTING.md) for its API, permission, and ABI
+details. The Rust function is `registry::register_stonecutting_recipe(path:
+&str, definition: registry::StonecuttingRecipeDefinition) -> SjmlResult<()>`.
+Use
 `RecipeIngredient::item("minecraft:stick")` or
 `RecipeIngredient::tag("c:ingots/ruby")` for an explicit ingredient kind; a
 string converted with `.into()` is an item ID. Cooking recipes are staged
@@ -1284,7 +1310,8 @@ sine rotation. Live client rendering remains unverified. See
 
 Request `world.read` in the module manifest and grant it to the same package/module
 in `config/sjml-permissions.toml`. Block updates additionally require a request
-and grant for `world.write`. The `world` module is available at the crate root
+and grant for `world.write`; weather changes also require both capabilities.
+The `world` module is available at the crate root
 and through the prelude:
 
 ```rust
@@ -1302,6 +1329,40 @@ fn read_overworld() -> SjmlResult<Option<i64>> {
     Ok(Some(time))
 }
 ```
+
+Weather is read as a detached value and changed with a bounded vanilla preset:
+
+```rust
+fn inspect_and_clear_weather(world: WorldHandle) -> SjmlResult<()> {
+    let state = world::weather(world)?;
+    if state.raining || state.thundering {
+        world::set_weather(world, world::WeatherCondition::Clear, 24_000)?;
+    }
+    Ok(())
+}
+```
+
+The Rust signatures are `world::weather(handle: WorldHandle) ->
+SjmlResult<world::WeatherSnapshot>` and `world::set_weather(handle: WorldHandle,
+condition: world::WeatherCondition, duration_ticks: u32) -> SjmlResult<()>`.
+`WeatherSnapshot` contains `raining`, `thundering`, `clear_time`, `rain_time`,
+and `thunder_time`; the latter three are remaining ticks for their corresponding
+vanilla weather state. Timers come from the host's non-negative Java `int`
+values, and the SDK rejects a returned value above `i32::MAX`.
+`WeatherCondition` is `Clear`, `Rain`, or `Thunder`.
+Duration must be 1–1,728,000 ticks. `weather` requires `world.read`; the setter
+requires both requested and granted `world.read` and `world.write`. Calls are
+synchronous on the owning logical-server thread, require an already-loaded
+dimension, never load dimensions or chunks, and are denied during static
+registration and on clients. The import output is exactly 18 bytes:
+little-endian `u32 schema=1`, strict `u8` booleans `raining` and `thundering`,
+then little-endian `u32 clear_time`, `rain_time`, and `thunder_time`. The setter
+imports the 24-byte world handle followed by `i32 condition` (`0=clear`,
+`1=rain`, `2=thunder`) and `i32 duration_ticks`. The exact imports are
+`sjml_world_v1.weather(handle_ptr: i32, handle_len: i32, output_ptr: i32,
+output_capacity: i32) -> i32` and `sjml_world_v1.set_weather(handle_ptr: i32,
+handle_len: i32, condition: i32, duration_ticks: i32) -> i32`. See
+[the weather API reference](WORLD_WEATHER.md).
 
 `get` accepts canonical `namespace:path` IDs and never loads worlds; an invalid
 ID returns `InvalidArgument`, while an unknown/unloaded world returns `None`.
@@ -1448,7 +1509,8 @@ inside build height and in an already loaded chunk.
 Request `entity.read` in the module manifest and grant it to the same
 package/module in `config/sjml-permissions.toml`. Player snapshots do not
 require `world.read`; applying a status effect additionally requires the
-separate `entity.effect.apply` grant:
+separate `entity.effect.apply` grant, while teleporting requires
+`player.teleport` in addition to `entity.read`:
 
 ```rust
 use sjml::prelude::*;
@@ -1473,6 +1535,20 @@ current `x`, `y`, and `z` coordinates as `f64`. Handles are scoped to one
 active module and login session. They survive respawn and dimension changes,
 then become stale as logout begins. Module/runtime close invalidates all
 remaining handles.
+
+`player::teleport(handle: PlayerHandle, destination: player::PlayerTeleport) ->
+SjmlResult<()>` sends an authoritative same-dimension move. Create the
+destination with `player::PlayerTeleport::new(x, y, z, yaw, pitch)`. Coordinates must
+be finite and each within ±29,999,984, yaw finite within ±36,000 degrees, and
+pitch finite within -90..=90. The host also checks the current dimension's
+build height, world border, and loaded status of the destination chunk. The
+API does not load chunks or transfer dimensions. Its host import is
+`sjml_player_v1.teleport(handle_ptr, handle_len, destination_ptr,
+destination_len) -> i32`; the handle is 24 bytes and the destination is exactly
+36 bytes: little-endian `u32 schema=1`, `f64 x`, `f64 y`, `f64 z`, `f32 yaw`,
+`f32 pitch`. Calls run on the owning server thread and are denied during
+static registration and in client contexts. See
+[player teleport](PLAYER_TELEPORT.md).
 
 Calls run synchronously on the owning logical-server thread. Before server
 binding, including early `mod_init`, and in client instances, enumeration is
@@ -1532,6 +1608,25 @@ entity::apply_effect(target, "ruby_pack:content/power", 200, 0)?;
 Every call revalidates the entity handle on the server thread. Duration is
 1–72,000 ticks and amplifier is 0–255. Players and non-living entities are
 rejected; the API does not spawn entities or schedule delayed effects.
+
+To remove one loaded non-player entity, also request and receive
+`entity.remove`:
+
+```rust
+fn remove_entity(handle: EntityHandle) -> SjmlResult<()> {
+    entity::discard(handle)
+}
+```
+
+The Rust API is `entity::discard(handle: EntityHandle) -> SjmlResult<()>`.
+The import `sjml_entity_v1.discard(handle_ptr: i32, handle_len: i32) -> i32`
+accepts exactly the standard 24-byte entity handle. The operation requires
+both `entity.read` and `entity.remove`, validates the handle on the owning
+server thread, rejects player or unloaded-entity handles, and immediately
+revokes the handle after successful discard. Minecraft's discard behavior
+does not run death behavior or create drops. It never loads chunks. Static
+registration and client calls are denied. See
+[entity removal](ENTITY_REMOVAL.md).
 
 ## Entity-attached opaque data
 

@@ -6,10 +6,12 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.34.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.35.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering.
+incompatible. Build metadata does not affect version ordering. ABI 1.35.0 adds
+bounded entity removal, same-dimension player teleport, loaded-world weather
+read/write, and vanilla stonecutting recipe declarations.
 
 ## Guest instruction budget
 
@@ -363,6 +365,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_shapeless_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_lines_ptr: i32, ingredient_lines_len: i32) -> i32` | Stage a bounded shapeless recipe with one to nine item or item-tag ingredients. |
 | `sjml_registry_v1.register_shaped_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, pattern_ptr: i32, pattern_len: i32, key_pairs_ptr: i32, key_pairs_len: i32) -> i32` | Stage a bounded 1–3 by 1–3 shaped recipe with uppercase-symbol item or item-tag bindings. |
 | `sjml_registry_v1.register_cooking_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_token_ptr: i32, ingredient_token_len: i32, kind: i32, experience_bits: i32, cooking_time: i32) -> i32` | Stage a vanilla cooking recipe with an item or item-tag input. |
+| `sjml_registry_v1.register_stonecutting_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_token_ptr: i32, ingredient_token_len: i32) -> i32` | Stage one vanilla stonecutting recipe with one item or item-tag input. |
 | `sjml_registry_v1.register_recipe_serializer` | `(path_ptr: i32, path_len: i32) -> i32` | Register a guest callback serializer for package-owned crafting recipe JSON. |
 | `sjml_registry_v1.register_particle` | `(path_ptr: i32, path_len: i32) -> i32` | Stage a simple particle type using the vanilla `minecraft:generic_0` sprite fallback. |
 | `sjml_registry_v1.register_particle_visual` | `(path_ptr: i32, path_len: i32, texture_ptr: i32, texture_len: i32, scale_bits: i32) -> i32` | Stage a simple particle with a package-owned `particle/` atlas resource and a scale from 0.05 through 4.0. |
@@ -471,10 +474,23 @@ The block and fluid registry events can arrive in either order; the host keeps
 their supplier links valid and emits the bucket only after both phases. If
 another mod owns the generated `_block` ID, the host uses `_liquid` when that
 fallback ID is available.
-Shapeless, shaped, and cooking recipes are emitted into an always-enabled generated
+Shapeless, shaped, cooking, and stonecutting recipes are emitted into an always-enabled generated
 server data pack and decoded by Minecraft's vanilla
 `minecraft:crafting_shapeless`, `minecraft:crafting_shaped`, `minecraft:smelting`,
-`minecraft:blasting`, `minecraft:smoking`, and `minecraft:campfire_cooking` serializers.
+`minecraft:blasting`, `minecraft:smoking`, `minecraft:campfire_cooking`, and
+`minecraft:stonecutting` serializers. Stonecutting takes exactly one item or
+item-tag ingredient; its path is 1–128 lowercase ASCII content-path characters,
+item and encoded ingredient IDs are at most 256 UTF-8 bytes (including `#` for
+a tag), and output count is 1–64. Vanilla recipe IDs must be unique across
+shapeless, shaped, cooking, and stonecutting families. The host limits recipe
+declarations to 256 aggregate content entries per module and 4,096 recipes
+globally. See [stonecutting recipes](STONECUTTING.md) for the Rust helper and
+exact token convention.
+The path, output-item ID, and ingredient token are passed as separate UTF-8
+pointer/length spans; a tag token includes its leading `#`. The declaration
+requires requested and granted `content.register` and is accepted only during
+`sjml_v1_mod_register`; using it outside that phase returns
+`PERMISSION_DENIED`.
 Ingredient tokens are ASCII resource IDs: an item is written as `namespace:path`
 or `path`, and an item tag is written as `#namespace:path` or `#path`. An
 unqualified path resolves inside the declaring package and module; a namespaced
@@ -828,7 +844,8 @@ server instances fail closed.
 ABI v1 provides the following synchronous `sjml_world_v1` imports. All parameters
 and statuses are `i32`; zero is success and nonzero values use the error table.
 World reads require the requested and granted `world.read` capability. Block
-mutation and particle spawning additionally require requested and granted `world.write`. Static
+mutation, weather changes, and particle spawning additionally require
+requested and granted `world.write`. Static
 registration binds the signatures but every call during `mod_register` returns
 `PERMISSION_DENIED`.
 
@@ -845,6 +862,8 @@ registration binds the signatures but every call during `mod_register` returns
 | `spawn_entity` | `query_ptr, query_len` | Spawn one registered, non-player entity from a bounded schema-v1 world/type/position record; status only |
 | `spawn_particle` | `handle_ptr, handle_len, x, y, z, particle_id_ptr, particle_id_len` | Spawn one registered simple particle at the center of a loaded block; status only |
 | `play_sound` | `handle_ptr, handle_len, x, y, z, sound_id_ptr, sound_id_len, volume_bits, pitch_bits` | Play one registered sound at the center of a loaded block; status only |
+| `weather` | `(handle_ptr: i32, handle_len: i32, output_ptr: i32, output_capacity: i32) -> i32` | Write an 18-byte schema-v1 weather snapshot |
+| `set_weather` | `(handle_ptr: i32, handle_len: i32, condition: i32, duration_ticks: i32) -> i32` | Set clear, rain, or thunder weather; status only |
 
 `handle_len` must be 24. `get` takes raw UTF-8, limited to 65,536 bytes,
 and requires a canonical `namespace:path` (no implicit `minecraft:` namespace).
@@ -859,7 +878,18 @@ The complete declared capacity is bounds checked. Only the encoded value is
 written; the remaining capacity is padding, not part of its stable encoding.
 Insufficient capacity returns `PAYLOAD_TOO_LARGE` before handle allocation.
 The SDK allocates 25, 24,580, 65,540 and 8 bytes respectively. The string limit
-remains 65,536 UTF-8 bytes.
+remains 65,536 UTF-8 bytes. `weather` requires the 24-byte world handle and an
+output capacity of at least 18 bytes. Its output is exactly little-endian
+`u32 schema=1`, `u8 raining` (0 or 1), `u8 thundering` (0 or 1), then
+`u32 clear_time`, `u32 rain_time`, and `u32 thunder_time`, each timer in ticks.
+The SDK rejects returned timer values above `i32::MAX`, matching the host's
+non-negative Java `int` timers. `world::weather` requires requested and granted
+`world.read`; `set_weather` requires both `world.read` and `world.write`. Its
+condition tag is `0=clear`, `1=rain`, or `2=thunder`, and duration is
+1–1,728,000 ticks inclusive. Both require an already-loaded server dimension,
+run synchronously on its owning server thread, and never load dimensions or
+chunks. Static-registration and client calls fail closed with
+`PERMISSION_DENIED`. See [world weather](WORLD_WEATHER.md).
 
 Each active module owns one world handle registry with a 1,024-live-handle
 quota. `get` and `loaded` share handles. `loaded` sorts all currently loaded
@@ -968,6 +998,7 @@ signatures but calls return `PERMISSION_DENIED`.
 | `online` | `out_ptr, out_capacity` | Stable `Vec<PlayerHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `PlayerSnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `profile_name`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to the current player for that login session; status only |
+| `teleport` | `(handle_ptr: i32, handle_len: i32, destination_ptr: i32, destination_len: i32) -> i32` | Teleport the current player session within its current dimension; status only |
 
 `handle_len` must be 24. UUIDs are canonical lowercase UUID text, and
 dimension IDs are canonical `namespace:path`. Each stable string is limited to
@@ -989,6 +1020,17 @@ ticks, and amplifier of 0–255. The host resolves the current `ServerPlayer`
 from the login-session handle on the server thread, so a handle remains valid
 through respawn but becomes invalid when logout begins. Static registration is
 denied; this operation does not load a world or expose player inventory.
+`teleport` requires both requested and granted `entity.read` and
+`player.teleport`. Its handle is exactly 24 bytes. `destination_len` must be
+exactly 36 and `destination_ptr` points to little-endian `u32 schema=1`,
+`f64 x`, `f64 y`, `f64 z`, `f32 yaw`, `f32 pitch`, in that order. Coordinates
+must be finite and each axis within ±29,999,984; yaw must be finite within
+±36,000 degrees; pitch must be finite within -90..=90 degrees. The host also
+checks the current dimension's build height, world border, and that the target
+chunk is already loaded. It does not load chunks or change dimensions. Calls
+require an active server-player session and the owning server thread. Static
+registration and client calls return `PERMISSION_DENIED`. See
+[player teleport](PLAYER_TELEPORT.md).
 
 ## Loaded non-player entities
 
@@ -1005,6 +1047,7 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | `loaded` | `out_ptr, out_capacity` | Stable `Vec<EntityHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `EntitySnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `entity_type_id`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to a loaded living non-player entity; status only |
+| `discard` | `(handle_ptr: i32, handle_len: i32) -> i32` | Discard one loaded non-player entity and revoke its handle; status only |
 
 `handle_len` must be 24. `uuid` is canonical lowercase UUID text;
 `entity_type_id` and `dimension_id` are canonical `namespace:path` IDs. Each
@@ -1032,6 +1075,14 @@ synchronous on the owning server thread; clients and pre-server-binding
 contexts enumerate an empty vector. Snapshot values expose no Minecraft object,
 NBT, components, or mutable references; `apply_effect` is the separate bounded
 mutation operation and requires its own capability.
+`discard` requires both requested and granted `entity.read` and
+`entity.remove`; it takes an exact 24-byte module-scoped entity handle. The
+operation runs on the logical-server thread, revalidates that the entity is
+still loaded and not a player, then calls Minecraft's discard operation. It
+does not execute death behavior or produce drops. The handle is revoked
+immediately, so later use returns `STALE_HANDLE`. It never loads chunks. Static
+registration and client calls return `PERMISSION_DENIED`. See
+[entity removal](ENTITY_REMOVAL.md).
 
 ## Non-player entity attachments
 
