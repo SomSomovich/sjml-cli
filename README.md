@@ -58,7 +58,7 @@ the generated project.
 
 ## Documentation
 
-- [Rust SDK guide](docs/SDK_GUIDE.md) and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.40.0/sjml/)
+- [Rust SDK guide](docs/SDK_GUIDE.md) and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.41.0/sjml/)
 - [WebAssembly ABI v1](docs/ABI.md)
 - [Project configuration and capability grants](docs/PROJECT_CONFIGURATION.md)
 - [Complete manifest schema](docs/MANIFEST_SCHEMA.md) and [`.sjml` archive format](docs/FORMAT.md)

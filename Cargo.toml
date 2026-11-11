@@ -23,14 +23,14 @@ members = ["sjml-sdk", "sjml-macros"]
 resolver = "2"
 
 [workspace.package]
-version = "0.40.0"
+version = "0.41.0"
 edition = "2021"
 license = "MIT"
 rust-version = "1.85"
 repository = "https://github.com/SomSomovich/sjml-cli"
 
 [workspace.dependencies]
-sjml-macros = { path = "sjml-macros", version = "0.40.0" }
+sjml-macros = { path = "sjml-macros", version = "0.41.0" }
 
 [[bin]]
 name = "sjml-cli"

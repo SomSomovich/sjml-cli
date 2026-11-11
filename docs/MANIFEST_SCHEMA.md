@@ -35,7 +35,7 @@ their limits, see the [`.sjml` package format](FORMAT.md). For the files made by
 
 | Key | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `abi` | string | yes | ABI compatibility range. The host currently implements ABI `1.32.0`. |
+| `abi` | string | yes | ABI compatibility range. The host currently implements ABI `1.33.0`. |
 | `minecraft` | string | no | Minecraft compatibility range. |
 | `sjml` | string | no | SJML loader compatibility range. |
 

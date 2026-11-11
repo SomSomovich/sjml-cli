@@ -93,6 +93,7 @@ compile_error!("SJML guest modules require wasm32-unknown-unknown; WASI targets 
 pub mod abi;
 pub mod batch;
 pub mod block_entity;
+pub mod client_chat;
 pub mod client_input;
 pub mod entity;
 pub mod entity_data;
@@ -123,6 +124,7 @@ pub use abi::{
 };
 pub use batch::{Batch, BatchValue, CallResult};
 pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
+pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent};
 pub use client_input::{ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle};
 pub use entity::EntitySnapshot;
 pub use error::{ErrorCode, SjmlError, SjmlResult};
@@ -178,6 +180,7 @@ pub mod prelude {
     };
     pub use crate::batch::{self, Batch, BatchValue, CallResult};
     pub use crate::block_entity::{self, BlockEntity, BlockEntitySnapshot, NbtValue};
+    pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent};
     pub use crate::client_input;
     pub use crate::client_input::{
         ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,

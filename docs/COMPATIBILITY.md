@@ -15,10 +15,11 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host ABI is `1.32.0`. ABI compatibility is major-version based:
+The current host ABI is `1.33.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.32.0` therefore accepts
-`1.0.x` through `1.32.0`, but rejects a later contract it does not know.
+minor/patch version is equal or newer. A host at ABI `1.33.0` therefore accepts
+`1.0.x` through `1.33.0` (including existing ABI 1.32 guests), but rejects a
+later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
 
@@ -34,10 +35,17 @@ use separate `entity.data.read` and `entity.data.write` grants and are stored in
 the entity's persistent NBT. World reads do not load dimensions or chunks;
 block-state batches are limited to 1,024 positions and 1 MiB of encoded output.
 
+SDK 0.41.0 adds client-only native chat layout control under ABI 1.33.0. It
+requires the separately requested and granted `client.chat.modify` capability.
+Local layout persistence uses the existing client-profile storage API. See
+[Native client chat layout](CHAT.md). Live-client wrapping, hit testing, input,
+suggestions, and persistence still require verification.
+
 Client modules have HUD, bounded typed OpenGL, camera-relative world-render,
-active-screen input, and global no-screen input APIs loaded through client-only
-integration. Guest entities and block entities can render bounded colored or
-package-textured cuboid models with a host-evaluated sine rotation. Package
+active-screen input, native chat layout control, and global no-screen input APIs
+loaded through client-only integration. Guest entities and block entities can
+render bounded colored or package-textured cuboid models with a host-evaluated
+sine rotation. Package
 assets beneath `assets/<package-id>/` are mounted through an always-enabled
 generated resource pack, including `sounds.json`/OGG files, particle sprites,
 and model textures. Unit and host tests cover the render contracts, but no

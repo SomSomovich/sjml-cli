@@ -6,7 +6,7 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.32.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.33.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
 incompatible. Build metadata does not affect version ordering.
@@ -742,6 +742,51 @@ bounded to ±1,048,576; buttons are 0–31; key codes are -1–65,535; scan code
 are 0–65,535; key modifier bits are limited to the six standard GLFW flags.
 Mouse events report Shift, Control, and Alt. A
 module may hold 256 active input subscriptions.
+
+## Native client chat layout imports
+
+ABI 1.33.0 adds client-only `sjml_client_chat_v1` imports. Each operation
+requires requested and currently granted `client.chat.modify`, the client main
+thread, and runtime phase. Static registration and dedicated-server instances
+fail closed. Only the active exclusive controller can query or update geometry.
+
+| Import | WASM signature |
+| --- | --- |
+| `subscribe` | `(i64 callback_id, i32 output_handle_ptr) -> i32` |
+| `unsubscribe` | `(i32 handle_ptr, i32 handle_len) -> i32` |
+| `layout` | `(i32 handle_ptr, i32 handle_len, i32 output_layout_ptr) -> i32` |
+| `set_layout` | `(i32 handle_ptr, i32 handle_len, i32 layout_ptr, i32 layout_len, i32 output_layout_ptr) -> i32` |
+
+Zero status means success; nonzero is a stable ABI error. Subscription output
+is the existing 24-byte ResourceHandle encoding with handle kind `13`.
+Handle inputs must be exactly 24 bytes. Layout inputs and outputs are exactly
+16 bytes: four little-endian IEEE-754 `f32` values in order `x,y,width,height`.
+Coordinates must be finite and dimensions finite positive. The host returns a
+rectangle clamped to the viewport and a 120×56 minimum reduced to fit smaller
+viewports. A competing controller returns `REGISTRATION_LIMIT_REACHED` (34).
+Runtime closure or unsubscription invalidates the controller and callback route.
+
+The guest exports `sjml_v1_client_chat_dispatch(pointer:u32, length:u32)->u64`.
+It uses the standard packed ByteSpan response framing: success contains one
+stable bool byte; failure contains the standard stable error response. The
+input is schema `u32=1`, callback ID `u64`, event tag `u8`, then:
+
+| Tag | Variant | Body in exact field order |
+| --- | --- | --- |
+| 0 | Opened | `f32 viewport_width, viewport_height, x, y, width, height` |
+| 1 | Closed | `f32 viewport_width, viewport_height, x, y, width, height` |
+| 2 | ViewportResized | `f32 viewport_width, viewport_height, x, y, width, height` |
+| 3 | MousePressed | `f32 mouse_x, mouse_y; u8 button` |
+| 4 | MouseDragged | `f32 mouse_x, mouse_y; u8 button; f32 delta_x, delta_y` |
+| 5 | MouseReleased | `f32 mouse_x, mouse_y; u8 button` |
+
+All fields use stable little-endian encoding. No trailing bytes are accepted.
+Viewport dimensions are finite positive and at most 1,048,576. Pointer
+coordinates and deltas are finite within ±1,048,576; buttons are 0–31. Only
+left-button (`0`) grip events may return consumed; other events are observational.
+Callbacks are synchronous and reject reentrance with `SERVICE_BUSY` (31).
+See [Native client chat layout](CHAT.md) for typed APIs, persistence, and the
+live-client verification boundary. Existing ABI 1.32 guests remain supported.
 
 ## Global client input imports
 

@@ -32,6 +32,12 @@ Most callback macros require synchronous functions; use `#[event_async]` for
 non-cancellable notifications or `task::spawn` to start owned async work from a
 synchronous callback. See [Client rendering](RENDERING.md).
 
+SDK 0.41.0 adds `client_chat::{subscribe, layout, set_layout, unsubscribe}`
+with typed `ChatLayout`, `ChatLayoutHandle`, and `ChatScreenEvent` values. It
+requires the separately requested and granted `client.chat.modify` capability
+and runs callbacks on the client main thread. See [Native client chat layout](CHAT.md)
+for the ABI contract, clamping, lifecycle, and client-profile persistence.
+
 Client modules can subscribe to bounded active-screen mouse-click, key-press,
 and typed-character events through `screen_input::subscribe`. This requires a
 separately requested and granted `client.input` capability; callbacks run on
@@ -97,7 +103,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.40.0"
+sjml-sdk = "0.41.0"
 ```
 
 For development against this checkout, use
@@ -110,33 +116,34 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.40.0/sjml/). The exact
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.41.0/sjml/). The exact
 function signatures and public types there are the reference for Rust callers.
 
 | Module | Main API |
 | --- | --- |
-| [`abi`](https://docs.rs/sjml-sdk/0.40.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
-| [`batch`](https://docs.rs/sjml-sdk/0.40.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
-| [`block_entity`](https://docs.rs/sjml-sdk/0.40.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
-| [`client_input`](https://docs.rs/sjml-sdk/0.40.0/sjml/client_input/) | Global key and mouse-button events when no screen is open. |
-| [`entity`](https://docs.rs/sjml-sdk/0.40.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, and effect application. |
-| [`entity_data`](https://docs.rs/sjml-sdk/0.40.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.40.0/sjml/events/) | Typed lifecycle, world, player, entity, inventory, and resource events. |
-| [`gl`](https://docs.rs/sjml-sdk/0.40.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
-| [`host`](https://docs.rs/sjml-sdk/0.40.0/sjml/host/) | ABI version query and host logging. |
-| [`inventory`](https://docs.rs/sjml-sdk/0.40.0/sjml/inventory/) | Detached snapshots of loaded block inventories and bounded item updates. |
-| [`menu`](https://docs.rs/sjml-sdk/0.40.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
-| [`network`](https://docs.rs/sjml-sdk/0.40.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
-| [`player`](https://docs.rs/sjml-sdk/0.40.0/sjml/player/) | Online player handles, detached snapshots, and supported effect operations. |
-| [`recipe`](https://docs.rs/sjml-sdk/0.40.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
-| [`registry`](https://docs.rs/sjml-sdk/0.40.0/sjml/registry/) | Static item, block, entity, fluid, recipe, sound, particle, effect, and related declarations. |
-| [`render`](https://docs.rs/sjml-sdk/0.40.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
-| [`screen_input`](https://docs.rs/sjml-sdk/0.40.0/sjml/screen_input/) | Bounded mouse, key, and text events delivered to the active screen. |
-| [`storage`](https://docs.rs/sjml-sdk/0.40.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
-| [`task`](https://docs.rs/sjml-sdk/0.40.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
-| [`widgets`](https://docs.rs/sjml-sdk/0.40.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
-| [`world`](https://docs.rs/sjml-sdk/0.40.0/sjml/world/) | Loaded-world handles, block-state snapshots, and capability-gated block updates. |
-| [`prelude`](https://docs.rs/sjml-sdk/0.40.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
+| [`abi`](https://docs.rs/sjml-sdk/0.41.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
+| [`batch`](https://docs.rs/sjml-sdk/0.41.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
+| [`block_entity`](https://docs.rs/sjml-sdk/0.41.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
+| [`client_chat`](https://docs.rs/sjml-sdk/0.41.0/sjml/client_chat/) | Native chat layout lifecycle, geometry, and pointer callbacks. |
+| [`client_input`](https://docs.rs/sjml-sdk/0.41.0/sjml/client_input/) | Global key and mouse-button events when no screen is open. |
+| [`entity`](https://docs.rs/sjml-sdk/0.41.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, and effect application. |
+| [`entity_data`](https://docs.rs/sjml-sdk/0.41.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
+| [`events`](https://docs.rs/sjml-sdk/0.41.0/sjml/events/) | Typed lifecycle, world, player, entity, inventory, and resource events. |
+| [`gl`](https://docs.rs/sjml-sdk/0.41.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
+| [`host`](https://docs.rs/sjml-sdk/0.41.0/sjml/host/) | ABI version query and host logging. |
+| [`inventory`](https://docs.rs/sjml-sdk/0.41.0/sjml/inventory/) | Detached snapshots of loaded block inventories and bounded item updates. |
+| [`menu`](https://docs.rs/sjml-sdk/0.41.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
+| [`network`](https://docs.rs/sjml-sdk/0.41.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
+| [`player`](https://docs.rs/sjml-sdk/0.41.0/sjml/player/) | Online player handles, detached snapshots, and supported effect operations. |
+| [`recipe`](https://docs.rs/sjml-sdk/0.41.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
+| [`registry`](https://docs.rs/sjml-sdk/0.41.0/sjml/registry/) | Static item, block, entity, fluid, recipe, sound, particle, effect, and related declarations. |
+| [`render`](https://docs.rs/sjml-sdk/0.41.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
+| [`screen_input`](https://docs.rs/sjml-sdk/0.41.0/sjml/screen_input/) | Bounded mouse, key, and text events delivered to the active screen. |
+| [`storage`](https://docs.rs/sjml-sdk/0.41.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
+| [`task`](https://docs.rs/sjml-sdk/0.41.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
+| [`widgets`](https://docs.rs/sjml-sdk/0.41.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
+| [`world`](https://docs.rs/sjml-sdk/0.41.0/sjml/world/) | Loaded-world handles, block-state snapshots, and capability-gated block updates. |
+| [`prelude`](https://docs.rs/sjml-sdk/0.41.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
 
 Stable codecs (`StableEncode`, `StableDecode`, `Encoder`, and `Decoder`) are
 re-exported at the crate root; the implementation module is intentionally
