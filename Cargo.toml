@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
+authors = ["Som_Somovich"]
 description = "Build, validate, and package SJML Rust guest projects"
 repository = "https://github.com/SomSomovich/sjml-cli"
 readme = "README.md"
