@@ -513,6 +513,18 @@ pub fn init(path: &Path, id: Option<&str>, sdk: Option<&Path>) -> Result<()> {
             .map_err(|e| io("create generated directory", e))?;
         fs::write(destination, contents).map_err(|e| io("write generated file", e))?;
     }
+    let output = Command::new("git")
+        .args(["init", "--quiet", "--initial-branch=master"])
+        .current_dir(temp.path())
+        .output()
+        .map_err(|e| Error::new("E_INIT", format!("cannot run git init: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::new(
+            "E_INIT",
+            format!("git init failed: {}", stderr.trim()),
+        ));
+    }
     // The destination was checked above; refuse a concurrent directory creation.
     fs::create_dir(path)
         .map_err(|e| Error::new("E_INIT", format!("cannot reserve {}: {e}", path.display())))?;
@@ -521,6 +533,10 @@ pub fn init(path: &Path, id: Option<&str>, sdk: Option<&Path>) -> Result<()> {
         fs::rename(child.path(), path.join(child.file_name()))
             .map_err(|e| io("publish generated project", e))?;
     }
-    println!("initialized {} at {}", name, path.display());
+    println!(
+        "initialized {} at {} (git branch: master)",
+        name,
+        path.display()
+    );
     Ok(())
 }

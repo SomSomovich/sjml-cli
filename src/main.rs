@@ -25,7 +25,7 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a Rust guest project from a name or destination path.
+    /// Create a Rust guest project and initialize Git on master.
     Init {
         #[arg(
             value_name = "NAME_OR_PATH",

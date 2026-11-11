@@ -161,6 +161,21 @@ fn init_accepts_a_name_or_relative_destination_path() {
 }
 
 #[test]
+fn init_creates_a_git_repository_with_master_as_the_initial_branch() {
+    let tmp = sandbox();
+    ok(run_from(tmp.path(), &["init", "git-mod"]));
+
+    let project = tmp.path().join("git-mod");
+    assert!(project.join(".git").is_dir());
+    let branch = Command::new("git")
+        .args(["-C", project.to_str().unwrap(), "branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert!(branch.status.success());
+    assert_eq!(String::from_utf8(branch.stdout).unwrap().trim(), "master");
+}
+
+#[test]
 fn generated_default_template_tracks_current_sdk_host_and_abi_versions() {
     let tmp = sandbox();
     let project = tmp.path().join("versioned-template");

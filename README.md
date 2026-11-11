@@ -42,7 +42,8 @@ sjml-cli init home/mymod
 
 The final path component becomes the default SJML package ID. Use `--id` to
 choose a different ID. The generated project contains `Cargo.toml`,
-`sjml.toml`, `sjml-project.toml`, `src/lib.rs`, and `.gitignore`.
+`sjml.toml`, `sjml-project.toml`, `src/lib.rs`, and `.gitignore`. `init` also
+creates a Git repository with an initial `master` branch; Git must be installed.
 
 When developing against a local SJML checkout, pass the path to its SDK crate:
 
