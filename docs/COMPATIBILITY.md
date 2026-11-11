@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host ABI is `1.37.0`. ABI compatibility is major-version based:
+The current host ABI is `1.38.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.37.0` therefore accepts
-`1.0.x` through `1.37.0` (including earlier ABI 1.32–1.36 guests), but rejects a
+minor/patch version is equal or newer. A host at ABI `1.38.0` therefore accepts
+`1.0.x` through `1.38.0` (including earlier ABI 1.32–1.37 guests), but rejects a
 later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -81,6 +81,17 @@ does not rewrite signed messages or affect server state. See [player
 equipment](PLAYER_EQUIPMENT.md), [daylight-cycle gamerule](WORLD_DAYLIGHT_CYCLE.md),
 [client chat messages](CLIENT_CHAT_MESSAGES.md), and [client toast
 notifications](CLIENT_NOTIFICATIONS.md).
+
+Host 0.48.0 / ABI 1.38.0 adds a detached player-abilities snapshot and a
+guarded current-flight toggle under `player.abilities.write`, normal signed
+client chat sending under `client.chat.send`, bounded client-local sound
+playback under `client.audio.play`, and loaded-world border reads and setters
+under `world.read`/`world.write`. Flight changes cannot grant `may_fly` or
+change invulnerability/build permissions. Chat follows Minecraft's ordinary
+signed send route and cannot dispatch commands or raw packets. Audio is local
+to the physical client. See [player abilities](PLAYER_ABILITIES.md), [client
+chat messages](CLIENT_CHAT_MESSAGES.md), [client audio](CLIENT_AUDIO.md), and
+[world border](WORLD_BORDER.md).
 
 Client modules have HUD, bounded typed OpenGL, camera-relative world-render,
 active-screen input, native chat layout control, global no-screen input, local

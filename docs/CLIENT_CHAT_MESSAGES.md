@@ -42,8 +42,8 @@ unsubscribe or runtime shutdown. Each runtime has one subscription; the host
 supports up to 128 active runtimes. A guest callback failure removes only that
 runtime's subscription and leaves other modules' handlers active. Callbacks
 must stay short because they run synchronously while the client adds a chat
-message. This API observes messages at the display insertion point; it does
-not expose outgoing chat or permit editing/reformatting message components.
+message. The receive subscription observes messages at the display insertion
+point; it does not permit editing/reformatting message components.
 
 The host import module is `sjml_client_chat_messages_v1`.
 
@@ -53,3 +53,29 @@ The host import module is `sjml_client_chat_messages_v1`.
 
 The version-1 callback payload contains the callback ID, source tag,
 truncation flag, and bounded UTF-8 text; its result is one stable bool byte.
+
+## Sending ordinary chat
+
+`sjml::chat_messages::send("hello")` sends a normal player chat message and
+requires the separate `client.chat.send` capability, a physical client, the
+client main thread, and an active local player connection. The host calls
+Minecraft's `LocalPlayer.connection.sendChat` path, which runs NeoForge's
+client-send hook, session signing, and acknowledgement handling. The guest
+cannot send packets directly or invoke command dispatch through this API.
+
+Text must contain 1–256 UTF-16 code units and at most 1024 UTF-8 bytes. Blank
+text, control characters, line breaks, and text whose first non-whitespace
+character is `/` are rejected. Each module runtime may send once per second;
+faster calls return `ServiceBusy`. Sending is not routed through the incoming
+display filter API above.
+
+```rust,ignore
+use sjml::chat_messages;
+
+chat_messages::send("Hello from my mod")?;
+```
+
+The host import is `sjml_client_chat_send_v1.send(i32, i32) -> i32`; the two
+arguments point to UTF-8 bytes in guest memory. It is independent of the
+message callback subscription import and checks `client.chat.send` on every
+call.

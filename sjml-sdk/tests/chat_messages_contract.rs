@@ -22,3 +22,19 @@ fn native_subscriptions_fail_without_invoking_guest_callbacks() {
     assert_eq!(result.unwrap_err().code(), ErrorCode::PermissionDenied);
     assert!(!called.get());
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn outgoing_chat_rejects_invalid_text_before_requesting_the_client_host() {
+    let overlong = "x".repeat(257);
+    for message in ["", " \t", "one\ntwo", "/help", "  /help", overlong.as_str()] {
+        assert_eq!(
+            chat_messages::send(message).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+    assert_eq!(
+        chat_messages::send("hello").unwrap_err().code(),
+        ErrorCode::PermissionDenied
+    );
+}

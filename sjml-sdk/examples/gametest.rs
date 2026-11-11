@@ -474,6 +474,7 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         .collect::<SjmlResult<Vec<_>>>()?;
     let original_day_time = world::day_time(overworld)?;
     let original_daylight_cycle = world::daylight_cycle_enabled(overworld)?;
+    let original_border = world::border(overworld)?;
     let first_player = player::online()?.into_iter().next().ok_or_else(|| {
         SjmlError::new(
             ErrorCode::InvalidArgument,
@@ -522,6 +523,98 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         world::set_daylight_cycle_enabled(overworld, original_daylight_cycle);
     let observed_daylight_cycle = observed_daylight_cycle?;
     restored_daylight_cycle?;
+    let border_mutation_observed = if original_border.remaining_lerp_millis == 0 {
+        let changed_center_x = if original_border.center_x > world::MAX_WORLD_BORDER_CENTER - 1.0 {
+            original_border.center_x - 1.0
+        } else {
+            original_border.center_x + 1.0
+        };
+        let changed_diameter =
+            if original_border.current_diameter < world::MAX_WORLD_BORDER_DIAMETER - 1.0 {
+                original_border.current_diameter + 1.0
+            } else {
+                original_border.current_diameter - 1.0
+            };
+        let changed_warning_time = if original_border.warning_time_seconds
+            < world::MAX_WORLD_BORDER_WARNING_SECONDS as i32
+        {
+            original_border.warning_time_seconds + 1
+        } else {
+            original_border.warning_time_seconds - 1
+        };
+        let changed_warning_distance = if original_border.warning_distance_blocks
+            < world::MAX_WORLD_BORDER_WARNING_BLOCKS as i32
+        {
+            original_border.warning_distance_blocks + 1
+        } else {
+            original_border.warning_distance_blocks - 1
+        };
+        let changed_damage_buffer =
+            if original_border.damage_buffer_blocks < world::MAX_WORLD_BORDER_DAMAGE_BUFFER {
+                original_border.damage_buffer_blocks + 0.25
+            } else {
+                original_border.damage_buffer_blocks - 0.25
+            };
+        let changed_damage =
+            if original_border.damage_per_block < world::MAX_WORLD_BORDER_DAMAGE_PER_BLOCK {
+                original_border.damage_per_block + 0.25
+            } else {
+                original_border.damage_per_block - 0.25
+            };
+        let mutation: SjmlResult<bool> = (|| {
+            world::set_border_center(overworld, changed_center_x, original_border.center_z)?;
+            world::set_border_size(overworld, changed_diameter, 0)?;
+            world::set_border_warnings(
+                overworld,
+                changed_warning_time as u32,
+                changed_warning_distance as u32,
+            )?;
+            world::set_border_damage(overworld, changed_damage_buffer, changed_damage)?;
+            let changed = world::border(overworld)?;
+            Ok(changed.center_x == changed_center_x
+                && changed.center_z == original_border.center_z
+                && changed.current_diameter == changed_diameter
+                && changed.target_diameter == changed_diameter
+                && changed.remaining_lerp_millis == 0
+                && changed.warning_time_seconds == changed_warning_time
+                && changed.warning_distance_blocks == changed_warning_distance
+                && changed.damage_buffer_blocks == changed_damage_buffer
+                && changed.damage_per_block == changed_damage)
+        })();
+        let restore = world::set_border_center(
+            overworld,
+            original_border.center_x,
+            original_border.center_z,
+        )
+        .and_then(|()| world::set_border_size(overworld, original_border.current_diameter, 0))
+        .and_then(|()| {
+            world::set_border_warnings(
+                overworld,
+                original_border.warning_time_seconds as u32,
+                original_border.warning_distance_blocks as u32,
+            )
+        })
+        .and_then(|()| {
+            world::set_border_damage(
+                overworld,
+                original_border.damage_buffer_blocks,
+                original_border.damage_per_block,
+            )
+        });
+        let mutation_observed = mutation?;
+        restore?;
+        let restored = world::border(overworld)?;
+        mutation_observed
+            && restored.center_x == original_border.center_x
+            && restored.center_z == original_border.center_z
+            && restored.current_diameter == original_border.current_diameter
+            && restored.warning_time_seconds == original_border.warning_time_seconds
+            && restored.warning_distance_blocks == original_border.warning_distance_blocks
+            && restored.damage_buffer_blocks == original_border.damage_buffer_blocks
+            && restored.damage_per_block == original_border.damage_per_block
+    } else {
+        true
+    };
     if !loaded.contains(&overworld)
         || world::get("minecraft:overworld")? != Some(overworld)
         || world::dimension_id(overworld)? != "minecraft:overworld"
@@ -530,6 +623,7 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         || observed_day_time != changed_day_time
         || observed_daylight_cycle == original_daylight_cycle
         || world::daylight_cycle_enabled(overworld)? != original_daylight_cycle
+        || !border_mutation_observed
         || biome_id
             .as_deref()
             .and_then(|id| id.split_once(':'))
@@ -844,6 +938,22 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
             "player equipment snapshot did not match the GameTest fixture",
         ));
     }
+    let original_abilities = player::abilities(target_player)?;
+    if !original_abilities.may_fly {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player abilities GameTest must grant may_fly before the guest callback",
+        ));
+    }
+    let temporary_flying = !original_abilities.flying;
+    let temporary_abilities = (|| {
+        player::set_flying(target_player, temporary_flying)?;
+        player::abilities(target_player)
+    })();
+    let restore_flying = player::set_flying(target_player, original_abilities.flying);
+    let temporary_abilities = temporary_abilities?;
+    restore_flying?;
+    let restored_abilities = player::abilities(target_player)?;
     let original_game_mode = game_modes[target_index];
     let temporary_game_mode = if original_game_mode == sjml::PlayerGameMode::Creative {
         sjml::PlayerGameMode::Adventure
@@ -914,6 +1024,11 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     if snapshots.is_empty()
         || vitals.len() != snapshots.len()
         || game_modes.len() != snapshots.len()
+        || temporary_abilities.flying != temporary_flying
+        || temporary_abilities.may_fly != original_abilities.may_fly
+        || temporary_abilities.invulnerable != original_abilities.invulnerable
+        || temporary_abilities.may_build != original_abilities.may_build
+        || restored_abilities != original_abilities
         || observed_game_mode != temporary_game_mode
         || (temporary_motion.velocity_x - temporary_velocity.x).abs() > 0.0001
         || (temporary_motion.velocity_y - temporary_velocity.y).abs() > 0.0001

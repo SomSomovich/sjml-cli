@@ -6,10 +6,15 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.37.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.38.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.37.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.38.0 adds
+read and bounded flight-state changes for server players, ordinary client chat
+sending through Minecraft's signed chat path, client-local sound playback, and
+read/write access to loaded world-border settings. These additions use
+`player.abilities.write`, `client.chat.send`, `client.audio.play`, or the
+existing `entity.read`/`world.read`/`world.write` grants. ABI 1.37.0 adds
 `sjml_player_v1.equipment` for detached main-hand/offhand/armor snapshots,
 `sjml_world_v1.daylight_cycle_enabled` and `set_daylight_cycle_enabled` for the
 vanilla `doDaylightCycle` gamerule, a client-local chat-message callback ABI
@@ -862,6 +867,16 @@ insertion, and is honored only when the module separately requests and receives
 rewrites or resends signed content or changes server state. See
 [client chat messages](CLIENT_CHAT_MESSAGES.md).
 
+The independent `sjml_client_chat_send_v1.send(message_ptr, message_len) -> i32`
+import sends one ordinary player chat message through the connected local
+player's standard `sendChat` route. It requires `client.chat.send`, a physical
+client, and the client main thread. The host keeps Minecraft and NeoForge's
+normal signing, send hooks, and acknowledgement handling. The guest cannot send
+raw packets or dispatch commands through this import. Text must be nonblank,
+single-line, free of controls, not start with `/` after leading whitespace,
+at most 256 UTF-16 code units and 1,024 UTF-8 bytes. A module may send once per
+second. See [client chat messages](CLIENT_CHAT_MESSAGES.md).
+
 ## Client toast notifications
 
 ABI 1.37.0 adds `sjml_client_ui_v1.notify(title_ptr, title_len, body_ptr,
@@ -873,6 +888,17 @@ thread. Title and body are strict UTF-8, nonblank literal strings of at most
 limited to six per module per 30 seconds, and repeated notices update one
 module-owned toast slot. Static-registration and server calls fail closed. See
 [client toast notifications](CLIENT_NOTIFICATIONS.md).
+
+## Client-local audio
+
+ABI 1.38.0 adds `sjml_client_audio_v1.play(sound_id_ptr, sound_id_len,
+category, volume_bits, pitch_bits) -> i32`. It requires the separately granted
+`client.audio.play`, a physical client, and the client main thread. IDs must be
+canonical registered sound resources of at most 256 UTF-8 bytes; categories
+are the ten vanilla `SoundSource` values (`0=Master` through `9=Voice`), volume
+is finite in 0..=4, and pitch is finite in 0.5..=2. Each module is limited to
+five requests per two-second window. Playback is local and sends no packets.
+See [client-local audio](CLIENT_AUDIO.md).
 
 ## Global client input imports
 
@@ -926,6 +952,11 @@ registration binds the signatures but every call during `mod_register` returns
 | `play_sound` | `handle_ptr, handle_len, x, y, z, sound_id_ptr, sound_id_len, volume_bits, pitch_bits` | Play one registered sound at the center of a loaded block; status only |
 | `weather` | `(handle_ptr: i32, handle_len: i32, output_ptr: i32, output_capacity: i32) -> i32` | Write an 18-byte schema-v1 weather snapshot |
 | `set_weather` | `(handle_ptr: i32, handle_len: i32, condition: i32, duration_ticks: i32) -> i32` | Set clear, rain, or thunder weather; status only |
+| `border` | `handle_ptr, handle_len, out_ptr, out_capacity` | 68-byte schema-v1 world-border snapshot |
+| `set_border_center` | `handle_ptr, handle_len, values_ptr, values_len` | Set finite bounded border center; status only |
+| `set_border_size` | `handle_ptr, handle_len, values_ptr, values_len` | Set size immediately or begin bounded transition; status only |
+| `set_border_warnings` | `handle_ptr, handle_len, values_ptr, values_len` | Set warning lead time and distance; status only |
+| `set_border_damage` | `handle_ptr, handle_len, values_ptr, values_len` | Set safe buffer and damage rate; status only |
 
 `handle_len` must be 24. `get` takes raw UTF-8, limited to 65,536 bytes,
 and requires a canonical `namespace:path` (no implicit `minecraft:` namespace).
@@ -970,6 +1001,17 @@ requires both `world.read` and `world.write`, accepts only integer 0 or 1, and
 changes the live world's persisted vanilla gamerule without changing the
 current day time. See [world time](WORLD_TIME.md) and
 [daylight-cycle gamerule](WORLD_DAYLIGHT_CYCLE.md).
+`border` requires `world.read` and returns the loaded world's center, current
+and target diameter, remaining transition milliseconds, warnings, and border
+damage settings. The four setters require both `world.read` and `world.write`.
+Their exact schema-v1 value lengths are 20 bytes for center, 20 for size,
+12 for warning values, and 20 for damage values. The host bounds center to
+±29,999,984, diameter to 1..=59,999,968, transition to at most 604,800,000 ms,
+warning time to at most 86,400 seconds, warning distance to at most 59,999,968,
+damage buffer to at most 1,024, and damage per block to at most 100. Every
+floating-point setter value must be finite. Reads and writes resolve an already
+loaded world on its server thread and never load chunks. See
+[world border](WORLD_BORDER.md).
 
 Each active module owns one world handle registry with a 1,024-live-handle
 quota. `get` and `loaded` share handles. `loaded` sorts all currently loaded
@@ -1082,6 +1124,8 @@ signatures but calls return `PERMISSION_DENIED`.
 | `game_mode` | `handle_ptr, handle_len, out_ptr, out_capacity` | Eight bytes: u32 schema `1`, u32 mode (`0=Survival`, `1=Creative`, `2=Adventure`, `3=Spectator`) |
 | `set_game_mode` | `handle_ptr, handle_len, mode_u32` | Set the current login session's game mode; status only |
 | `motion` | `handle_ptr, handle_len, out_ptr, out_capacity` | 36-byte schema-v1 player motion: u32 schema, three f64 velocity components, f32 yaw, f32 pitch |
+| `abilities` | `handle_ptr, handle_len, out_ptr, out_capacity` | 8-byte schema-v1 snapshot: u32 schema and four bool bytes (`may_fly`, `flying`, `invulnerable`, `may_build`) |
+| `set_flying` | `handle_ptr, handle_len, enabled` | Set only the flying flag; status only |
 | `set_velocity` | `handle_ptr, handle_len, velocity_ptr, velocity_len` | Set three bounded f64 velocity components from a 28-byte schema-v1 record; status only |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to the current player for that login session; status only |
 | `teleport` | `(handle_ptr: i32, handle_len: i32, destination_ptr: i32, destination_len: i32) -> i32` | Teleport the current player session within its current dimension; status only |
@@ -1146,6 +1190,13 @@ only finite components within ±64 blocks per tick. The host synchronizes
 motion to the player and validates the owning server thread and live session.
 Static registration and client calls fail closed. See
 [player motion](PLAYER_MOTION.md).
+`abilities` requires `entity.read` and returns four strict boolean bytes after
+schema version 1. `set_flying` additionally requires `player.abilities.write`,
+accepts only 0 or 1, and cannot enable flight unless the player's existing
+`may_fly` flag permits it. It changes no game-mode, invulnerability, or build
+permission flags. The host updates the player's ability packet only after a
+real change. Static registration and client calls fail closed. See
+[player abilities](PLAYER_ABILITIES.md).
 
 ## Loaded non-player entities
 

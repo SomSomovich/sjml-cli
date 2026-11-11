@@ -4,14 +4,14 @@
 //! limited to 1,024 live worlds.
 
 #[cfg(target_arch = "wasm32")]
-use crate::Decoder;
-#[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::{BlockPos, Direction};
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
+#[cfg(target_arch = "wasm32")]
+use crate::Decoder;
 use crate::{
-    ErrorCode, MAX_STRING_BYTES, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
+    ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle, MAX_STRING_BYTES,
 };
 
 const MAX_RESOURCE_ID_BYTES: usize = 256;
@@ -32,6 +32,20 @@ pub const MAX_WORLD_COLLISION_BLOCKS: usize = 4096;
 pub const MAX_WORLD_ENTITY_TYPE_ID_BYTES: usize = 256;
 /// Maximum duration accepted by [`set_weather`], in ticks (24 in-game hours).
 pub const MAX_WEATHER_DURATION_TICKS: u32 = 1_728_000;
+/// Maximum absolute world-border center coordinate accepted by the host.
+pub const MAX_WORLD_BORDER_CENTER: f64 = 29_999_984.0;
+/// Maximum world-border diameter accepted by the host.
+pub const MAX_WORLD_BORDER_DIAMETER: f64 = 59_999_968.0;
+/// Maximum size transition accepted by the host, in milliseconds.
+pub const MAX_WORLD_BORDER_LERP_MILLIS: u64 = 604_800_000;
+/// Maximum world-border warning lead time accepted by the host, in seconds.
+pub const MAX_WORLD_BORDER_WARNING_SECONDS: u32 = 86_400;
+/// Maximum world-border warning distance accepted by the host, in blocks.
+pub const MAX_WORLD_BORDER_WARNING_BLOCKS: u32 = 59_999_968;
+/// Maximum damage buffer accepted by the host, in blocks.
+pub const MAX_WORLD_BORDER_DAMAGE_BUFFER: f64 = 1_024.0;
+/// Maximum damage applied per block accepted by the host.
+pub const MAX_WORLD_BORDER_DAMAGE_PER_BLOCK: f64 = 100.0;
 /// Maximum day-time value accepted by [`set_time`].
 pub const MAX_WORLD_DAY_TIME_TICKS: i64 = 1_000_000_000_000;
 
@@ -73,6 +87,59 @@ pub struct WeatherSnapshot {
     pub rain_time: u32,
     /// Ticks until the thunder state changes, or zero when inactive.
     pub thunder_time: u32,
+}
+
+/// Detached world-border settings for one loaded dimension.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct WorldBorderSnapshot {
+    /// Center X coordinate, in blocks.
+    pub center_x: f64,
+    /// Center Z coordinate, in blocks.
+    pub center_z: f64,
+    /// Diameter currently applied, in blocks.
+    pub current_diameter: f64,
+    /// Transition target diameter, in blocks; equals `current_diameter` when stationary.
+    pub target_diameter: f64,
+    /// Remaining size-transition time, in milliseconds.
+    pub remaining_lerp_millis: u64,
+    /// Warning lead time, in seconds.
+    pub warning_time_seconds: i32,
+    /// Warning distance from the border, in blocks.
+    pub warning_distance_blocks: i32,
+    /// Safe damage buffer inside the border, in blocks.
+    pub damage_buffer_blocks: f64,
+    /// Damage applied per block outside the safe buffer.
+    pub damage_per_block: f64,
+}
+
+impl WorldBorderSnapshot {
+    #[cfg(target_arch = "wasm32")]
+    fn validate(&self) -> SjmlResult<()> {
+        if !self.center_x.is_finite()
+            || self.center_x.abs() > MAX_WORLD_BORDER_CENTER
+            || !self.center_z.is_finite()
+            || self.center_z.abs() > MAX_WORLD_BORDER_CENTER
+            || !valid_border_diameter(self.current_diameter)
+            || !valid_border_diameter(self.target_diameter)
+            || self.warning_time_seconds < 0
+            || self.warning_distance_blocks < 0
+            || !self.damage_buffer_blocks.is_finite()
+            || self.damage_buffer_blocks < 0.0
+            || !self.damage_per_block.is_finite()
+            || self.damage_per_block < 0.0
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned world border values outside the supported ranges",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn valid_border_diameter(diameter: f64) -> bool {
+    diameter.is_finite() && (1.0..=MAX_WORLD_BORDER_DIAMETER).contains(&diameter)
 }
 
 /// Weather preset used by [`set_weather`].
@@ -269,8 +336,25 @@ extern "C" {
     ) -> i32;
     #[link_name = "weather"]
     fn imported_weather(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "border"]
+    fn imported_border(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_weather"]
     fn imported_set_weather(handle: i32, length: i32, condition: i32, duration_ticks: i32) -> i32;
+    #[link_name = "set_border_center"]
+    fn imported_set_border_center(handle: i32, length: i32, values: i32, values_length: i32)
+        -> i32;
+    #[link_name = "set_border_size"]
+    fn imported_set_border_size(handle: i32, length: i32, values: i32, values_length: i32) -> i32;
+    #[link_name = "set_border_warnings"]
+    fn imported_set_border_warnings(
+        handle: i32,
+        length: i32,
+        values: i32,
+        values_length: i32,
+    ) -> i32;
+    #[link_name = "set_border_damage"]
+    fn imported_set_border_damage(handle: i32, length: i32, values: i32, values_length: i32)
+        -> i32;
     #[link_name = "set_time"]
     fn imported_set_time(handle: i32, length: i32, day_time_low: i32, day_time_high: i32) -> i32;
     #[link_name = "set_daylight_cycle_enabled"]
@@ -647,6 +731,180 @@ pub fn set_weather(
     {
         let _ = (handle, condition);
         Err(unsupported_target())
+    }
+}
+
+/// Reads the live world's center, size transition, warnings, and damage settings.
+///
+/// Requires `world.read` and a loaded world handle. The transition time is the non-negative
+/// number of milliseconds remaining; a stationary border has no remaining transition.
+pub fn border(handle: WorldHandle) -> SjmlResult<WorldBorderSnapshot> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let snapshot: WorldBorderSnapshot = read_output(68, |output, capacity| {
+            // SAFETY: the handle and fixed output buffer stay live for this synchronous import.
+            unsafe {
+                imported_border(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the center of a loaded world's border. Requires `world.read` and `world.write`.
+pub fn set_border_center(handle: WorldHandle, center_x: f64, center_z: f64) -> SjmlResult<()> {
+    if !center_x.is_finite()
+        || center_x.abs() > MAX_WORLD_BORDER_CENTER
+        || !center_z.is_finite()
+        || center_z.abs() > MAX_WORLD_BORDER_CENTER
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "world border center must be finite and within ±29999984",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut values = Vec::with_capacity(20);
+        values.extend_from_slice(&1_u32.to_le_bytes());
+        values.extend_from_slice(&center_x.to_le_bytes());
+        values.extend_from_slice(&center_z.to_le_bytes());
+        set_border_request(handle, &values, imported_set_border_center)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets a border diameter immediately or starts a bounded size transition. Requires `world.read`
+/// and `world.write`; transition time is in milliseconds, with zero meaning immediate.
+pub fn set_border_size(
+    handle: WorldHandle,
+    diameter: f64,
+    transition_millis: u64,
+) -> SjmlResult<()> {
+    if !valid_border_diameter(diameter) || transition_millis > MAX_WORLD_BORDER_LERP_MILLIS {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "world border size or transition time is outside its supported range",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut values = Vec::with_capacity(20);
+        values.extend_from_slice(&1_u32.to_le_bytes());
+        values.extend_from_slice(&diameter.to_le_bytes());
+        values.extend_from_slice(&transition_millis.to_le_bytes());
+        set_border_request(handle, &values, imported_set_border_size)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets border warning lead time and distance. Requires `world.read` and `world.write`.
+pub fn set_border_warnings(
+    handle: WorldHandle,
+    warning_time_seconds: u32,
+    warning_distance_blocks: u32,
+) -> SjmlResult<()> {
+    if warning_time_seconds > MAX_WORLD_BORDER_WARNING_SECONDS
+        || warning_distance_blocks > MAX_WORLD_BORDER_WARNING_BLOCKS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "world border warning time or distance is outside its supported range",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut values = Vec::with_capacity(12);
+        values.extend_from_slice(&1_u32.to_le_bytes());
+        values.extend_from_slice(&warning_time_seconds.to_le_bytes());
+        values.extend_from_slice(&warning_distance_blocks.to_le_bytes());
+        set_border_request(handle, &values, imported_set_border_warnings)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the safe damage buffer and damage per block for a border. Requires `world.read` and
+/// `world.write`; both finite values are bounded by the host-supported ranges.
+pub fn set_border_damage(
+    handle: WorldHandle,
+    damage_buffer_blocks: f64,
+    damage_per_block: f64,
+) -> SjmlResult<()> {
+    if !damage_buffer_blocks.is_finite()
+        || !(0.0..=MAX_WORLD_BORDER_DAMAGE_BUFFER).contains(&damage_buffer_blocks)
+        || !damage_per_block.is_finite()
+        || !(0.0..=MAX_WORLD_BORDER_DAMAGE_PER_BLOCK).contains(&damage_per_block)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "world border damage values are outside their supported finite ranges",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut values = Vec::with_capacity(20);
+        values.extend_from_slice(&1_u32.to_le_bytes());
+        values.extend_from_slice(&damage_buffer_blocks.to_le_bytes());
+        values.extend_from_slice(&damage_per_block.to_le_bytes());
+        set_border_request(handle, &values, imported_set_border_damage)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+type BorderMutationImport = unsafe extern "C" fn(i32, i32, i32, i32) -> i32;
+
+#[cfg(target_arch = "wasm32")]
+fn set_border_request(
+    handle: WorldHandle,
+    values: &[u8],
+    import: BorderMutationImport,
+) -> SjmlResult<()> {
+    let encoded_handle = to_bytes(&handle)?;
+    // SAFETY: handle and bounded request bytes live through this synchronous host call.
+    let status = unsafe {
+        import(
+            encoded_handle.as_ptr() as usize as u32 as i32,
+            encoded_handle.len() as i32,
+            values.as_ptr() as usize as u32 as i32,
+            values.len() as i32,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(SjmlError::from_abi_code(
+            status as u32,
+            "host rejected the world border update",
+        ))
     }
 }
 

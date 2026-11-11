@@ -1,4 +1,4 @@
-use sjml::{player, world, BlockPos, ErrorCode, PlayerHandle, WorldHandle};
+use sjml::{from_bytes, player, to_bytes, world, BlockPos, ErrorCode, PlayerHandle, WorldHandle};
 
 #[test]
 fn malformed_dimension_ids_are_rejected_before_host_access() {
@@ -76,6 +76,83 @@ fn block_state_snapshots_have_stable_versioned_encoding() {
     assert_eq!(
         sjml::from_bytes::<world::BlockStateSnapshot>(&sjml::to_bytes(&snapshot).unwrap()).unwrap(),
         snapshot
+    );
+}
+
+#[test]
+fn world_border_snapshot_has_a_stable_little_endian_schema() {
+    let snapshot = world::WorldBorderSnapshot {
+        center_x: 12.5,
+        center_z: -8.25,
+        current_diameter: 1_000.0,
+        target_diameter: 500.0,
+        remaining_lerp_millis: 30_000,
+        warning_time_seconds: 15,
+        warning_distance_blocks: 7,
+        damage_buffer_blocks: 5.0,
+        damage_per_block: 0.2,
+    };
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    for value in [12.5_f64, -8.25, 1_000.0, 500.0] {
+        expected.extend_from_slice(&value.to_le_bytes());
+    }
+    expected.extend_from_slice(&30_000_u64.to_le_bytes());
+    expected.extend_from_slice(&15_i32.to_le_bytes());
+    expected.extend_from_slice(&7_i32.to_le_bytes());
+    expected.extend_from_slice(&5.0_f64.to_le_bytes());
+    expected.extend_from_slice(&0.2_f64.to_le_bytes());
+    assert_eq!(expected.len(), 68);
+    assert_eq!(to_bytes(&snapshot).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<world::WorldBorderSnapshot>(&expected).unwrap(),
+        snapshot
+    );
+}
+
+#[test]
+fn border_api_validates_ranges_before_host_access() {
+    let handle = WorldHandle::new(1, 2, 3, 4).unwrap();
+    assert_eq!(
+        world::border(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        world::set_border_center(handle, f64::NAN, 0.0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        world::set_border_size(handle, 0.0, 0).unwrap_err().code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        world::set_border_size(handle, 1_000.0, world::MAX_WORLD_BORDER_LERP_MILLIS + 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        world::set_border_warnings(handle, world::MAX_WORLD_BORDER_WARNING_SECONDS + 1, 0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        world::set_border_damage(handle, 0.0, f64::INFINITY)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        world::set_border_center(handle, 1.0, 2.0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        world::set_border_warnings(handle, 1, 2).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
     );
 }
 

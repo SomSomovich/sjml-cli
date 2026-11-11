@@ -97,6 +97,7 @@ pub mod client_chat;
 pub mod client_input;
 pub mod chat_messages;
 pub mod client_notifications;
+pub mod client_audio;
 pub mod entity;
 pub mod entity_data;
 mod error;
@@ -129,6 +130,7 @@ pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle};
 pub use client_notifications::NotificationKind;
+pub use client_audio::SoundCategory;
 pub use chat_messages::{
     ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
 };
@@ -149,8 +151,8 @@ pub use network::{
     NetworkSubscriptionHandle, Player as NetworkPlayer, Uuid,
 };
 pub use player::{
-    MAX_PLAYER_VELOCITY_COMPONENT, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode,
-    PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
+    MAX_PLAYER_VELOCITY_COMPONENT, PlayerAbilities, PlayerEquipment, PlayerEquipmentStack,
+    PlayerGameMode, PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
 };
 pub use recipe::{
     CraftingSlot, RECIPE_CALLBACK_SCHEMA_VERSION, RecipeEvaluation, RecipeMatchInput,
@@ -182,8 +184,11 @@ pub use widgets::{
     Button, MAX_TEXT_FIELD_BYTES, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect,
 };
 pub use world::{
-    BlockStateSnapshot, HeightmapType, LightSnapshot, MAX_WORLD_BLOCK_COORDINATE,
-    MAX_WORLD_BLOCK_STATES,
+    BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot,
+    MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BORDER_CENTER,
+    MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+    MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS,
+    MAX_WORLD_BORDER_WARNING_BLOCKS, MAX_WORLD_BORDER_WARNING_SECONDS,
 };
 
 /// Common imports for an SJML guest module.
@@ -207,6 +212,8 @@ pub mod prelude {
     };
     pub use crate::client_notifications;
     pub use crate::client_notifications::NotificationKind;
+    pub use crate::client_audio;
+    pub use crate::client_audio::SoundCategory;
     pub use crate::entity;
     pub use crate::entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
     pub use crate::entity_data;
@@ -244,8 +251,8 @@ pub mod prelude {
     };
     pub use crate::player;
     pub use crate::player::{
-        MAX_PLAYER_VELOCITY_COMPONENT, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode,
-        PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
+        MAX_PLAYER_VELOCITY_COMPONENT, PlayerAbilities, PlayerEquipment, PlayerEquipmentStack,
+        PlayerGameMode, PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
     };
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
@@ -293,10 +300,13 @@ pub mod prelude {
     };
     pub use crate::world;
     pub use crate::world::{
-        BlockStateSnapshot, HeightmapType, LightSnapshot, MAX_WORLD_BLOCK_COORDINATE,
-        MAX_WORLD_BLOCK_STATES, MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
-        MAX_WORLD_RAYCAST_RESPONSE_BYTES, RaycastBlockMode, RaycastFluidMode, RaycastHit,
-        RaycastPoint,
+        BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot,
+        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BORDER_CENTER,
+        MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+        MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS,
+        MAX_WORLD_BORDER_WARNING_BLOCKS, MAX_WORLD_BORDER_WARNING_SECONDS,
+        MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE, MAX_WORLD_RAYCAST_RESPONSE_BYTES,
+        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
     };
     pub use crate::{StableDecode, StableEncode};
     pub use crate::{

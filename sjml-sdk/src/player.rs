@@ -1,7 +1,8 @@
 //! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, and game-mode reads require
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
-//! `player.vitals.write`, and velocity changes require `player.motion.write`. Player handles
+//! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
+//! `player.abilities.write`. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
 #[cfg(target_arch = "wasm32")]
@@ -172,6 +173,33 @@ impl PlayerEquipment {
 
 fn invalid_equipment(message: &str) -> SjmlError {
     SjmlError::new(ErrorCode::InvalidArgument, message)
+}
+
+/// Detached, read-only snapshot of the four built-in player abilities exposed by the host.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerAbilities {
+    /// Whether the current game mode or server grants flight capability.
+    pub may_fly: bool,
+    /// Whether the player is currently flying.
+    pub flying: bool,
+    /// Whether the player is invulnerable.
+    pub invulnerable: bool,
+    /// Whether the player may build and interact with blocks.
+    pub may_build: bool,
+}
+
+impl PlayerAbilities {
+    #[cfg(target_arch = "wasm32")]
+    fn validate(self) -> SjmlResult<()> {
+        if self.flying && !self.may_fly {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned flying=true while may_fly=false",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Maximum health value accepted by [`set_health`]. The host also limits it to the player's current maximum health.
@@ -359,6 +387,10 @@ extern "C" {
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "equipment"]
     fn imported_equipment(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "abilities"]
+    fn imported_abilities(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_flying"]
+    fn imported_set_flying(handle: i32, length: i32, flying: i32) -> i32;
     #[link_name = "vitals"]
     fn imported_vitals(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "game_mode"]
@@ -767,6 +799,64 @@ pub fn equipment(handle: PlayerHandle) -> SjmlResult<PlayerEquipment> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the four built-in abilities of the current live server-player session.
+///
+/// Requires `entity.read`. The snapshot is read-only: game-mode/admin-owned
+/// fields such as `may_fly`, `invulnerable`, and `may_build` are never writable
+/// through this API. The host validates the active session and logical-server
+/// thread for each call; client and static-registration calls fail closed.
+pub fn abilities(handle: PlayerHandle) -> SjmlResult<PlayerAbilities> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let abilities: PlayerAbilities = read_output(8, |output, capacity| {
+            // SAFETY: the encoded handle and output buffer stay valid through this synchronous import.
+            unsafe {
+                imported_abilities(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        abilities.validate()?;
+        Ok(abilities)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables flight for a live server player without changing `may_fly`.
+///
+/// Requires both `entity.read` and `player.abilities.write`. Enabling flight is
+/// accepted only while the current player already has `may_fly`; disabling
+/// flight is always allowed. The host synchronizes an actual state change to
+/// clients and leaves invulnerability, build permission, and game mode intact.
+pub fn set_flying(handle: PlayerHandle, flying: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and boolean scalar stay valid through this synchronous host import.
+        let status = unsafe {
+            imported_set_flying(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                i32::from(flying),
+            )
+        };
+        status_result(status, "host rejected the player flight change")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, flying);
         Err(unsupported_target())
     }
 }

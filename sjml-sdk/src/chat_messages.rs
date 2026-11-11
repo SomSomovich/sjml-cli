@@ -16,6 +16,10 @@ use crate::{ErrorCode, SjmlError, SjmlResult};
 pub const MAX_CHAT_MESSAGE_SUBSCRIPTIONS: usize = 128;
 /// Maximum UTF-8 bytes exposed for one message; longer messages are truncated at a code point boundary.
 pub const MAX_CHAT_MESSAGE_BYTES: usize = 4096;
+/// Maximum UTF-8 bytes accepted by [`send`].
+pub const MAX_OUTGOING_CHAT_BYTES: usize = 1024;
+/// Minecraft's chat input is limited to 256 UTF-16 code units.
+pub const MAX_OUTGOING_CHAT_UTF16_UNITS: usize = 256;
 #[cfg(any(target_arch = "wasm32", test))]
 const MESSAGE_SCHEMA_VERSION: u32 = 1;
 #[cfg(target_arch = "wasm32")]
@@ -86,6 +90,13 @@ extern "C" {
     fn imported_subscribe(callback_id: i64, output_handle: i32) -> i32;
     #[link_name = "unsubscribe"]
     fn imported_unsubscribe(handle_pointer: i32, handle_length: i32) -> i32;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "sjml_client_chat_send_v1")]
+extern "C" {
+    #[link_name = "send"]
+    fn imported_send(message_pointer: i32, message_length: i32) -> i32;
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -241,6 +252,70 @@ pub fn unsubscribe(handle: ChatMessageSubscriptionHandle) -> SjmlResult<()> {
     }
 }
 
+/// Sends one ordinary chat message through Minecraft's current local player connection.
+///
+/// Requires a declared and granted `client.chat.send` capability, a physical client, and a
+/// connected local player. The host invokes Minecraft's `ClientPacketListener.sendChat` path,
+/// including NeoForge's client-send hook, session signing, and acknowledgement tracking. It does
+/// not expose command dispatch or packet construction. Messages must be nonblank, single-line,
+/// free of control characters, not start with `/` after leading whitespace, and fit both Minecraft's
+/// 256 UTF-16-unit input limit and the 1024-byte UTF-8 ABI limit. Each module runtime is limited to
+/// one send per second.
+pub fn send(message: &str) -> SjmlResult<()> {
+    validate_outgoing_message(message)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let length = message.len() as u32;
+        let pointer = allocate_host_input(length);
+        if pointer == 0 {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate client chat message input",
+            ));
+        }
+        // SAFETY: the allocation is writable and exactly `length` bytes long.
+        unsafe {
+            core::ptr::copy_nonoverlapping(message.as_ptr(), pointer as *mut u8, length as usize)
+        };
+        // SAFETY: the initialized UTF-8 input remains live for the synchronous host call.
+        let status = unsafe { imported_send(pointer as i32, length as i32) };
+        // SAFETY: release the exact input allocation supplied to the host import.
+        unsafe { deallocate_host_input(pointer, length) };
+        host_status(status)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported())
+    }
+}
+
+fn validate_outgoing_message(message: &str) -> SjmlResult<()> {
+    if message.trim().is_empty() {
+        return Err(invalid("chat text must not be blank"));
+    }
+    if message.len() > MAX_OUTGOING_CHAT_BYTES
+        || message.encode_utf16().count() > MAX_OUTGOING_CHAT_UTF16_UNITS
+    {
+        return Err(invalid(
+            "chat text exceeds the Minecraft UTF-16 or UTF-8 length limit",
+        ));
+    }
+    if message
+        .chars()
+        .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
+    {
+        return Err(invalid(
+            "chat text must be single-line and contain no control characters",
+        ));
+    }
+    if message.trim_start().starts_with('/') {
+        return Err(invalid(
+            "slash commands are not accepted by the chat-send API",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug)]
 struct Delivery {
@@ -345,7 +420,7 @@ fn host_status(status: i32) -> SjmlResult<()> {
     } else {
         Err(SjmlError::from_abi_code(
             status as u32,
-            "host rejected chat message operation",
+            "host rejected client chat operation",
         ))
     }
 }
@@ -361,7 +436,6 @@ fn stale() -> SjmlError {
         "chat message subscription is not active",
     )
 }
-#[cfg(any(target_arch = "wasm32", test))]
 fn invalid(message: &'static str) -> SjmlError {
     SjmlError::new(ErrorCode::InvalidArgument, message)
 }
@@ -369,7 +443,7 @@ fn invalid(message: &'static str) -> SjmlError {
 fn unsupported() -> SjmlError {
     SjmlError::new(
         ErrorCode::PermissionDenied,
-        "client chat message subscriptions are available only to wasm guests",
+        "client chat operations are available only to wasm guests",
     )
 }
 
@@ -447,5 +521,27 @@ mod tests {
         CALLBACKS.with(|state| {
             state.borrow_mut().entries.clear();
         });
+    }
+
+    #[test]
+    fn outgoing_chat_validation_rejects_blank_controls_lines_commands_and_overflow() {
+        assert!(validate_outgoing_message("hello 🌍").is_ok());
+        assert!(validate_outgoing_message(&"x".repeat(MAX_OUTGOING_CHAT_UTF16_UNITS)).is_ok());
+        let overlong = "x".repeat(MAX_OUTGOING_CHAT_UTF16_UNITS + 1);
+        for message in [
+            "",
+            " \t ",
+            "one\ntwo",
+            "one\rtwo",
+            "one\u{2028}two",
+            "/say hello",
+            "   /say hello",
+            overlong.as_str(),
+        ] {
+            assert_eq!(
+                validate_outgoing_message(message).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
     }
 }
