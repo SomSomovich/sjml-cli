@@ -16,12 +16,12 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.65.0` with ABI `1.55.0`. ABI compatibility is major-version based:
+The current host is `0.66.0` with ABI `1.56.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.55.0` therefore accepts
-`1.0.x` through `1.55.0` (including earlier ABI 1.32–1.54 guests), but rejects
-a later contract it does not know. ABI `1.55.0` accepts ABI `1.0.x` through
-`1.55.0`, including packages targeting host 0.64.0 / ABI 1.54.0.
+minor/patch version is equal or newer. A host at ABI `1.56.0` therefore accepts
+`1.0.x` through `1.56.0` (including earlier ABI 1.32–1.55 guests), but rejects
+a later contract it does not know. ABI `1.56.0` accepts ABI `1.0.x` through
+`1.56.0`, including packages targeting host 0.65.0 / ABI 1.55.0.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
 
@@ -216,3 +216,5 @@ Host 0.63.0 / ABI 1.53.0 / SDK 0.61.0 adds selected hotbar-slot reads/writes, bo
 Host 0.64.0 / ABI 1.54.0 / SDK 0.62.0 adds synchronous client item-tooltip callbacks. A client module receives only an item registry ID, count, and durability snapshot and may append bounded literal lines under `events.subscribe` and `client.item.tooltip.modify`. Server contexts cannot subscribe, and callbacks cannot mutate item data. Codec, adapter, subscription-context, SDK, and example tests pass; visible rendering still needs a display-backed client. See [client item-tooltip events](ITEM_TOOLTIP_EVENTS.md).
 
 Host 0.65.0 / ABI 1.55.0 / SDK 0.63.0 adds `client.chat.send_attempt`, a physical-client callback for the original text about to be sent. A module may veto sending synchronously, but cannot rewrite the message. Reading text requires `client.chat.send.observe`; vetoing also requires `events.subscribe` and `events.cancel`. This leaves Minecraft's signed-chat path intact. Codec, adapter, permissions, client-side routing, and SDK tests pass; a display-backed client check remains outstanding. See [outgoing client chat veto](CLIENT_CHAT_SEND.md).
+
+Host 0.66.0 / ABI 1.56.0 / SDK 0.64.0 adds bounded interactive client screens. A physical-client module with `client.ui.screen` can open a vanilla screen containing literal text and up to four buttons. Button actions route directly to the owning module's `client.screen.action` callback; they do not use global event subscriptions. The host rejects screens when another screen owns the display, keeps the screen non-pausing, and closes it when its module unloads. Codec, capability/context, screen ownership, cleanup, SDK, and example tests pass; visible layout and input still need a display-backed client. See [interactive client screens](CLIENT_SCREEN.md).

@@ -105,6 +105,19 @@ pub struct ClientChatSendAttempt {
     pub message: String,
 }
 
+/// Synchronous, non-cancellable notification for a button click on a module-owned client screen.
+///
+/// The host emits `client.screen.action` directly only to the owner of the screen that received
+/// the click. It contains the stable screen and button IDs, not Minecraft objects or command text.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ClientScreenAction {
+    /// ID of the module-owned screen that was clicked.
+    pub screen_id: String,
+    /// ID of the button clicked on that screen.
+    pub button_id: String,
+}
+
 /// Synchronous cancellable logical-server right-click attempt for a block, entity, or item use.
 ///
 /// Return `Ok(true)` from the `player.interaction` event handler to veto this attempt.

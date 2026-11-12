@@ -99,6 +99,7 @@ pub mod client_chat;
 pub mod client_input;
 pub mod client_keybindings;
 pub mod client_notifications;
+pub mod client_screen;
 pub mod entity;
 pub mod entity_attributes;
 pub mod entity_data;
@@ -150,6 +151,7 @@ pub use client_keybindings::{
     MAX_CLIENT_KEYBINDING_SUBSCRIPTIONS,
 };
 pub use client_notifications::NotificationKind;
+pub use client_screen::{ClientScreenButton, ClientScreenDefinition};
 pub use entity::{
     ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
     MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_EFFECT_ID_BYTES,
@@ -157,7 +159,10 @@ pub use entity::{
 };
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
-pub use events::{ClientChatSendAttempt, ClientItemTooltip, ItemTooltipLines, PlayerSleepAttempt};
+pub use events::{
+    ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction, ItemTooltipLines,
+    PlayerSleepAttempt,
+};
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
     GlDepthFunction, GlExecutionReport, GlFramebufferAttachment, GlIndexType, GlPrimitiveMode,
@@ -274,6 +279,8 @@ pub mod prelude {
     };
     pub use crate::client_notifications;
     pub use crate::client_notifications::NotificationKind;
+    pub use crate::client_screen;
+    pub use crate::client_screen::{ClientScreenButton, ClientScreenDefinition};
     pub use crate::entity;
     pub use crate::entity::{
         ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY,
@@ -291,8 +298,8 @@ pub mod prelude {
     pub use crate::events;
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
-        BlockPlaceAttempt, ClientChatSendAttempt, ClientItemTooltip, EffectTickEvent,
-        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        BlockPlaceAttempt, ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction,
+        EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
         EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
         EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged, ItemTooltipLines,
         PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,

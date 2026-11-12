@@ -6,11 +6,13 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.55.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.56.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.55.0 adds
-the synchronous, cancellable, physical-client `client.chat.send_attempt` event.
+incompatible. Build metadata does not affect version ordering. ABI 1.56.0 adds
+bounded interactive physical-client screens under `client.ui.screen`, with
+owner-directed `client.screen.action` callbacks. ABI 1.55.0 adds the
+synchronous, cancellable, physical-client `client.chat.send_attempt` event.
 It passes bounded original text and requires `client.chat.send.observe` plus
 `events.subscribe` and `events.cancel`; it never rewrites signed chat. ABI
 1.54.0 adds the synchronous, client-only `client.item.tooltip` event, whose
@@ -453,6 +455,9 @@ dedicated-server execution contexts. `client.item.tooltip` and
 Non-cancellable notification callbacks may use
 `#[event_async]`; cancellable callbacks and callbacks that return a value to
 Minecraft synchronously, including `client.item.tooltip`, must use `#[event]`.
+The owner-directed `client.screen.action` callback is not an event subscription
+and does not require `events.subscribe`; it may use `#[event_async]` because it
+returns no value to the screen synchronously.
 
 ## Event subscription imports (NeoForge adapter)
 
@@ -1184,6 +1189,42 @@ raw packets or dispatch commands through this import. Text must be nonblank,
 single-line, free of controls, not start with `/` after leading whitespace,
 at most 256 UTF-16 code units and 1,024 UTF-8 bytes. A module may send once per
 second. See [client chat messages](CLIENT_CHAT_MESSAGES.md).
+
+## Interactive client screens
+
+ABI 1.56.0 adds `sjml_client_ui_v1.open_screen(payload_ptr, payload_len) -> i32`.
+It requires the declared and administrator-granted `client.ui.screen`
+capability, `ExecutionContext.CLIENT`, a physical client, and the client main
+thread. The import is denied during static registration and in server contexts.
+Only one screen per runtime module may be open; the module may replace its own
+screen. If another screen owns the display, the call returns `SERVICE_BUSY`.
+Module teardown closes only that module's current screen.
+
+The exact payload is little-endian schema-v1 data:
+
+1. `u32 schema_version` (`1`)
+2. stable UTF-8 string `screen_id`
+3. stable UTF-8 string `title`
+4. `u32 body_line_count`, then that many stable UTF-8 body strings
+5. `u32 button_count`, then each stable UTF-8 `button_id` and `label`
+
+The complete payload is at most 4,096 bytes. IDs contain 1–64 lowercase ASCII
+letters, digits, or `_.:/-`; button IDs must be unique. The title is 1–128
+bytes, there are zero to six body lines of up to 160 bytes each, and there are
+one to four buttons with labels of 1–96 bytes. Text must be strict UTF-8 and
+cannot contain control characters; empty body lines are allowed. All text is
+literal and is rendered by a bounded vanilla `Screen` with ordinary buttons.
+
+When a button is clicked, the screen closes and the owning module receives the
+direct callback export `sjml_v1_event_client.screen.action`. Its schema-v1
+payload is `u32 schema_version` (`1`), stable UTF-8 `screen_id`, and stable
+UTF-8 `button_id`; the callback must return the unit value. This callback is
+not routed through `events.subscribe`. The host checks for this export before
+opening the screen and returns `INVALID_ARGUMENT` if it is missing. Escape or
+external screen closure does not emit a button action. The callback can open
+another owner screen after the first screen closes. `Screen` does not pause
+integrated-server ticks. See
+[interactive client screens](CLIENT_SCREEN.md).
 
 ## Client toast notifications
 

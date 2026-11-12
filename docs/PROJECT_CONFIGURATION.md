@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.55.0"
+abi = "^1.56.0"
 minecraft = "~1.21.1"
-sjml = "^0.65.0"
+sjml = "^0.66.0"
 
 [[modules]]
 id = "main"
@@ -202,6 +202,7 @@ module's manifest request and the administrator's list.
 | `client.input.screen_scroll` | Receiving/consuming active-screen scroll callbacks; requires `client.input`. |
 | `player.ui.actionbar` | Sending bounded literal action-bar text to a live player; also requires `entity.read`. |
 | `player.ui.title` | Sending bounded literal title and subtitle packets to a live player; also requires `entity.read`. |
+| `client.ui.screen` | Opening a bounded literal vanilla screen with up to four buttons on the physical client; button actions are dispatched directly to their owning module. |
 | `client.chat.observe`, `client.chat.filter`, `client.chat.rewrite`, `client.chat.send`, `client.chat.send.observe` | Observing bounded incoming chat text, hiding its display insertion, replacing it with bounded rich text, sending ordinary signed chat through Minecraft's local player connection, or reading the local user's original outgoing text. Incoming filtering/replacement need their separate grants; outgoing observation also requires `events.subscribe`, and veto requires `events.cancel`. |
 | `client.ui.notify` | Showing bounded vanilla toast notifications on the physical client. |
 | `client.audio.play` | Playing a registered sound locally through Minecraft's sound manager. |

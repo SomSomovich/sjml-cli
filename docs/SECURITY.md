@@ -57,6 +57,14 @@ continue through Minecraft's regular signed-chat path. Callbacks run on the
 client main thread, and nested chat sends from a guest callback are canceled to
 prevent recursion or bypassing a veto.
 
+`client.ui.screen` opens only a bounded vanilla screen for the owning physical-
+client module. Literal text, ID syntax, button count, and payload size are
+validated on both sides of the ABI; the screen exposes no Minecraft objects or
+arbitrary widget callbacks. A button action is dispatched only to the module
+that owns that screen, and module teardown closes only its screen instance.
+The API refuses to replace another screen, does not pause integrated-server
+ticks, and does not require `events.subscribe` for the direct action callback.
+
 Task groups bound the number of queued and running operations per module and
 bound each requested timeout. A timeout completes the operation with a timeout
 error and requests cooperative cancellation. It cannot guarantee termination

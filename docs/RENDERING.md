@@ -183,6 +183,14 @@ fn initialize_screen_overlay() -> SjmlResult<()> {
 }
 ```
 
+For a vanilla screen that displays literal title/body text and up to four
+buttons, use the separate `client_screen` API. It requires `client.ui.screen`;
+its `client.screen.action` button actions close the screen and are dispatched
+directly to its owning module.
+See [interactive client screens](CLIENT_SCREEN.md) for an example. This does not
+replace HUD/screen render callbacks and does not expose arbitrary Minecraft
+widget trees.
+
 ## Package-owned GUI fonts and sprites
 
 HUD and screen callbacks can draw images and select fonts from their own package
