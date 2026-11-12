@@ -25,6 +25,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "block.place_attempt"
             | "player.interaction"
             | "player.drop_attempt"
+            | "player.sleep_attempt"
             | "entity.death_attempt"
             | "entity.damage_attempt"
             | "entity.heal_attempt"
@@ -37,6 +38,12 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
         return error(
             Span::call_site(),
             format!("{name} is cancellable and must use a synchronous #[event] handler"),
+        );
+    }
+    if name == "client.item.tooltip" {
+        return error(
+            Span::call_site(),
+            "client.item.tooltip returns tooltip lines synchronously and cannot use #[event_async]",
         );
     }
 
@@ -308,6 +315,13 @@ mod tests {
         );
         diagnostic(
             expand_event_async(
+                quote!(name = "player.sleep_attempt"),
+                quote! { async fn sleep_attempt(_: PlayerSleepAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.sleep_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
                 quote!(name = "entity.death_attempt"),
                 quote! { async fn death_attempt(_: EntityDeathAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
@@ -361,6 +375,19 @@ mod tests {
                 quote! { async fn screen_key(_: ScreenKeyPressedEvent) -> SjmlResult<()> { Ok(()) } },
             ),
             "client.screen.key_pressed is cancellable",
+        );
+    }
+
+    #[test]
+    fn result_bearing_client_tooltip_handler_must_remain_synchronous() {
+        diagnostic(
+            expand_event_async(
+                quote!(name = "client.item.tooltip"),
+                quote! {
+                    async fn tooltip(_: ClientItemTooltip) -> SjmlResult<()> { Ok(()) }
+                },
+            ),
+            "returns tooltip lines synchronously",
         );
     }
 

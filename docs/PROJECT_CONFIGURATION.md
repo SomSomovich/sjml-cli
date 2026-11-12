@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.53.0"
+abi = "^1.54.0"
 minecraft = "~1.21.1"
-sjml = "^0.63.0"
+sjml = "^0.64.0"
 
 [[modules]]
 id = "main"
@@ -160,9 +160,10 @@ exactly one `cdylib` target.
 ## Capability requests and server grants
 
 A capability must be declared in the module's `permissions` array and granted
-by the server administrator. Neither side alone is enough. The administrator
-file is `config/sjml-permissions.toml` in the Minecraft instance, not inside
-the mod project:
+by the administrator for that Minecraft instance. Neither side alone is enough.
+The grant file is `config/sjml-permissions.toml` in the game instance, not
+inside the mod project. Client-only permissions are granted on each client
+that runs the module:
 
 ```toml
 [[grant]]
@@ -179,6 +180,7 @@ module's manifest request and the administrator's list.
 | `content.register` | Static registry declarations, including bounded item food/rarity/enchantment/durability values, and server guest commands. |
 | `client.command` | Register and execute bounded local commands on the physical client; does not send commands to the server. |
 | `events.subscribe` | Subscribing to supported host events. |
+| `client.item.tooltip.modify` | Appending bounded literal lines from synchronous `client.item.tooltip` callbacks on the physical client; also requires `events.subscribe`. |
 | `events.cancel` | Vetoing cancellable block break/place, right-click `player.interaction`, `player.drop_attempt`, `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`, `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; also requires `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
 | `world.read`, `world.write` | Reading loaded server-world state; writes include blocks and properties, scheduled block ticks, time, weather, difficulty, Overworld spawn point, allowlisted boolean/integer game rules, and world-border settings, and require both. |
 | `entity.read`, `entity.spawn`, `entity.effect.apply`, `entity.effect.remove` | Reading player/entity snapshots, spawning registered entities, or applying/removing registered effects; effect mutation also requires `entity.read`. |

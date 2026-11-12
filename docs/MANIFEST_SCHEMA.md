@@ -51,7 +51,7 @@ activation. It does not select or download a host version.
 | `path` | string | yes | Relative archive path ending in `.wasm`; normally `modules/<id>.wasm`. |
 | `side` | string | no | `client`, `server`, or `both`; default `both`. Selects the logical runtime where the module is instantiated. |
 | `depends` | array of strings | no | Module IDs in this package that must be available first. Every ID must name a declared module. |
-| `permissions` | array of strings | no | Capability requests; each must also be granted by the server administrator before protected operations are enabled. |
+| `permissions` | array of strings | no | Capability requests; each must also be granted by the administrator for the Minecraft instance that runs the module before protected operations are enabled. |
 | `provides` | array of strings | no | Service IDs this module implements. Each must also have a matching entry in `exports`. |
 | `[[modules.exports]]` | array of tables | no | Versioned service exports and their visibility. |
 | `[[modules.commands]]` | array of tables | no | Server guest commands; client-only modules cannot declare them. |

@@ -31,3 +31,7 @@ error does not cancel vanilla behavior.
 
 Both callbacks run on the logical server thread and receive bounded schema-v1
 payloads. They expose no Minecraft objects and do not cause chunks to load.
+
+The physical-client `client.item.tooltip` callback is synchronous and can
+append bounded literal lines to a vanilla tooltip; it is documented separately
+in [Client item-tooltip events](ITEM_TOOLTIP_EVENTS.md).

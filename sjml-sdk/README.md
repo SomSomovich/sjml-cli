@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.61.0"
+sjml-sdk = "0.62.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -154,6 +154,11 @@ on loaded living entities, reads/writes for existing scoreboard objectives,
 and the cancellable `PlayerSleepAttempt` event. See the matching API guides
 in `../docs/` for grants, bounds, and event semantics.
 
+SDK 0.62.0 adds the synchronous physical-client `client.item.tooltip` event
+and bounded literal lines through `ItemTooltipLines`. It requires
+`events.subscribe` and the separate `client.item.tooltip.modify` grant; see
+`../docs/ITEM_TOOLTIP_EVENTS.md` for the contract and example.
+
 ```rust
 use sjml::prelude::*;
 
@@ -166,7 +171,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.61.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.62.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

@@ -6,10 +6,13 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.53.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.54.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.53.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.54.0 adds
+the synchronous, client-only `client.item.tooltip` event, whose callback can
+append bounded literal tooltip lines when separately granted
+`client.item.tooltip.modify`. ABI 1.53.0 adds
 selected hotbar-slot reads and writes, bounded active-effect snapshots for
 loaded living entities, reads and writes for entries in existing scoreboard
 objectives, and the synchronous cancellable `player.sleep_attempt` event.
@@ -441,10 +444,11 @@ server level. Slots are `None` when the successful hook does not expose an
 exact player inventory slot. No live inventory or item stack is exposed, and
 the callback cannot alter the completed change.
 Guest commands are described below.
-Subscriptions are accepted only in
-integrated-server and dedicated-server execution contexts. An `ActiveModule`
-in a client context cannot subscribe. Non-cancellable callbacks may use
-`#[event_async]`; all cancellable callbacks remain synchronous.
+Server event subscriptions are accepted only in integrated-server and
+dedicated-server execution contexts. `client.item.tooltip` is accepted only in
+the physical-client context. Non-cancellable notification callbacks may use
+`#[event_async]`; cancellable callbacks and callbacks that return a value to
+Minecraft synchronously, including `client.item.tooltip`, must use `#[event]`.
 
 ## Event subscription imports (NeoForge adapter)
 
@@ -474,22 +478,57 @@ event.
 The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
-`player.moved`, `player.respawned`,
-`player.advancement_earned`, `entity.death`, `entity.spawned`, `entity.effect.tick`, `entity.target_attempt`, `entity.projectile_impact_attempt`, `world.explosion_attempt`, `block.break`,
-`block.place`, `player.interacted`, `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
-`world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`.
-Subscribing to `block.break`, `player.interaction`, `player.drop_attempt`, `entity.target_attempt`, `entity.projectile_impact_attempt`, or `world.explosion_attempt` additionally requires the
-module to request and receive the separate `events.cancel` capability. Static
-registration instances cannot subscribe. A subscription callback runs
-synchronously on the owning logical-server thread. Non-cancellable handlers may
-use the SDK's `#[event_async(name = "...")]` macro: its generated synchronous
-ABI export admits a guest task and returns without waiting for the async body.
+`player.moved`, `player.respawned`, `player.advancement_earned`,
+`player.sleep_attempt`, `entity.death`, `entity.death_attempt`,
+`entity.damage_attempt`, `entity.spawned`, `entity.join_attempt`,
+`entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
+`entity.projectile_impact_attempt`, `entity.heal_attempt`, `block.break`,
+`block.break_attempt`, `block.place`, `block.place_attempt`, `player.interacted`,
+`player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
+`world.unloaded`, `world.explosion_attempt`, `server.tick`,
+`inventory.changed`, `resources.reloaded`, `menu.action`, and
+`client.item.tooltip`.
+Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
+`player.interaction`, `player.drop_attempt`, `player.sleep_attempt`,
+`entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`,
+`entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
+`entity.projectile_impact_attempt`, or `world.explosion_attempt` additionally
+requires the module to request and receive the separate `events.cancel`
+capability. Static registration instances cannot subscribe. Server event
+callbacks run synchronously on the owning logical-server thread. Non-cancellable
+notifications may use the SDK's `#[event_async(name = "...")]` macro: its
+generated synchronous ABI export admits a guest task and returns without
+waiting for the async body. The client tooltip callback instead runs on the
+client main thread and returns its value synchronously; it cannot use
+`#[event_async]`.
 Task-admission and async handler errors are logged; they do not affect the
 already-delivered notification. These tasks use the existing bounded
 `sjml_async_v1.wake`/poll runtime and inherit its task quota, timeout,
-cancellation, and module-shutdown behavior. The async macro rejects
-`block.break`, `player.interaction`, `player.drop_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; their cancellation
-results remain strictly synchronous.
+cancellation, and module-shutdown behavior. The async macro rejects all
+cancellable events and result-bearing client events such as
+`client.item.tooltip`.
+
+### Client item tooltip callback
+
+The guest export is `sjml_v1_event_client.item.tooltip`. It is available only
+to physical-client module instances subscribed to `client.item.tooltip`.
+Subscriptions still require `events.subscribe`; callbacks are invoked only
+when the same module also requested and received `client.item.tooltip.modify`.
+The callback executes synchronously on the client main thread.
+
+Its schema-v1 input is little-endian: `u32 schema_version` (`1`), a stable
+UTF-8 string `item_id`, then `u32 count`, `u32 damage`, and `u32 max_damage`.
+The item ID is at most 256 UTF-8 bytes; count is 1 through 1,000,000; damage values
+are at most 1,000,000. The host supplies only registry ID and stack durability
+metadata, not an `ItemStack`, components, or NBT.
+
+The callback returns the stable-encoded `ItemTooltipLines` record: `u32
+schema_version` (`1`), `u32 line_count`, then that many stable UTF-8 strings.
+At most 16 lines are allowed per callback, each at most 256 bytes, with at
+most 2,048 combined bytes. Strings must be non-empty and contain no control
+characters. The host caps one tooltip at 64 callbacks, 64 lines, and 8,192
+combined output bytes. Returned strings become literal tooltip components
+appended after vanilla content; they cannot carry style or interaction data.
 
 ## Async task and service imports
 

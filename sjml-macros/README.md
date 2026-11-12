@@ -10,6 +10,11 @@ The SDK re-exports lifecycle attributes `#[mod_register]`, `#[mod_init]`, and
 `StableEncode` and `StableDecode` derives. These generate the ABI entrypoints
 and stable payload codecs used by the host.
 
+`#[event_async]` is for non-cancellable notifications whose callback returns
+`SjmlResult<()>`. Cancellable events and synchronous result events such as
+`client.item.tooltip` must use `#[event]`; the macro rejects async handlers for
+both classes.
+
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for supported signatures, examples, schema annotations, and callback
 constraints. The low-level calling convention is documented in the

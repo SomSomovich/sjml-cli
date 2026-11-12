@@ -143,6 +143,71 @@ pub struct PlayerSleepAttempt {
     pub can_veto: bool,
 }
 
+/// Detached client-side snapshot emitted while Minecraft builds a tooltip for an item stack.
+///
+/// Subscribe to `client.item.tooltip` with `events::subscribe`. The callback may return bounded
+/// literal lines through [`ItemTooltipLines`]; changing tooltips requires the
+/// `client.item.tooltip.modify` capability in addition to `events.subscribe`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ClientItemTooltip {
+    /// Canonical registry ID of the item in the stack.
+    pub item_id: String,
+    /// Current stack count, in `1..=1_000_000`.
+    pub count: u32,
+    /// Current vanilla damage value, or zero for non-damageable stacks.
+    pub damage: u32,
+    /// The item's vanilla maximum damage value, or zero when it is not damageable.
+    pub max_damage: u32,
+}
+
+/// Bounded literal lines to append after the vanilla item tooltip.
+#[derive(Debug, Default, PartialEq, StableEncode)]
+#[sjml(version = 1)]
+pub struct ItemTooltipLines {
+    lines: Vec<String>,
+}
+
+impl ItemTooltipLines {
+    /// Maximum lines that one callback can add to a single tooltip.
+    pub const MAX_LINES: usize = 16;
+    /// Maximum UTF-8 bytes in one added line.
+    pub const MAX_LINE_BYTES: usize = 256;
+    /// Maximum combined UTF-8 bytes in all lines returned by one callback.
+    pub const MAX_TOTAL_BYTES: usize = 2_048;
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds one literal tooltip line. Control characters and empty lines are rejected.
+    pub fn push(&mut self, line: impl Into<String>) -> SjmlResult<()> {
+        let line = line.into();
+        if line.is_empty()
+            || line.len() > Self::MAX_LINE_BYTES
+            || line.chars().any(char::is_control)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "tooltip lines must contain 1–256 UTF-8 bytes without control characters",
+            ));
+        }
+        let total_bytes = self.lines.iter().map(String::len).sum::<usize>() + line.len();
+        if self.lines.len() >= Self::MAX_LINES || total_bytes > Self::MAX_TOTAL_BYTES {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "tooltip callback exceeds its line or byte limit",
+            ));
+        }
+        self.lines.push(line);
+        Ok(())
+    }
+
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
+}
+
 /// Synchronous cancellable logical-server attempt to drop an item stack from a player inventory.
 ///
 /// Return `Ok(true)` from the `player.drop_attempt` handler to veto the toss when `can_cancel` is
@@ -806,16 +871,83 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
-        BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
-        EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged,
-        PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerMoved, PlayerRespawned, PlayerSleepAttempt, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        BlockPlaceAttempt, ClientItemTooltip, EffectTickEvent, EntityDamageAttempt, EntityDamaged,
+        EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
+        EntityJoinAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt,
+        InventoryChanged, ItemTooltipLines, PlayerAdvancementEarned, PlayerDropAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerMoved, PlayerRespawned,
+        PlayerSleepAttempt, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
     use crate::{from_bytes, to_bytes};
+
+    #[test]
+    fn client_item_tooltip_round_trips_and_bounds_appended_literal_lines() {
+        let event = ClientItemTooltip {
+            item_id: "minecraft:diamond_sword".to_owned(),
+            count: 1,
+            damage: 7,
+            max_damage: 1_561,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&(event.item_id.len() as u32).to_le_bytes());
+        expected.extend_from_slice(event.item_id.as_bytes());
+        expected.extend_from_slice(&event.count.to_le_bytes());
+        expected.extend_from_slice(&event.damage.to_le_bytes());
+        expected.extend_from_slice(&event.max_damage.to_le_bytes());
+        assert_eq!(encoded, expected);
+        assert_eq!(from_bytes::<ClientItemTooltip>(&encoded).unwrap(), event);
+
+        let mut lines = ItemTooltipLines::new();
+        lines.push("Quality: epic").unwrap();
+        lines.push("Bound to this character").unwrap();
+        let encoded = to_bytes(&lines).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        for line in lines.lines() {
+            expected.extend_from_slice(&(line.len() as u32).to_le_bytes());
+            expected.extend_from_slice(line.as_bytes());
+        }
+        assert_eq!(encoded, expected);
+        assert!(lines.lines().contains(&"Quality: epic".to_owned()));
+    }
+
+    #[test]
+    fn client_item_tooltip_lines_reject_controls_and_excessive_output() {
+        let mut lines = ItemTooltipLines::new();
+        assert_eq!(
+            lines.push("line\nwith control").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            lines
+                .push("x".repeat(ItemTooltipLines::MAX_LINE_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        for index in 0..ItemTooltipLines::MAX_LINES {
+            lines.push(format!("line {index}")).unwrap();
+        }
+        assert_eq!(
+            lines.push("extra").unwrap_err().code(),
+            ErrorCode::PayloadTooLarge
+        );
+
+        let mut total_limited = ItemTooltipLines::new();
+        for _ in 0..8 {
+            total_limited.push("x".repeat(256)).unwrap();
+        }
+        assert_eq!(
+            total_limited.push("x").unwrap_err().code(),
+            ErrorCode::PayloadTooLarge
+        );
+    }
 
     #[test]
     fn player_moved_snapshot_round_trips_detached_position_and_look() {

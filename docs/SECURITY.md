@@ -40,6 +40,22 @@ continues to govern the existing key/mouse callbacks, and a mouse-button press
 can be consumed only through its documented hook. Input subscriptions are
 module-owned and removed when their runtime closes.
 
+The `client.item.tooltip` event passes only a registry ID, stack count, and
+durability values to a synchronous client callback. Appended output is bounded
+literal text and requires the separate `client.item.tooltip.modify` grant.
+Callbacks run on the client main thread because Minecraft consumes their
+result during tooltip construction; keep handlers short and avoid unrelated
+work in them. The host never exposes an `ItemStack`, components, or item NBT
+through this event.
+
+The `client.item.tooltip` event passes only a registry ID, stack count, and
+durability values to a synchronous client callback. Appended output is bounded
+literal text and requires the separate `client.item.tooltip.modify` grant.
+Callbacks run on the client main thread because Minecraft consumes their
+result during tooltip construction; keep handlers short and avoid unrelated
+work in them. The host never exposes an `ItemStack`, components, or item NBT
+through this event.
+
 Task groups bound the number of queued and running operations per module and
 bound each requested timeout. A timeout completes the operation with a timeout
 error and requests cooperative cancellation. It cannot guarantee termination
