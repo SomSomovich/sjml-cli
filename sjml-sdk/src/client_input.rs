@@ -51,6 +51,9 @@ impl CursorPosition {
 /// Module-owned global client-input subscription handle.
 pub type ClientInputSubscriptionHandle = EventSubscriptionHandle;
 
+/// Module-owned subscription handle for observe-only global keyboard notifications.
+pub type GlobalKeyObservationHandle = EventSubscriptionHandle;
+
 /// Module-owned global mouse-wheel subscription handle.
 pub type MouseScrollSubscriptionHandle = EventSubscriptionHandle;
 
@@ -108,6 +111,35 @@ pub enum ClientInputAction {
     Press,
     Release,
     Repeat,
+}
+
+/// Detached key data posted by NeoForge after vanilla key mappings have already run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GlobalKeyObservation {
+    pub key_code: i32,
+    pub scan_code: u16,
+    pub action: ClientInputAction,
+    pub modifiers: u8,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl GlobalKeyObservation {
+    fn from_input(event: ClientInputEvent) -> Option<Self> {
+        match event {
+            ClientInputEvent::Key {
+                key_code,
+                scan_code,
+                action,
+                modifiers,
+            } => Some(Self {
+                key_code,
+                scan_code,
+                action,
+                modifiers,
+            }),
+            ClientInputEvent::MouseButton { .. } => None,
+        }
+    }
 }
 
 impl ClientInputEvent {
@@ -194,6 +226,10 @@ extern "C" {
     fn imported_subscribe(callback_id: i64, handle_output_pointer: i32) -> i32;
     #[link_name = "unsubscribe"]
     fn imported_unsubscribe(handle_pointer: i32, handle_length: i32) -> i32;
+    #[link_name = "subscribe_key_observation"]
+    fn imported_subscribe_key_observation(callback_id: i64, handle_output_pointer: i32) -> i32;
+    #[link_name = "unsubscribe_key_observation"]
+    fn imported_unsubscribe_key_observation(handle_pointer: i32, handle_length: i32) -> i32;
     #[link_name = "subscribe_scroll"]
     fn imported_subscribe_scroll(callback_id: i64, handle_output_pointer: i32) -> i32;
     #[link_name = "unsubscribe_scroll"]
@@ -210,6 +246,7 @@ type Callback =
 struct CallbackEntry {
     callback: Callback,
     handle: Option<ClientInputSubscriptionHandle>,
+    key_observation_only: bool,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -221,7 +258,7 @@ struct Callbacks {
 
 #[cfg(target_arch = "wasm32")]
 impl Callbacks {
-    fn insert<F>(&mut self, callback: F) -> SjmlResult<u64>
+    fn insert<F>(&mut self, callback: F, key_observation_only: bool) -> SjmlResult<u64>
     where
         F: FnMut(ClientInputEvent) -> SjmlResult<bool> + 'static,
     {
@@ -238,6 +275,7 @@ impl Callbacks {
             CallbackEntry {
                 callback: std::rc::Rc::new(std::cell::RefCell::new(Box::new(callback))),
                 handle: None,
+                key_observation_only,
             },
         );
         Ok(id)
@@ -326,7 +364,8 @@ where
 {
     #[cfg(target_arch = "wasm32")]
     {
-        let callback_id = CALLBACKS.with(|registry| registry.borrow_mut().insert(callback))?;
+        let callback_id =
+            CALLBACKS.with(|registry| registry.borrow_mut().insert(callback, false))?;
         let output = allocate_host_input(HANDLE_BYTES);
         if output == 0 {
             CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
@@ -374,17 +413,81 @@ where
     }
 }
 
+/// Subscribes to bounded global keyboard notices under `client.input.observe`.
+/// NeoForge emits these after vanilla key mappings and Minecraft processing; returning a value or
+/// cancelling this callback cannot change key handling. Use `screen_input::subscribe_key_pressed`
+/// for synchronous veto of key presses delivered to an already open screen.
+pub fn subscribe_global_keys<F>(callback: F) -> SjmlResult<GlobalKeyObservationHandle>
+where
+    F: FnMut(GlobalKeyObservation) -> SjmlResult<()> + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut callback = callback;
+        let adapter = move |event: ClientInputEvent| {
+            if let Some(event) = GlobalKeyObservation::from_input(event) {
+                callback(event)?;
+            }
+            Ok(false)
+        };
+        let callback_id = CALLBACKS.with(|registry| registry.borrow_mut().insert(adapter, true))?;
+        let output = allocate_host_input(HANDLE_BYTES);
+        if output == 0 {
+            CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate global key observation handle output",
+            ));
+        }
+        // SAFETY: initialize the complete live output allocation before the host writes the handle.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, HANDLE_BYTES as usize) };
+        // SAFETY: the exact output allocation remains live during the synchronous host import.
+        let status =
+            unsafe { imported_subscribe_key_observation(callback_id as i64, output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful call initialized the full handle allocation.
+            from_bytes::<GlobalKeyObservationHandle>(unsafe {
+                core::slice::from_raw_parts(output as *const u8, HANDLE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected global key observation subscription",
+            ))
+        };
+        // SAFETY: release the exact allocation passed to the host import.
+        unsafe { deallocate_host_input(output, HANDLE_BYTES) };
+        match result {
+            Ok(handle) => {
+                CALLBACKS.with(|registry| {
+                    if let Some(entry) = registry.borrow_mut().entries.get_mut(&callback_id) {
+                        entry.handle = Some(handle);
+                    }
+                });
+                Ok(handle)
+            }
+            Err(error) => {
+                CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+                Err(error)
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = callback;
+        Err(unsupported())
+    }
+}
+
 /// Removes an active subscription from the host and guest callback registry.
 pub fn unsubscribe(handle: ClientInputSubscriptionHandle) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
     {
-        let callback_id = CALLBACKS
+        let (callback_id, key_observation_only) = CALLBACKS
             .with(|registry| {
-                registry
-                    .borrow()
-                    .entries
-                    .iter()
-                    .find_map(|(&id, entry)| (entry.handle == Some(handle)).then_some(id))
+                registry.borrow().entries.iter().find_map(|(&id, entry)| {
+                    (entry.handle == Some(handle)).then_some((id, entry.key_observation_only))
+                })
             })
             .ok_or_else(|| {
                 SjmlError::new(
@@ -394,7 +497,15 @@ pub fn unsubscribe(handle: ClientInputSubscriptionHandle) -> SjmlResult<()> {
             })?;
         let bytes = to_bytes(&handle)?;
         // SAFETY: the stable handle bytes live for the complete synchronous host call.
-        let status = unsafe { imported_unsubscribe(bytes.as_ptr() as i32, bytes.len() as i32) };
+        let status = if key_observation_only {
+            // SAFETY: the exact serialized handle remains live for the synchronous host call.
+            unsafe {
+                imported_unsubscribe_key_observation(bytes.as_ptr() as i32, bytes.len() as i32)
+            }
+        } else {
+            // SAFETY: the exact serialized handle remains live for the synchronous host call.
+            unsafe { imported_unsubscribe(bytes.as_ptr() as i32, bytes.len() as i32) }
+        };
         if status != 0 {
             return Err(SjmlError::from_abi_code(
                 status as u32,
@@ -411,6 +522,12 @@ pub fn unsubscribe(handle: ClientInputSubscriptionHandle) -> SjmlResult<()> {
         let _ = handle;
         Err(unsupported())
     }
+}
+
+/// Removes a global-key observer using the same module-scoped handle returned by
+/// [`subscribe_global_keys`].
+pub fn unsubscribe_global_keys(handle: GlobalKeyObservationHandle) -> SjmlResult<()> {
+    unsubscribe(handle)
 }
 
 /// Subscribes to horizontal and vertical mouse-wheel movement. The event is observational: the
@@ -752,7 +869,7 @@ fn unsupported() -> SjmlError {
 mod tests {
     use super::{
         decode_cursor_position, ClientInputAction, ClientInputEvent, CursorPosition,
-        MouseScrollEvent,
+        GlobalKeyObservation, MouseScrollEvent,
     };
 
     #[test]
@@ -804,6 +921,33 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn global_observer_projection_contains_only_detached_keyboard_fields() {
+        let key = ClientInputEvent::Key {
+            key_code: 32,
+            scan_code: 57,
+            action: ClientInputAction::Press,
+            modifiers: 0x05,
+        };
+        assert_eq!(
+            GlobalKeyObservation::from_input(key),
+            Some(GlobalKeyObservation {
+                key_code: 32,
+                scan_code: 57,
+                action: ClientInputAction::Press,
+                modifiers: 0x05,
+            })
+        );
+        assert_eq!(
+            GlobalKeyObservation::from_input(ClientInputEvent::MouseButton {
+                button: 0,
+                action: ClientInputAction::Press,
+                modifiers: 0,
+            }),
+            None
+        );
     }
 
     #[test]

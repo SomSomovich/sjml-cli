@@ -32,11 +32,13 @@ one `ActiveModule` and execution context; `ActiveModule.close()` closes the
 event subscription, world, and player handle registries during module teardown after any eligible
 `mod_shutdown` callback and compiled-runtime close.
 
-The client-only `client.input` capability exposes detached key and mouse-button
-notifications on the client main thread when no screen is open. NeoForge does
-not allow global key events to be canceled; only a mouse-button press can be
-consumed. Input subscriptions are module-owned and removed when their runtime
-closes.
+Client input is split by effect: `client.input.observe` exposes detached
+global-key notices after Minecraft has processed them, so callbacks cannot
+cancel gameplay keys. `client.input.screen_cancel` can synchronously veto a
+key press delivered to an active screen. The older `client.input` grant
+continues to govern the existing key/mouse callbacks, and a mouse-button press
+can be consumed only through its documented hook. Input subscriptions are
+module-owned and removed when their runtime closes.
 
 Task groups bound the number of queued and running operations per module and
 bound each requested timeout. A timeout completes the operation with a timeout
@@ -265,6 +267,12 @@ existing attribute allowlist. Reads require `entity.read`; writes additionally
 require `entity.attributes.write`. Every call checks the login session and
 server thread, and base-value writes enforce the same per-attribute ranges as
 non-player entities.
+
+`entity::fire_ticks` reads a bounded effective duration from a live loaded
+non-player entity and requires `entity.read`. `entity::set_fire_ticks` also
+requires the separately granted `entity.fire.write` capability; both recheck
+the live module-scoped handle and logical-server thread. Values are limited to
+`0..=72_000`, and a negative vanilla extinguished sentinel is reported as zero.
 
 Integer game-rule writes use a fixed four-rule allowlist with narrow ranges;
 they require both `world.read` and `world.write`. `world::set_block_properties`

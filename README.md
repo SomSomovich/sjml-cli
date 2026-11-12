@@ -52,20 +52,20 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.54.0"`; that crate must be available from a configured Cargo registry.
+"0.55.0"`; that crate must be available from a configured Cargo registry.
 Until the SDK crates are published, use `--sdk-path` when you need to compile
 the generated project.
 
 ## Documentation
 
-- [Rust SDK guide](docs/SDK_GUIDE.md) and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.54.0/sjml/)
+- [Rust SDK guide](docs/SDK_GUIDE.md) and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.55.0/sjml/)
 - [WebAssembly ABI v1](docs/ABI.md)
 - [Project configuration and capability grants](docs/PROJECT_CONFIGURATION.md)
 - [Complete manifest schema](docs/MANIFEST_SCHEMA.md) and [`.sjml` archive format](docs/FORMAT.md)
 - [Compatibility and host support](docs/COMPATIBILITY.md)
 - [Networking](docs/NETWORKING.md), [storage](docs/STORAGE.md), [async services](docs/ASYNC_MODEL.md), and [client rendering/OpenGL](docs/RENDERING.md)
 - [Security boundaries](docs/SECURITY.md), [module lifecycle](docs/MODULE_LIFECYCLE.md), [block entities](docs/BLOCK_ENTITIES.md), [player movement](docs/PLAYER_MOVED_EVENT.md), [player respawn events](docs/PLAYER_RESPAWNED_EVENT.md), [player vitals](docs/PLAYER_VITALS.md), [player game mode](docs/PLAYER_GAME_MODE.md), [player motion](docs/PLAYER_MOTION.md), [player teleport](docs/PLAYER_TELEPORT.md), [entity removal](docs/ENTITY_REMOVAL.md), [world biomes](docs/WORLD_BIOMES.md), [world time](docs/WORLD_TIME.md), [world weather](docs/WORLD_WEATHER.md), [stonecutting recipes](docs/STONECUTTING.md), [smithing transform recipes](docs/SMITHING_TRANSFORM.md), [inventory transfers](docs/INVENTORY_MUTATIONS.md), [particles](docs/PARTICLES.md), and [worker compute](docs/WORKER_COMPUTE.md)
-- [Player equipment](docs/PLAYER_EQUIPMENT.md), [player abilities](docs/PLAYER_ABILITIES.md), [daylight-cycle gamerule](docs/WORLD_DAYLIGHT_CYCLE.md), [world border](docs/WORLD_BORDER.md), [client chat messages](docs/CLIENT_CHAT_MESSAGES.md), [client audio](docs/CLIENT_AUDIO.md), and [client toast notifications](docs/CLIENT_NOTIFICATIONS.md)
+- [Player equipment](docs/PLAYER_EQUIPMENT.md), [player abilities](docs/PLAYER_ABILITIES.md), [daylight-cycle gamerule](docs/WORLD_DAYLIGHT_CYCLE.md), [world border](docs/WORLD_BORDER.md), [client chat messages](docs/CLIENT_CHAT_MESSAGES.md), [client audio](docs/CLIENT_AUDIO.md), [client key events](docs/CLIENT_KEY_EVENTS.md), [player titles](docs/PLAYER_TITLES.md), [player inventory components](docs/PLAYER_INVENTORY_COMPONENTS.md), [item rarity](docs/ITEM_RARITY.md), [entity fire ticks](docs/ENTITY_FIRE_TICKS.md), [block break attempts](docs/BLOCK_BREAK_ATTEMPTS.md), and [client toast notifications](docs/CLIENT_NOTIFICATIONS.md)
 - [Loaded chunks](docs/WORLD_LOADED_CHUNKS.md), [entity raycasts](docs/ENTITY_RAYCAST.md), [cancellable entity death attempts](docs/ENTITY_DEATH_ATTEMPTS.md), [local client commands](docs/CLIENT_COMMANDS.md), [integer game rules](docs/WORLD_INTEGER_GAME_RULES.md), [block-property writes](docs/WORLD_BLOCK_PROPERTIES_WRITE.md), [item-stack snapshots](docs/ITEM_STACK_SNAPSHOT.md), [player inventory and durability writes](docs/PLAYER_INVENTORY_WRITES.md), [block-placement vetoes](docs/BLOCK_PLACE_ATTEMPTS.md), and [living entity and player attributes](docs/ENTITY_ATTRIBUTES.md), [villager trades](docs/VILLAGER_TRADES.md), [damage-attempt vetoes](docs/ENTITY_DAMAGE_ATTEMPTS.md), [cross-dimension teleport](docs/PLAYER_DIMENSION_TELEPORT.md), and [shared game time](docs/WORLD_GAME_TIME.md)
 
 ## Commands

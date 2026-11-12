@@ -138,8 +138,10 @@ pub use chat_messages::{
 pub use client_audio::SoundCategory;
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{
-    cursor_position, ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
-    CursorPosition, MouseScrollEvent, MouseScrollSubscriptionHandle, MAX_CURSOR_COORDINATE,
+    cursor_position, subscribe_global_keys, unsubscribe_global_keys, ClientInputAction,
+    ClientInputEvent, ClientInputSubscriptionHandle, CursorPosition, GlobalKeyObservation,
+    GlobalKeyObservationHandle, MouseScrollEvent, MouseScrollSubscriptionHandle,
+    MAX_CURSOR_COORDINATE,
 };
 pub use client_keybindings::{
     Context as KeybindingContext, Key as KeybindingKey, KeybindingDefinition,
@@ -169,7 +171,9 @@ pub use network::{
 };
 pub use player::{
     PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
-    PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_VELOCITY_COMPONENT,
+    PlayerSnapshot, PlayerTitleTimings, PlayerVelocity, PlayerVitals, MAX_PLAYER_TITLE_TEXT_BYTES,
+    MAX_PLAYER_TITLE_TEXT_CODE_POINTS, MAX_PLAYER_TITLE_TIMING_TICKS,
+    MAX_PLAYER_VELOCITY_COMPONENT,
 };
 pub use player_inventory::{
     PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
@@ -179,8 +183,8 @@ pub use recipe::{
     CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
 };
 pub use registry::{
-    BlockEntityModelDefinition, EntityModelDefinition, IntegerComponentDefinition, ModelAnimation,
-    ModelAnimationAxis, ModelCuboid, VillagerTradeItem, VillagerTradeOffer,
+    BlockEntityModelDefinition, EntityModelDefinition, IntegerComponentDefinition, ItemRarity,
+    ModelAnimation, ModelAnimationAxis, ModelCuboid, VillagerTradeItem, VillagerTradeOffer,
     MAX_BOUND_MODEL_CUBOIDS,
 };
 pub use render::{
@@ -188,7 +192,10 @@ pub use render::{
     WorldModelBuilder, WorldRenderFrame, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
     MAX_WORLD_MODEL_VERTICES,
 };
-pub use screen_input::{ScreenInputEvent, ScreenInputSubscriptionHandle, MAX_SCREEN_SCROLL_DELTA};
+pub use screen_input::{
+    unsubscribe_key_pressed, ScreenInputEvent, ScreenInputSubscriptionHandle,
+    ScreenKeyPressedEvent, ScreenKeyPressedSubscriptionHandle, MAX_SCREEN_SCROLL_DELTA,
+};
 pub use serialization::{
     from_bytes, to_bytes, Decoder, Encoder, StableDecode, StableEncode, MAX_COLLECTION_ITEMS,
     MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
@@ -235,8 +242,9 @@ pub mod prelude {
     pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
     pub use crate::client_input;
     pub use crate::client_input::{
-        cursor_position, subscribe_scroll, unsubscribe_scroll, ClientInputAction, ClientInputEvent,
-        ClientInputSubscriptionHandle, CursorPosition, MouseScrollEvent,
+        cursor_position, subscribe_global_keys, subscribe_scroll, unsubscribe_global_keys,
+        unsubscribe_scroll, ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
+        CursorPosition, GlobalKeyObservation, GlobalKeyObservationHandle, MouseScrollEvent,
         MouseScrollSubscriptionHandle, MAX_CLIENT_INPUT_SUBSCRIPTIONS, MAX_CURSOR_COORDINATE,
     };
     pub use crate::client_keybindings;
@@ -261,12 +269,12 @@ pub mod prelude {
     pub use crate::error::{ErrorCode, SjmlError, SjmlResult};
     pub use crate::events;
     pub use crate::events::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
-        EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerJoined, PlayerLeft, PlayerMoved, ResourcesReloaded,
-        ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
+        BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
+        EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft, PlayerMoved,
+        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
+        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -295,7 +303,8 @@ pub mod prelude {
     };
     pub use crate::player_inventory;
     pub use crate::player_inventory::{
-        PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
+        PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES,
+        MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
         MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
@@ -309,14 +318,14 @@ pub mod prelude {
         register_particle, register_recipe_serializer, register_shaped_recipe,
         register_shapeless_recipe, register_smithing_transform_recipe, register_sound,
         register_string_component, register_villager_trade, set_entity_attribute,
-        set_item_integer_component, set_item_string_component, AttributeModifierOperation,
-        BlockDefinition, BlockEntityModelDefinition, CookingRecipeDefinition, CookingRecipeKind,
-        CreativeTabDefinition, EffectCategory, EntityAiGoal, EntityAttribute, EntityDefinition,
-        EntityModelDefinition, FluidDefinition, FluidVisualDefinition, IntegerComponentDefinition,
-        ItemDefinition, ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient,
-        ShapedRecipeDefinition, ShapedRecipeKey, ShapelessRecipeDefinition,
-        SmithingTransformRecipeDefinition, StringComponentDefinition, VillagerTradeItem,
-        VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,
+        set_item_integer_component, set_item_rarity, set_item_string_component,
+        AttributeModifierOperation, BlockDefinition, BlockEntityModelDefinition,
+        CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
+        EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
+        FluidVisualDefinition, IntegerComponentDefinition, ItemDefinition, ItemRarity,
+        ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition,
+        ShapedRecipeKey, ShapelessRecipeDefinition, SmithingTransformRecipeDefinition,
+        StringComponentDefinition, VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,
     };
     pub use crate::render;
     pub use crate::render::{
@@ -326,7 +335,8 @@ pub mod prelude {
     };
     pub use crate::screen_input;
     pub use crate::screen_input::{
-        ScreenInputEvent, ScreenInputSubscriptionHandle, MAX_SCREEN_INPUT_COORDINATE,
+        unsubscribe_key_pressed, ScreenInputEvent, ScreenInputSubscriptionHandle,
+        ScreenKeyPressedEvent, ScreenKeyPressedSubscriptionHandle, MAX_SCREEN_INPUT_COORDINATE,
         MAX_SCREEN_INPUT_SUBSCRIPTIONS, MAX_SCREEN_SCROLL_DELTA,
     };
     pub use crate::serialization::{

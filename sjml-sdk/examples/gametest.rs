@@ -39,6 +39,12 @@ fn register_test_content() -> SjmlResult<()> {
     )?)?;
     registry::register_block_entity_model("gametest_machine", block_model)?;
     registry::register_item("gametest_ruby", ItemDefinition::default())?;
+    registry::register_item("gametest_epic_rarity", ItemDefinition::default())?;
+    registry::set_item_rarity("gametest_epic_rarity", ItemRarity::Epic)?;
+    registry::register_integer_component(
+        "player_charge",
+        IntegerComponentDefinition::new(-10, 10)?,
+    )?;
     registry::register_entity("gametest_ai", EntityDefinition::default())?;
     let mut entity_model = EntityModelDefinition::new();
     entity_model.add_cuboid([-0.25, 0.0, -0.25], [0.25, 0.5, 0.25], 0xFFFF_2080)?;
@@ -172,6 +178,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     let _ = world::loaded()?;
     let _ = player::online()?;
     events::subscribe("block.break", EventPriority::High)?;
+    events::subscribe("block.break_attempt", EventPriority::High)?;
     events::subscribe("entity.death", EventPriority::Normal)?;
     events::subscribe("entity.death_attempt", EventPriority::Normal)?;
     events::subscribe("entity.target_attempt", EventPriority::Normal)?;
@@ -195,6 +202,11 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
 #[event(name = "block.break")]
 fn veto_test_block_break(event: BlockBreak) -> SjmlResult<bool> {
     Ok(event.block_id == "sjml_game_test:content/gametest_block")
+}
+
+#[event(name = "block.break_attempt")]
+fn veto_diamond_block_break_attempt(event: BlockBreakAttempt) -> SjmlResult<bool> {
+    Ok(event.block_id == "minecraft:diamond_block")
 }
 
 #[event(name = "entity.death")]
@@ -1511,6 +1523,36 @@ fn write_player_inventory(arguments: PlayerArguments) -> SjmlResult<String> {
     Ok("player inventory slot write/clear and item durability update succeeded".to_owned())
 }
 
+#[command(name = "player.inventory.integer_component")]
+fn player_inventory_integer_component(arguments: PlayerArguments) -> SjmlResult<String> {
+    let target_player = player::online()?
+        .into_iter()
+        .find(|handle| {
+            player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.player_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "the requested player is not online",
+            )
+        })?;
+    let path = "player_charge";
+    if sjml::player_inventory::read_integer_component(target_player, 1, path)?.is_some() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the player inventory component fixture must start without the module component",
+        ));
+    }
+    sjml::player_inventory::write_integer_component(target_player, 1, path, 7)?;
+    if sjml::player_inventory::read_integer_component(target_player, 1, path)? != Some(7) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the player inventory component did not round-trip through the guest API",
+        ));
+    }
+    Ok("player inventory integer component read/write succeeded".to_owned())
+}
+
 #[derive(StableDecode)]
 #[sjml(version = 1)]
 struct EntityArguments {}
@@ -1565,6 +1607,43 @@ fn check_entity_raycast(arguments: EntityRaycastArguments) -> SjmlResult<String>
         ));
     }
     Ok("entity raycast returned the nearest loaded pig".to_owned())
+}
+
+#[command(name = "entity.fire_ticks.check")]
+fn check_entity_fire_ticks(arguments: EntityRaycastArguments) -> SjmlResult<String> {
+    let handle = entity::loaded()?
+        .into_iter()
+        .find(|handle| {
+            entity::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.entity_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "fire-tick test entity is not loaded",
+            )
+        })?;
+    let original_ticks = entity::fire_ticks(handle)?;
+    let check = (|| {
+        entity::set_fire_ticks(handle, 120)?;
+        if entity::fire_ticks(handle)? != 120 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity fire ticks did not round-trip to 120",
+            ));
+        }
+        entity::set_fire_ticks(handle, 0)?;
+        if entity::fire_ticks(handle)? != 0 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity fire ticks did not clear",
+            ));
+        }
+        Ok(())
+    })();
+    let restore = entity::set_fire_ticks(handle, original_ticks);
+    check?;
+    restore?;
+    Ok("entity fire ticks were set, read, and cleared".to_owned())
 }
 
 #[command(name = "entity.inspect")]

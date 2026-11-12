@@ -21,11 +21,13 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
     if matches!(
         name.as_str(),
         "block.break"
+            | "block.break_attempt"
             | "block.place_attempt"
             | "player.interaction"
             | "entity.death_attempt"
             | "entity.damage_attempt"
             | "entity.target_attempt"
+            | "client.screen.key_pressed"
     ) {
         return error(
             Span::call_site(),
@@ -273,6 +275,13 @@ mod tests {
         );
         diagnostic(
             expand_event_async(
+                quote!(name = "block.break_attempt"),
+                quote! { async fn break_attempt(_: BlockBreakAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.break_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
                 quote!(name = "block.place_attempt"),
                 quote! { async fn place_attempt(_: BlockPlaceAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
@@ -305,6 +314,13 @@ mod tests {
                 quote! { async fn damage_attempt(_: EntityDamageAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.damage_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "client.screen.key_pressed"),
+                quote! { async fn screen_key(_: ScreenKeyPressedEvent) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "client.screen.key_pressed is cancellable",
         );
     }
 

@@ -28,6 +28,22 @@ fn native_entity_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        entity::fire_ticks(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_fire_ticks(handle, entity::MAX_ENTITY_FIRE_TICKS)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_fire_ticks(handle, entity::MAX_ENTITY_FIRE_TICKS + 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
         entity::damage(handle, 1.0).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );

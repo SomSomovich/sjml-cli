@@ -231,7 +231,30 @@ pub struct BlockBreak {
     pub player_id: String,
     /// Resource location of the owning dimension, such as `minecraft:overworld`.
     pub dimension_id: String,
-    /// Resource location of the block state, such as `minecraft:stone`.
+    /// Registry ID of the block type at the attempted position; state properties are omitted.
+    pub block_id: String,
+    /// Signed block X coordinate.
+    pub x: i32,
+    /// Signed block Y coordinate.
+    pub y: i32,
+    /// Signed block Z coordinate.
+    pub z: i32,
+}
+
+/// Synchronous cancellable attempt to break a block on the logical server.
+///
+/// Return `Ok(true)` from a `#[event(name = "block.break_attempt")]` handler to
+/// veto destruction. The callback runs before the block is removed on the
+/// server thread and receives only detached values. A veto requires both
+/// `events.subscribe` and `events.cancel`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockBreakAttempt {
+    /// Canonical UUID string of the player who attempted to break the block.
+    pub player_id: String,
+    /// Resource location of the owning dimension, such as `minecraft:overworld`.
+    pub dimension_id: String,
+    /// Registry ID of the block type at the attempted position; state properties are omitted.
     pub block_id: String,
     /// Signed block X coordinate.
     pub x: i32,
@@ -577,11 +600,11 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
-        EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerMoved, PlayerRespawned, ResourcesReloaded, ServerTick,
-        WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
+        BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
+        EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerMoved, PlayerRespawned,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -635,6 +658,23 @@ mod tests {
         let decoded: BlockBreak = from_bytes(&encoded).unwrap();
 
         assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn block_break_attempt_round_trips_detached_player_block_and_signed_coordinates() {
+        let attempt = BlockBreakAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            block_id: "minecraft:stone".to_owned(),
+            x: -3,
+            y: 320,
+            z: i32::MIN,
+        };
+
+        let encoded = to_bytes(&attempt).unwrap();
+        let decoded: BlockBreakAttempt = from_bytes(&encoded).unwrap();
+
+        assert_eq!(decoded, attempt);
     }
 
     #[test]

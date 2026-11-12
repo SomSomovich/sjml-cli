@@ -1,8 +1,9 @@
 //! Bounded client-local sound playback through Minecraft's sound manager.
 //!
-//! A module must declare and receive `client.audio.play`. Requests run on the physical client
-//! main thread, accept only a sound event available in the active resource set, and never send
-//! sound playback over the network. The host rate-limits calls per module.
+//! One-shot playback requires `client.audio.play`; looping playback requires `client.audio.loop`.
+//! Requests run on the physical client main thread, accept only a sound event available in the
+//! active resource set, and never send sound playback over the network. The host rate-limits
+//! starts per module and stops only looping instances owned by the calling module.
 
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
@@ -14,6 +15,8 @@ pub const MAX_SOUND_VOLUME: f32 = 4.0;
 pub const MIN_SOUND_PITCH: f32 = 0.5;
 /// Largest pitch accepted by [`play`].
 pub const MAX_SOUND_PITCH: f32 = 2.0;
+/// Maximum active looping sounds a module may own at one time.
+pub const MAX_ACTIVE_LOOPING_SOUNDS_PER_MODULE: usize = 8;
 
 /// One of Minecraft's built-in sound categories.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,6 +45,30 @@ extern "C" {
         volume_bits: i32,
         pitch_bits: i32,
     ) -> i32;
+
+    #[link_name = "start_loop"]
+    fn imported_start_loop(
+        sound_id_pointer: i32,
+        sound_id_length: i32,
+        category: i32,
+        volume_bits: i32,
+        pitch_bits: i32,
+    ) -> i64;
+
+    #[link_name = "stop_loop"]
+    fn imported_stop_loop(handle: i32) -> i32;
+}
+
+/// Opaque loop handle scoped to the SJML module runtime that created it.
+#[must_use = "store the handle to stop this loop before the module runtime closes"]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct LoopingSoundHandle(u32);
+
+impl LoopingSoundHandle {
+    /// Returns the opaque numeric value for storage or comparison.
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
 }
 
 /// Plays a sound event locally at the client's listener position.
@@ -80,6 +107,83 @@ pub fn play(sound_id: &str, category: SoundCategory, volume: f32, pitch: f32) ->
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = category;
+        Err(SjmlError::new(
+            ErrorCode::UnknownErrorCode,
+            "client audio is available only to wasm32 guests",
+        ))
+    }
+}
+
+/// Starts a local looping sound and returns its module-owned handle.
+///
+/// The module must request and receive `client.audio.loop`; the host allows at most eight active
+/// loops per module and at most five playback starts per two-second window. Handles are valid only
+/// for the creating module runtime. Stopping a loop cannot stop another module's sound, and all
+/// remaining handles are stopped automatically when their owner runtime is deactivated.
+pub fn start_loop(
+    sound_id: &str,
+    category: SoundCategory,
+    volume: f32,
+    pitch: f32,
+) -> SjmlResult<LoopingSoundHandle> {
+    validate_sound_id(sound_id)?;
+    validate_levels(volume, pitch)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the borrowed resource ID stays live during this synchronous import. The host
+        // copies and validates the bounded UTF-8 bytes before returning.
+        let packed = unsafe {
+            imported_start_loop(
+                sound_id.as_ptr() as usize as u32 as i32,
+                sound_id.len() as i32,
+                category as u32 as i32,
+                volume.to_bits() as i32,
+                pitch.to_bits() as i32,
+            ) as u64
+        };
+        let status = (packed >> 32) as u32;
+        if status != 0 {
+            return Err(SjmlError::from_abi_code(
+                status,
+                "host rejected the looping client sound request",
+            ));
+        }
+        let handle = packed as u32;
+        if handle == 0 || handle > i32::MAX as u32 {
+            return Err(invalid("host returned an invalid looping sound handle"));
+        }
+        Ok(LoopingSoundHandle(handle))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = category;
+        Err(SjmlError::new(
+            ErrorCode::UnknownErrorCode,
+            "client audio is available only to wasm32 guests",
+        ))
+    }
+}
+
+/// Stops one looping sound owned by the current module runtime.
+pub fn stop_loop(handle: LoopingSoundHandle) -> SjmlResult<()> {
+    if handle.0 == 0 || handle.0 > i32::MAX as u32 {
+        return Err(invalid("looping sound handle is invalid"));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host verifies this opaque handle against the calling module's own registry.
+        let status = unsafe { imported_stop_loop(handle.0 as i32) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the looping sound handle",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
         Err(SjmlError::new(
             ErrorCode::UnknownErrorCode,
             "client audio is available only to wasm32 guests",
@@ -205,6 +309,27 @@ mod tests {
         );
         assert_eq!(
             play("bad ID", SoundCategory::Players, 1.0, 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn native_looping_calls_fail_closed_after_validating_arguments() {
+        assert_eq!(
+            start_loop(
+                "minecraft:entity.player.levelup",
+                SoundCategory::Music,
+                1.0,
+                1.0,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            start_loop("bad ID", SoundCategory::Music, 1.0, 1.0)
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument

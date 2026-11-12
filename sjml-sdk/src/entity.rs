@@ -19,6 +19,8 @@ pub(crate) const MAX_EFFECT_DURATION_TICKS: u32 = 72_000;
 pub const MAX_ENTITY_VELOCITY_COMPONENT: f64 = 64.0;
 /// Maximum damage amount accepted by one [`damage`] call.
 pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
+/// Maximum active fire duration that an entity fire-tick API call accepts or returns.
+pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 
 /// Current identity, type, dimension, and coordinates of one loaded non-player entity.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -106,6 +108,10 @@ extern "C" {
     fn imported_discard(handle: i32, handle_length: i32) -> i32;
     #[link_name = "velocity"]
     fn imported_velocity(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "fire_ticks"]
+    fn imported_fire_ticks(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_fire_ticks"]
+    fn imported_set_fire_ticks(handle: i32, handle_length: i32, ticks: i32) -> i32;
     #[link_name = "set_velocity"]
     fn imported_set_velocity(
         handle: i32,
@@ -574,6 +580,77 @@ pub fn set_velocity(handle: EntityHandle, velocity: EntityVelocity) -> SjmlResul
     }
 }
 
+/// Reads effective remaining fire duration for one loaded non-player entity.
+///
+/// The module must request `entity.read`. Vanilla's negative sentinel values
+/// for entities that are not burning are normalized to zero. Values above
+/// [`MAX_ENTITY_FIRE_TICKS`] are rejected by the host rather than truncated.
+pub fn fire_ticks(handle: EntityHandle) -> SjmlResult<u32> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output::<u32>(core::mem::size_of::<u32>() as u32, |output, capacity| {
+            // SAFETY: read_output owns the destination allocation for this synchronous import.
+            unsafe {
+                imported_fire_ticks(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+        .and_then(|ticks| {
+            if ticks <= MAX_ENTITY_FIRE_TICKS {
+                Ok(ticks)
+            } else {
+                Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "host returned entity fire ticks above the supported bound",
+                ))
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets remaining active fire duration on one loaded non-player entity.
+///
+/// The module must request and receive both `entity.read` and
+/// `entity.fire.write`. The tick count must be in `0..=72_000`; zero clears
+/// the active fire duration. Mutation happens synchronously on the owning
+/// logical-server thread after the host validates the module-scoped live handle.
+pub fn set_fire_ticks(handle: EntityHandle, ticks: u32) -> SjmlResult<()> {
+    if ticks > MAX_ENTITY_FIRE_TICKS {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity fire ticks must be within 0..=72,000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and bounded tick count remain live during the synchronous call.
+        let status = unsafe {
+            imported_set_fire_ticks(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                ticks as i32,
+            )
+        };
+        status_result(status, "host rejected the entity fire-tick mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 /// Requests one bounded generic damage hit against a loaded living non-player entity.
 ///
 /// The module must request and receive both `entity.read` and `entity.damage`. The host uses
@@ -689,10 +766,11 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, damage, raycast, remove_effect, set_velocity, validate_entity_raycast,
-        validate_spatial_query, within, EntityRaycastQuery, EntityRaycastResult, EntityVelocity,
-        SpatialQuery, SpatialResults, MAX_ENTITY_DAMAGE, MAX_ENTITY_RAYCAST_DISTANCE,
-        MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
+        apply_effect, damage, fire_ticks, raycast, remove_effect, set_fire_ticks, set_velocity,
+        validate_entity_raycast, validate_spatial_query, within, EntityRaycastQuery,
+        EntityRaycastResult, EntityVelocity, SpatialQuery, SpatialResults, MAX_ENTITY_DAMAGE,
+        MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT,
+        MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
     };
     use crate::{inventory::BlockPos, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle};
 
@@ -973,6 +1051,29 @@ mod tests {
         #[cfg(not(target_arch = "wasm32"))]
         assert_eq!(
             damage(handle, 1.0).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn entity_fire_tick_setter_enforces_the_supported_range_before_host_access() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(MAX_ENTITY_FIRE_TICKS, 72_000);
+        assert_eq!(
+            set_fire_ticks(handle, MAX_ENTITY_FIRE_TICKS + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_fire_ticks(handle, MAX_ENTITY_FIRE_TICKS)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "the inclusive upper bound should reach the WASM-only import on native targets"
+        );
+        assert_eq!(
+            fire_ticks(handle).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
         );
     }

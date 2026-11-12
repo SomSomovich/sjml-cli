@@ -47,6 +47,18 @@ pub struct ItemDefinition {
     pub fire_resistant: bool,
 }
 
+/// Supported vanilla display rarity for a registered item.
+///
+/// The stable host-import values are `Common = 0`, `Uncommon = 1`, `Rare = 2`, and `Epic = 3`.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ItemRarity {
+    Common = 0,
+    Uncommon = 1,
+    Rare = 2,
+    Epic = 3,
+}
+
 impl Default for ItemDefinition {
     fn default() -> Self {
         Self {
@@ -712,6 +724,8 @@ extern "C" {
         max_stack_size: i32,
         fire_resistant: i32,
     ) -> i32;
+    #[link_name = "set_item_rarity"]
+    fn imported_set_item_rarity(path_pointer: i32, path_length: i32, rarity: i32) -> i32;
     #[link_name = "register_block"]
     fn imported_register_block(
         path_pointer: i32,
@@ -1011,6 +1025,32 @@ pub fn register_item(path: &str, definition: ItemDefinition) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = definition;
+        Err(unsupported_target())
+    }
+}
+
+/// Selects a vanilla rarity for an item declared earlier by this module.
+///
+/// Call this from `#[mod_register]`, after [`register_item`] or the registration of a block with
+/// an item form. The host accepts only items owned by the same package and module; the default is
+/// [`ItemRarity::Common`].
+pub fn set_item_rarity(item_path: &str, rarity: ItemRarity) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the stable rarity code.
+        let status = unsafe {
+            imported_set_item_rarity(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                rarity as i32,
+            )
+        };
+        return status_result(status, "host rejected the item rarity");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = rarity;
         Err(unsupported_target())
     }
 }
@@ -3823,6 +3863,27 @@ mod tests {
         );
         assert_eq!(
             register_item("../ruby", ItemDefinition::default())
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_rarity_values_have_stable_wire_codes_and_paths_validate_before_import() {
+        assert_eq!(ItemRarity::Common as i32, 0);
+        assert_eq!(ItemRarity::Uncommon as i32, 1);
+        assert_eq!(ItemRarity::Rare as i32, 2);
+        assert_eq!(ItemRarity::Epic as i32, 3);
+        assert_eq!(
+            set_item_rarity("ruby", ItemRarity::Epic)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_rarity("../ruby", ItemRarity::Epic)
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument

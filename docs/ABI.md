@@ -6,10 +6,31 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.46.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.47.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.46.0 adds registry-backed bounded biome ID enumeration, module-owned bounded integer components on existing block-inventory stacks, and the cancellable `entity.target_attempt` event. Biome enumeration requires `world.read` and does not load chunks; component declarations require `content.register`, and inventory reads/writes require `world.read` plus `inventory.read` or `inventory.write`; target vetoes require `events.subscribe` and `events.cancel`. ABI 1.45.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.47.0 adds
+bounded item-rarity declarations, module-owned integer-component access on
+live player inventory stacks, loaded-entity fire-tick access, synchronous
+cancellable `block.break_attempt`, observe-only global key notifications,
+active-screen key vetoes, bounded module-owned client-loop sound handles, and
+server title/subtitle packets. Item and rarity registration requires
+`content.register`; player stack components require `entity.read` plus
+`inventory.read` or `inventory.write` and a component registered by the same
+module; fire reads require `entity.read` and writes also require
+`entity.fire.write`; break vetoes require `events.subscribe` and `events.cancel`;
+global key observation and screen vetoes use the separate
+`client.input.observe` and `client.input.screen_cancel` grants; looping audio
+requires `client.audio.loop`; titles require `entity.read` and
+`player.ui.title`.
+ABI 1.46.0 adds registry-backed bounded biome ID enumeration, module-owned
+bounded integer components on existing block-inventory stacks, and the
+cancellable `entity.target_attempt` event. Biome enumeration requires
+`world.read` and does not load chunks; component declarations require
+`content.register`, and block-inventory reads/writes require `world.read` plus
+`inventory.read` or `inventory.write`; target vetoes require `events.subscribe`
+and `events.cancel`.
+ABI 1.45.0 adds
 a replacement result to local client chat-message callbacks, allowing bounded
 literal spans with formatting, hover text, and safe local click actions under
 `client.chat.rewrite`. ABI 1.44.0 adds `sjml_world_v1.set_game_time` for the shared elapsed clock, `sjml_player_v1.teleport_to_world` to an already-loaded destination chunk, bounded static villager trade declarations, and the synchronous cancellable `entity.damage_attempt` callback before damage mitigation. Game-time writes require `world.read` and `world.write`; cross-dimension teleport requires `entity.read`, `player.teleport`, and `world.read`; trade declarations require `content.register` on a server-capable module; damage vetoes require `events.subscribe` and `events.cancel`. ABI 1.43.0 adds
@@ -1299,6 +1320,7 @@ signatures but calls return `PERMISSION_DENIED`.
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to the current player for that login session; status only |
 | `teleport` | `(handle_ptr: i32, handle_len: i32, destination_ptr: i32, destination_len: i32) -> i32` | Teleport the current player session within its current dimension; status only |
 | `action_bar` | `(handle_ptr: i32, handle_len: i32, text_ptr: i32, text_len: i32) -> i32` | Send literal action-bar text; requires `entity.read` and `player.ui.actionbar` |
+| `title` | `(handle_ptr, handle_len, title_ptr, title_len, subtitle_ptr, subtitle_len, fade_in_ticks, stay_ticks, fade_out_ticks) -> i32` | Send literal title and optional subtitle; requires `entity.read` and `player.ui.title` |
 
 `handle_len` must be 24. UUIDs are canonical lowercase UUID text, and
 dimension IDs are canonical `namespace:path`. Each stable string is limited to
@@ -1373,6 +1395,13 @@ nonblank, control-free UTF-8 limited to 1,024 bytes and 256 Unicode scalar
 values. Calls are server-only, validate the live player login session and
 server thread, and are limited to ten per module per five seconds. See
 [player action-bar messages](PLAYER_ACTIONBAR.md).
+`title` requires the separately requested and granted `player.ui.title`
+capability alongside `entity.read`. Title and subtitle are literal, control-free
+UTF-8 limited to 1,024 bytes and 256 Unicode scalar values; the title cannot be
+blank, while the subtitle may be empty. Each animation timing must be in
+`0..=6000` ticks. Calls are server-only, validate the live login session and
+server thread, and are limited to ten sends per module per five seconds. See
+[player title and subtitle messages](PLAYER_TITLES.md).
 
 ## Loaded non-player entities
 

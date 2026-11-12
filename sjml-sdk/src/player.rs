@@ -2,7 +2,8 @@
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
-//! `player.abilities.write`; action-bar messages require `player.ui.actionbar`. Player handles
+//! `player.abilities.write`; action-bar messages require `player.ui.actionbar`, and title packets
+//! require `player.ui.title`. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
 #[cfg(target_arch = "wasm32")]
@@ -383,6 +384,44 @@ pub const MAX_PLAYER_VELOCITY_COMPONENT: f64 = 64.0;
 pub const MAX_ACTION_BAR_TEXT_BYTES: usize = 1024;
 /// Maximum Unicode scalar values accepted for one literal player action-bar message.
 pub const MAX_ACTION_BAR_TEXT_CODE_POINTS: usize = 256;
+/// Maximum UTF-8 size accepted for a literal player title or subtitle.
+pub const MAX_PLAYER_TITLE_TEXT_BYTES: usize = 1024;
+/// Maximum Unicode scalar values accepted for a literal player title or subtitle.
+pub const MAX_PLAYER_TITLE_TEXT_CODE_POINTS: usize = 256;
+/// Maximum fade or stay duration, in ticks, for a player title.
+pub const MAX_PLAYER_TITLE_TIMING_TICKS: u32 = 6_000;
+
+/// Vanilla title animation timings in server ticks.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct PlayerTitleTimings {
+    /// Fade-in duration.
+    pub fade_in: u32,
+    /// Visible duration before fade-out.
+    pub stay: u32,
+    /// Fade-out duration.
+    pub fade_out: u32,
+}
+
+impl PlayerTitleTimings {
+    /// Creates bounded title animation timings. Each duration is at most five minutes.
+    pub fn new(fade_in: u32, stay: u32, fade_out: u32) -> SjmlResult<Self> {
+        let timings = Self {
+            fade_in,
+            stay,
+            fade_out,
+        };
+        if [fade_in, stay, fade_out]
+            .into_iter()
+            .any(|ticks| ticks > MAX_PLAYER_TITLE_TIMING_TICKS)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "player title timings must each be between zero and 6000 ticks",
+            ));
+        }
+        Ok(timings)
+    }
+}
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_player_v1")]
@@ -445,6 +484,18 @@ extern "C" {
     ) -> i32;
     #[link_name = "action_bar"]
     fn imported_action_bar(handle: i32, handle_length: i32, text: i32, text_length: i32) -> i32;
+    #[link_name = "title"]
+    fn imported_title(
+        handle: i32,
+        handle_length: i32,
+        title: i32,
+        title_length: i32,
+        subtitle: i32,
+        subtitle_length: i32,
+        fade_in: i32,
+        stay: i32,
+        fade_out: i32,
+    ) -> i32;
 }
 
 /// Returns every online player, sorted by canonical UUID. Before server binding and in client
@@ -629,6 +680,76 @@ fn validate_action_bar_text(text: &str) -> SjmlResult<()> {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "action-bar text must not contain control characters",
+        ));
+    }
+    Ok(())
+}
+
+/// Sends literal title and optional subtitle text to an online player.
+///
+/// The host sends Minecraft's normal title packets and applies the supplied timings. Text is not
+/// interpreted as JSON, a translation key, or a command. The title must be nonblank; the optional
+/// subtitle may be empty. Each string is limited to 1,024 UTF-8 bytes and 256 Unicode scalar
+/// values, and control characters are rejected. Timings are bounded to 6,000 ticks each.
+///
+/// Requires declared and administrator-granted `entity.read` and `player.ui.title`. The operation
+/// is available only to logical-server modules and is rate limited to ten sends per five seconds.
+pub fn show_title(
+    handle: PlayerHandle,
+    title: &str,
+    subtitle: Option<&str>,
+    timings: PlayerTitleTimings,
+) -> SjmlResult<()> {
+    validate_player_title_text(title, false)?;
+    let subtitle = subtitle.unwrap_or_default();
+    validate_player_title_text(subtitle, true)?;
+    PlayerTitleTimings::new(timings.fade_in, timings.stay, timings.fade_out)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: handle and both borrowed UTF-8 strings remain live during the synchronous call.
+        let status = unsafe {
+            imported_title(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                title.as_ptr() as usize as u32 as i32,
+                title.len() as i32,
+                subtitle.as_ptr() as usize as u32 as i32,
+                subtitle.len() as i32,
+                timings.fade_in as i32,
+                timings.stay as i32,
+                timings.fade_out as i32,
+            )
+        };
+        status_result(status, "host rejected the player title")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, title, subtitle, timings);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_player_title_text(text: &str, allow_blank: bool) -> SjmlResult<()> {
+    if (!allow_blank && text.trim().is_empty())
+        || text.len() > MAX_PLAYER_TITLE_TEXT_BYTES
+        || text.chars().count() > MAX_PLAYER_TITLE_TEXT_CODE_POINTS
+    {
+        return Err(SjmlError::new(
+            if text.len() > MAX_PLAYER_TITLE_TEXT_BYTES
+                || text.chars().count() > MAX_PLAYER_TITLE_TEXT_CODE_POINTS
+            {
+                ErrorCode::PayloadTooLarge
+            } else {
+                ErrorCode::InvalidArgument
+            },
+            "player title text is blank or exceeds its bounded text size",
+        ));
+    }
+    if text.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player title text must not contain control characters",
         ));
     }
     Ok(())
@@ -1042,10 +1163,37 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, teleport, teleport_to_world, vitals, PlayerTeleport, PlayerVitals,
+        apply_effect, teleport, teleport_to_world, validate_player_title_text, vitals,
+        PlayerTeleport, PlayerTitleTimings, PlayerVitals, MAX_PLAYER_TITLE_TEXT_BYTES,
         MAX_TELEPORT_COORDINATE,
     };
     use crate::{ErrorCode, PlayerHandle, WorldHandle};
+
+    #[test]
+    fn player_title_timings_and_literal_text_are_bounded() {
+        assert_eq!(PlayerTitleTimings::new(10, 70, 20).unwrap().stay, 70);
+        assert_eq!(
+            PlayerTitleTimings::new(0, 6_001, 0).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_player_title_text("", false).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert!(validate_player_title_text("", true).is_ok());
+        assert_eq!(
+            validate_player_title_text("line\nfeed", true)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_player_title_text(&"x".repeat(MAX_PLAYER_TITLE_TEXT_BYTES + 1), false)
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+    }
 
     #[test]
     fn player_effect_application_validates_before_host_access() {

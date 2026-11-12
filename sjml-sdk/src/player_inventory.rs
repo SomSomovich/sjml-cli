@@ -27,6 +27,8 @@ pub const MAX_PLAYER_INVENTORY_SLOT_COUNT: u32 = 4096;
 pub const MAX_PLAYER_INVENTORY_ITEM_ID_BYTES: usize = 256;
 /// Maximum durability value accepted for a live player inventory item.
 pub const MAX_PLAYER_INVENTORY_DAMAGE: u32 = 65_535;
+/// Maximum UTF-8 path length for a module-owned integer data component.
+pub const MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES: usize = 256;
 
 /// The only two updates accepted by [`set_slot`]. New stacks use registered items' default components.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -55,6 +57,27 @@ extern "C" {
 
     #[link_name = "set_player_damage"]
     fn imported_set_player_damage(player: i32, player_length: i32, slot: i32, damage: i32) -> i32;
+
+    #[link_name = "read_player_integer_component"]
+    fn imported_read_player_integer_component(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "write_player_integer_component"]
+    fn imported_write_player_integer_component(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        value: i32,
+    ) -> i32;
 }
 
 /// Reads all slots in the current live player's inventory as a bounded detached snapshot.
@@ -96,6 +119,106 @@ pub fn read(player: PlayerHandle) -> SjmlResult<InventorySnapshot> {
         let _ = player;
         Err(unsupported_target())
     }
+}
+
+/// Reads one bounded integer data component registered by this module from a nonempty player slot.
+///
+/// `component_path` is local to this package/module and must have been declared with
+/// [`crate::registry::register_integer_component`]. Empty slots or stacks without the component
+/// return `Ok(None)`. The host validates the stored value against the registered inclusive range.
+/// This server-only operation requires declared and granted `entity.read` and `inventory.read`,
+/// the owning server thread, and a live player session handle.
+pub fn read_integer_component(
+    player: PlayerHandle,
+    slot: u32,
+    component_path: &str,
+) -> SjmlResult<Option<i32>> {
+    validate_integer_component_access(slot, component_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        let value = read_output(|output, capacity| {
+            // SAFETY: borrowed handle/path and allocated output stay live through the synchronous import.
+            unsafe {
+                imported_read_player_integer_component(
+                    player.as_ptr() as usize as u32 as i32,
+                    player.len() as i32,
+                    slot as i32,
+                    component_path.as_ptr() as usize as u32 as i32,
+                    component_path.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        Ok(value)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, component_path);
+        Err(unsupported_target())
+    }
+}
+
+/// Writes one module-owned integer data component onto a nonempty live player inventory stack.
+///
+/// The path must have been declared with [`crate::registry::register_integer_component`]. The host
+/// enforces the registered inclusive value range, copies the existing stack before updating only
+/// this component, preserves its item/count/other components, and synchronizes the active menu.
+/// This server-only operation requires declared and granted `entity.read` and `inventory.write`,
+/// the owning server thread, and a live player session handle.
+pub fn write_integer_component(
+    player: PlayerHandle,
+    slot: u32,
+    component_path: &str,
+    value: i32,
+) -> SjmlResult<()> {
+    validate_integer_component_access(slot, component_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle and UTF-8 path remain borrowed for this synchronous host call.
+        let status = unsafe {
+            imported_write_player_integer_component(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as i32,
+                value,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory integer component write",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, component_path, value);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_integer_component_access(slot: u32, component_path: &str) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory slot must be between 0 and 40",
+        ));
+    }
+    if component_path.is_empty()
+        || component_path.len() > MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES
+        || !component_path.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+        })
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "integer component path must contain 1..=256 lowercase ASCII letters, digits, '.', '_' or '-'",
+        ));
+    }
+    Ok(())
 }
 
 /// Replaces or clears one slot in a live player's inventory.
@@ -297,10 +420,11 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     #[cfg(not(target_arch = "wasm32"))]
-    use super::read;
+    use super::{read, read_integer_component, write_integer_component};
     use super::{
         set_damage, set_slot, validate_damage, validate_inventory, PlayerInventorySlotUpdate,
-        MAX_PLAYER_INVENTORY_DAMAGE, MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
+        MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_DAMAGE,
+        MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
         MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
@@ -439,6 +563,55 @@ mod tests {
         );
         assert_eq!(
             set_damage(player, 0, MAX_PLAYER_INVENTORY_DAMAGE + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn player_integer_component_paths_and_slots_are_validated_before_host_access() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        for slot in [0, 40] {
+            assert_eq!(
+                read_integer_component(player, slot, "charge")
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::UnknownErrorCode,
+                "valid slot/path {slot} reaches the wasm-only host"
+            );
+            assert_eq!(
+                write_integer_component(player, slot, "charge", -7)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::UnknownErrorCode,
+                "valid slot/path {slot} reaches the wasm-only host"
+            );
+        }
+        for slot in [41, u32::MAX] {
+            assert_eq!(
+                read_integer_component(player, slot, "charge")
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                write_integer_component(player, slot, "charge", 1)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for path in ["", "Charge", "../charge", "nested/charge", "café"] {
+            assert_eq!(
+                read_integer_component(player, 0, path).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+                "invalid component path {path:?} must not reach the host"
+            );
+        }
+        let oversized = "a".repeat(MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES + 1);
+        assert_eq!(
+            write_integer_component(player, 0, &oversized, 1)
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument

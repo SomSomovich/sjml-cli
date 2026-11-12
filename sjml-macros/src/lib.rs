@@ -149,6 +149,12 @@ fn expand_callback(attribute: TokenStream2, item: TokenStream2, kind: &str) -> T
         Ok(name) => name,
         Err(error) => return error.to_compile_error(),
     };
+    if kind == "event" && name == "client.screen.key_pressed" {
+        return error(
+            Span::call_site(),
+            "client.screen.key_pressed uses screen_input::subscribe_key_pressed, not events::subscribe",
+        );
+    }
     let function = match parse2::<ItemFn>(item) {
         Ok(function) => function,
         Err(error) => return error.to_compile_error(),
@@ -606,6 +612,19 @@ mod tests {
     }
 
     #[test]
+    fn client_screen_key_veto_uses_the_typed_screen_input_subscription() {
+        diagnostic(
+            expand_event(
+                quote!(name = "client.screen.key_pressed"),
+                quote! {
+                    fn key(event: ScreenKeyPressedEvent) -> SjmlResult<bool> { Ok(true) }
+                },
+            ),
+            "uses screen_input::subscribe_key_pressed",
+        );
+    }
+
+    #[test]
     fn cancellable_entity_death_attempt_exports_the_sync_callback() {
         let generated = expand_event(
             quote!(name = "entity.death_attempt"),
@@ -616,6 +635,20 @@ mod tests {
         assert!(generated
             .to_string()
             .contains("sjml_v1_event_entity.death_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
+    fn cancellable_block_break_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "block.break_attempt"),
+            quote! {
+                fn protect_block(event: BlockBreakAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_block.break_attempt"));
         assert!(generated.to_string().contains("dispatch_payload"));
     }
 

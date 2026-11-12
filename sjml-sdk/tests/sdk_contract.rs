@@ -1,6 +1,6 @@
 use sjml::events::{
-    EffectTickEvent, EntityDeath, EntityDeathAttempt, PlayerJoined, PlayerLeft, PlayerRespawned,
-    ResourcesReloaded,
+    BlockBreakAttempt, EffectTickEvent, EntityDeath, EntityDeathAttempt, PlayerJoined, PlayerLeft,
+    PlayerRespawned, ResourcesReloaded,
 };
 use sjml::player::PlayerTeleport;
 use sjml::prelude::PlayerMoved;
@@ -64,6 +64,11 @@ fn on_player_respawned(_: PlayerRespawned) -> SjmlResult<()> {
 
 #[event(name = "entity.death_attempt")]
 fn on_entity_death_attempt(_: EntityDeathAttempt) -> SjmlResult<bool> {
+    Ok(false)
+}
+
+#[event(name = "block.break_attempt")]
+fn on_block_break_attempt(_: BlockBreakAttempt) -> SjmlResult<bool> {
     Ok(false)
 }
 
@@ -336,6 +341,34 @@ fn entity_death_attempt_record_has_detached_player_data_and_cancellable_bool_con
         from_bytes::<EntityDeathAttempt>(&expected_none).unwrap(),
         non_player
     );
+}
+
+#[test]
+fn block_break_attempt_record_has_the_documented_v1_field_order_and_bool_callback() {
+    let event = BlockBreakAttempt {
+        player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+        dimension_id: "minecraft:overworld".to_owned(),
+        block_id: "minecraft:stone".to_owned(),
+        x: -3,
+        y: 320,
+        z: i32::MIN,
+    };
+    let bytes = to_bytes(&event).expect("encode block.break_attempt record");
+    let mut expected = vec![1, 0, 0, 0];
+    for field in [
+        "00000000-0000-0000-0000-000000000001",
+        "minecraft:overworld",
+        "minecraft:stone",
+    ] {
+        expected.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        expected.extend_from_slice(field.as_bytes());
+    }
+    expected.extend_from_slice(&(-3_i32).to_le_bytes());
+    expected.extend_from_slice(&(320_i32).to_le_bytes());
+    expected.extend_from_slice(&i32::MIN.to_le_bytes());
+    assert_eq!(bytes, expected);
+    assert_eq!(from_bytes::<BlockBreakAttempt>(&bytes).unwrap(), event);
+    assert_eq!(on_block_break_attempt(event), Ok(false));
 }
 
 #[test]

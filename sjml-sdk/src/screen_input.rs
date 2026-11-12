@@ -23,6 +23,21 @@ const HANDLE_BYTES: u32 = 24;
 /// Module-owned active-screen input subscription handle.
 pub type ScreenInputSubscriptionHandle = EventSubscriptionHandle;
 
+/// Module-owned handle for synchronous active-screen key veto callbacks.
+pub type ScreenKeyPressedSubscriptionHandle = EventSubscriptionHandle;
+
+/// Detached press data available before the active screen's `keyPressed` handler runs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScreenKeyPressedEvent {
+    /// GLFW key code; -1 is an unknown key with a valid scan code.
+    pub key_code: i32,
+    pub scan_code: u16,
+    /// Shift, Control, Alt, Super, Caps Lock, and Num Lock occupy the low six bits.
+    pub modifiers: u8,
+    /// True when this is a repeated press rather than the initial key-down.
+    pub repeat: bool,
+}
+
 /// A click or key press from the active screen, captured on the client main thread.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScreenInputEvent {
@@ -113,6 +128,10 @@ extern "C" {
     fn imported_subscribe(callback_id: i64, handle_output_pointer: i32) -> i32;
     #[link_name = "unsubscribe"]
     fn imported_unsubscribe(handle_pointer: i32, handle_length: i32) -> i32;
+    #[link_name = "subscribe_key_pressed"]
+    fn imported_subscribe_key_pressed(callback_id: i64, handle_output_pointer: i32) -> i32;
+    #[link_name = "unsubscribe_key_pressed"]
+    fn imported_unsubscribe_key_pressed(handle_pointer: i32, handle_length: i32) -> i32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -123,6 +142,7 @@ type Callback =
 struct CallbackEntry {
     callback: Callback,
     handle: Option<ScreenInputSubscriptionHandle>,
+    key_pressed_only: bool,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -134,7 +154,7 @@ struct Callbacks {
 
 #[cfg(target_arch = "wasm32")]
 impl Callbacks {
-    fn insert<F>(&mut self, callback: F) -> SjmlResult<u64>
+    fn insert<F>(&mut self, callback: F, key_pressed_only: bool) -> SjmlResult<u64>
     where
         F: FnMut(ScreenInputEvent) -> SjmlResult<bool> + 'static,
     {
@@ -151,6 +171,7 @@ impl Callbacks {
             CallbackEntry {
                 callback: std::rc::Rc::new(std::cell::RefCell::new(Box::new(callback))),
                 handle: None,
+                key_pressed_only,
             },
         );
         Ok(id)
@@ -182,7 +203,8 @@ where
 {
     #[cfg(target_arch = "wasm32")]
     {
-        let callback_id = CALLBACKS.with(|registry| registry.borrow_mut().insert(callback))?;
+        let callback_id =
+            CALLBACKS.with(|registry| registry.borrow_mut().insert(callback, false))?;
         let output = allocate_host_input(HANDLE_BYTES);
         if output == 0 {
             CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
@@ -230,17 +252,87 @@ where
     }
 }
 
+/// Subscribes a synchronous boolean callback to active-screen key presses only.
+/// Return `true` to veto the screen's `keyPressed` handler. Requires
+/// `client.input.screen_cancel`; `#[event_async]` handlers cannot be used here.
+pub fn subscribe_key_pressed<F>(callback: F) -> SjmlResult<ScreenKeyPressedSubscriptionHandle>
+where
+    F: FnMut(ScreenKeyPressedEvent) -> SjmlResult<bool> + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut callback = callback;
+        let adapter = move |event: ScreenInputEvent| match event {
+            ScreenInputEvent::KeyPressed {
+                key_code,
+                scan_code,
+                modifiers,
+                repeat,
+            } => callback(ScreenKeyPressedEvent {
+                key_code,
+                scan_code,
+                modifiers,
+                repeat,
+            }),
+            _ => Ok(false),
+        };
+        let callback_id = CALLBACKS.with(|registry| registry.borrow_mut().insert(adapter, true))?;
+        let output = allocate_host_input(HANDLE_BYTES);
+        if output == 0 {
+            CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate screen key veto handle output",
+            ));
+        }
+        // SAFETY: initialize the complete live output allocation before the host writes the handle.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, HANDLE_BYTES as usize) };
+        // SAFETY: the exact output allocation remains live during the synchronous host import.
+        let status = unsafe { imported_subscribe_key_pressed(callback_id as i64, output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful host call initialized the complete handle allocation.
+            from_bytes::<ScreenKeyPressedSubscriptionHandle>(unsafe {
+                core::slice::from_raw_parts(output as *const u8, HANDLE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected screen key veto subscription",
+            ))
+        };
+        // SAFETY: release the exact allocation passed to the host import.
+        unsafe { deallocate_host_input(output, HANDLE_BYTES) };
+        match result {
+            Ok(handle) => {
+                CALLBACKS.with(|registry| {
+                    if let Some(entry) = registry.borrow_mut().entries.get_mut(&callback_id) {
+                        entry.handle = Some(handle);
+                    }
+                });
+                Ok(handle)
+            }
+            Err(error) => {
+                CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+                Err(error)
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = callback;
+        Err(unsupported())
+    }
+}
+
 /// Removes an active subscription from both the host and guest callback registry.
 pub fn unsubscribe(handle: ScreenInputSubscriptionHandle) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
     {
-        let callback_id = CALLBACKS
+        let (callback_id, key_pressed_only) = CALLBACKS
             .with(|registry| {
-                registry
-                    .borrow()
-                    .entries
-                    .iter()
-                    .find_map(|(&id, entry)| (entry.handle == Some(handle)).then_some(id))
+                registry.borrow().entries.iter().find_map(|(&id, entry)| {
+                    (entry.handle == Some(handle)).then_some((id, entry.key_pressed_only))
+                })
             })
             .ok_or_else(|| {
                 SjmlError::new(
@@ -250,7 +342,13 @@ pub fn unsubscribe(handle: ScreenInputSubscriptionHandle) -> SjmlResult<()> {
             })?;
         let bytes = to_bytes(&handle)?;
         // SAFETY: the stable handle bytes live for the complete synchronous host call.
-        let status = unsafe { imported_unsubscribe(bytes.as_ptr() as i32, bytes.len() as i32) };
+        let status = if key_pressed_only {
+            // SAFETY: the exact serialized handle remains live for the synchronous host call.
+            unsafe { imported_unsubscribe_key_pressed(bytes.as_ptr() as i32, bytes.len() as i32) }
+        } else {
+            // SAFETY: the exact serialized handle remains live for the synchronous host call.
+            unsafe { imported_unsubscribe(bytes.as_ptr() as i32, bytes.len() as i32) }
+        };
         if status != 0 {
             return Err(SjmlError::from_abi_code(
                 status as u32,
@@ -267,6 +365,12 @@ pub fn unsubscribe(handle: ScreenInputSubscriptionHandle) -> SjmlResult<()> {
         let _ = handle;
         Err(unsupported())
     }
+}
+
+/// Removes the synchronous active-screen key-veto callback returned by
+/// [`subscribe_key_pressed`].
+pub fn unsubscribe_key_pressed(handle: ScreenKeyPressedSubscriptionHandle) -> SjmlResult<()> {
+    unsubscribe(handle)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -385,7 +489,10 @@ fn unsupported() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ScreenInputEvent, MAX_SCREEN_INPUT_COORDINATE, MAX_SCREEN_SCROLL_DELTA};
+    use super::{
+        ScreenInputEvent, ScreenKeyPressedEvent, MAX_SCREEN_INPUT_COORDINATE,
+        MAX_SCREEN_SCROLL_DELTA,
+    };
 
     #[test]
     fn validates_bounded_click_and_key_events() {
@@ -403,6 +510,21 @@ mod tests {
             repeat: true,
         };
         assert_eq!(key.validate().unwrap(), key);
+        let veto = ScreenKeyPressedEvent {
+            key_code: -1,
+            scan_code: 65_535,
+            modifiers: 0x20,
+            repeat: true,
+        };
+        assert_eq!(
+            veto,
+            ScreenKeyPressedEvent {
+                key_code: -1,
+                scan_code: 65_535,
+                modifiers: 0x20,
+                repeat: true,
+            }
+        );
     }
 
     #[test]
