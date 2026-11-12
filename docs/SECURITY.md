@@ -126,7 +126,8 @@ static-registration calls are denied.
 
 ## Guest menus and action callbacks
 
-`sjml_menu_v1.open` requires both `entity.read` and `menu.open`, a live
+`sjml_menu_v1.open` and `sjml_menu_v1.update` require both `entity.read` and
+`menu.open`, a live
 module-owned player handle, and the owning logical-server thread. The host
 accepts only bounded slot, item-ID, count, title, label, and optional action-ID
 data; it resolves IDs through the item registry and rejects unknown items or
@@ -134,7 +135,10 @@ counts above the registered stack limit. The menu contains detached display
 stacks. Its server-side container ignores all item movement and quick-move
 requests. Only a left-click on an explicitly marked action slot can call the
 owner module's synchronous `menu.action` handler, and each module is limited to
-eight callbacks per server tick. The callback requires a live event
+eight callbacks per server tick. Updates can only replace an active SJML menu
+whose opaque owner token matches the calling runtime module; they cannot modify
+vanilla or another module's menu and are limited to eight replacements per
+module per server tick. The callback requires a live event
 subscription plus `entity.read` and `menu.open`; it does not load client classes
 on dedicated servers and is unavailable during static registration or on
 physical-client module instances.
@@ -273,6 +277,18 @@ non-player entity and requires `entity.read`. `entity::set_fire_ticks` also
 requires the separately granted `entity.fire.write` capability; both recheck
 the live module-scoped handle and logical-server thread. Values are limited to
 `0..=72_000`, and a negative vanilla extinguished sentinel is reported as zero.
+
+`entity::is_glowing` and `entity::is_silent` read only two fixed vanilla flags
+from live loaded non-player entities under `entity.read`. Their setters also
+require `entity.state.write`; the host rejects client, static-registration, and
+stale-handle calls. These flags do not expose general entity metadata or NBT.
+
+`player.drop_attempt` is synchronous and cancellable only when the host can
+restore the entire tossed stack to the player's inventory. It requires both
+event capabilities. If the inventory is full, or a callback changes it so the
+whole stack no longer fits, the original toss continues (with only any
+unrestored remainder left in the world). The host never cancels a toss after a
+partial restore, preventing item loss or duplication.
 
 Integer game-rule writes use a fixed four-rule allowlist with narrow ranges;
 they require both `world.read` and `world.write`. `world::set_block_properties`

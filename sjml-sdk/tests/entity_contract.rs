@@ -44,6 +44,22 @@ fn native_entity_api_reports_unsupported_imports() {
         ErrorCode::InvalidArgument
     );
     assert_eq!(
+        entity::is_glowing(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_glowing(handle, true).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::is_silent(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_silent(handle, false).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
         entity::damage(handle, 1.0).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );

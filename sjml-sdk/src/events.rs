@@ -103,6 +103,27 @@ pub struct PlayerInteractionAttempt {
     pub block_position: Option<BlockPos>,
 }
 
+/// Synchronous cancellable logical-server attempt to drop an item stack from a player inventory.
+///
+/// Return `Ok(true)` from the `player.drop_attempt` handler to veto the toss when `can_cancel` is
+/// true. NeoForge posts `ItemTossEvent` after the stack leaves its slot, so the host restores the
+/// stack before canceling. If the complete stack cannot fit in the player's inventory, the host
+/// reports `can_cancel = false` and preserves vanilla dropping to prevent item loss.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerDropAttempt {
+    /// Canonical UUID string of the player who attempted to drop the item.
+    pub player_id: String,
+    /// Resource location of the level where the toss was initiated.
+    pub dimension_id: String,
+    /// Registry ID of the item stack being tossed.
+    pub item_id: String,
+    /// Number of items in the tossed stack, bounded to `1..=99`.
+    pub count: u32,
+    /// Whether the whole stack can currently be restored to the player's inventory if vetoed.
+    pub can_cancel: bool,
+}
+
 /// Synchronous, non-cancellable snapshot emitted after damage has been applied to a living entity.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -603,8 +624,8 @@ mod tests {
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
         BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
         EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerMoved, PlayerRespawned,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerMoved,
+        PlayerRespawned, ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -998,6 +1019,30 @@ mod tests {
         assert_eq!(
             from_bytes::<PlayerInteractionAttempt>(&encoded).unwrap(),
             item_attempt
+        );
+    }
+
+    #[test]
+    fn player_drop_attempt_round_trips_item_stack_and_inventory_capacity() {
+        let attempt = PlayerDropAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            item_id: "minecraft:diamond".to_owned(),
+            count: 12,
+            can_cancel: true,
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        assert_eq!(from_bytes::<PlayerDropAttempt>(&encoded).unwrap(), attempt);
+
+        let not_cancellable = PlayerDropAttempt {
+            can_cancel: false,
+            ..attempt
+        };
+        let encoded = to_bytes(&not_cancellable).unwrap();
+        assert_eq!(encoded.last(), Some(&0));
+        assert_eq!(
+            from_bytes::<PlayerDropAttempt>(&encoded).unwrap(),
+            not_cancellable
         );
     }
 

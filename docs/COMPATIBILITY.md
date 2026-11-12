@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.57.0` with ABI `1.47.0`. ABI compatibility is major-version based:
+The current host is `0.58.0` with ABI `1.48.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.47.0` therefore accepts
-`1.0.x` through `1.47.0` (including earlier ABI 1.32–1.46 guests), but rejects
+minor/patch version is equal or newer. A host at ABI `1.48.0` therefore accepts
+`1.0.x` through `1.48.0` (including earlier ABI 1.32–1.46 guests), but rejects
 a later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -199,3 +199,6 @@ and [entity target attempts](ENTITY_TARGET_ATTEMPTS.md).
 
 
 Host 0.57.0 / ABI 1.47.0 / SDK 0.55.0 adds module-owned integer-component access on existing player inventory stacks, static item rarity declarations, bounded fire-tick access for loaded non-player entities, synchronous cancellable block-break attempts, observe-only global keyboard notices, active-screen key vetoes, module-owned client-loop sound handles, and literal player title/subtitle packets. Each operation uses its distinct capability and remains bounded to the owning module, active session, logical side, and required game thread. See [player inventory components](PLAYER_INVENTORY_COMPONENTS.md), [item rarity](ITEM_RARITY.md), [entity fire ticks](ENTITY_FIRE_TICKS.md), [block-break attempts](BLOCK_BREAK_ATTEMPTS.md), [client key events](CLIENT_KEY_EVENTS.md), [client audio](CLIENT_AUDIO.md), and [player titles](PLAYER_TITLES.md).
+
+
+Host 0.58.0 / ABI 1.48.0 / SDK 0.56.0 adds inventory-safe cancellable player drop attempts, module-owned updates to its active read-only menu, bounded entity glowing/silent flags, and static item enchantment values. Drop vetoes require `events.subscribe` and `events.cancel` and are declined when the complete stack cannot be restored; menu updates require `entity.read` and `menu.open`; flag writes require `entity.state.write` plus `entity.read`; item declarations require `content.register`. See [drop attempts](PLAYER_DROP_ATTEMPTS.md), [menu updates](MENU_UPDATES.md), [entity state flags](ENTITY_STATE_FLAGS.md), and [item properties](ITEM_RARITY.md).

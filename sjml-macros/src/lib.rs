@@ -681,6 +681,20 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_player_drop_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "player.drop_attempt"),
+            quote! {
+                fn protect_drop(event: PlayerDropAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_player.drop_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
     fn command_macro_generates_the_named_command_export() {
         let generated = expand_command(
             quote!(name = "demo.echo"),

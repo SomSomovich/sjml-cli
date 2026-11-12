@@ -6,23 +6,31 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.47.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.48.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.47.0 adds
-bounded item-rarity declarations, module-owned integer-component access on
-live player inventory stacks, loaded-entity fire-tick access, synchronous
-cancellable `block.break_attempt`, observe-only global key notifications,
-active-screen key vetoes, bounded module-owned client-loop sound handles, and
-server title/subtitle packets. Item and rarity registration requires
-`content.register`; player stack components require `entity.read` plus
-`inventory.read` or `inventory.write` and a component registered by the same
-module; fire reads require `entity.read` and writes also require
-`entity.fire.write`; break vetoes require `events.subscribe` and `events.cancel`;
-global key observation and screen vetoes use the separate
+incompatible. Build metadata does not affect version ordering. ABI 1.48.0 adds
+synchronous cancellable `player.drop_attempt` with inventory-safe stack
+restoration, module-owned updates to the title and contents of its currently
+open read-only menu, reads and writes for loaded entity glowing/silent flags,
+and bounded item enchantment values during static registration. Drop vetoes
+require `events.subscribe` and `events.cancel`; menu replacement requires
+`entity.read` plus `menu.open` and ownership of the active SJML menu; entity
+state reads require `entity.read` and writes also require `entity.state.write`;
+enchantment declarations require `content.register`.
+
+ABI 1.47.0 added bounded item-rarity declarations, module-owned
+integer-component access on live player inventory stacks, loaded-entity
+fire-tick access, synchronous cancellable `block.break_attempt`, observe-only
+global key notifications, active-screen key vetoes, bounded module-owned
+client-loop sound handles, and server title/subtitle packets. Item and rarity
+registration requires `content.register`; player stack components require
+`entity.read` plus `inventory.read` or `inventory.write` and a component
+registered by the same module; fire reads require `entity.read` and writes also
+require `entity.fire.write`; break vetoes require `events.subscribe` and
+`events.cancel`; global key observation and screen vetoes use the separate
 `client.input.observe` and `client.input.screen_cancel` grants; looping audio
-requires `client.audio.loop`; titles require `entity.read` and
-`player.ui.title`.
+requires `client.audio.loop`; titles require `entity.read` and `player.ui.title`.
 ABI 1.46.0 adds registry-backed bounded biome ID enumeration, module-owned
 bounded integer components on existing block-inventory stacks, and the
 cancellable `entity.target_attempt` event. Biome enumeration requires
@@ -307,6 +315,18 @@ return exactly one stable boolean byte after the status prefix. `true` vetoes
 the original action, while `false` leaves it available to vanilla and other
 event handlers. It requires both `events.subscribe` and `events.cancel` and
 cannot be asynchronous.
+The synchronous cancellable `sjml_v1_event_player.drop_attempt` callback
+receives schema-v1 `PlayerDropAttempt`: little-endian `u32(1)`, stable
+length-prefixed strings for the canonical player UUID, dimension ID, and item
+ID, little-endian `u32` stack count, then a strict boolean byte `can_cancel`.
+The count is limited to 1–99 and IDs are bounded to 256 UTF-8 bytes. The
+callback runs on the owning logical-server thread through NeoForge's
+`ItemTossEvent`; it must return exactly one stable boolean byte and requires
+`events.subscribe` plus `events.cancel`. A `true` result cancels only if the
+host can restore the whole stack into the player's inventory. If capacity is
+insufficient, the host preserves the vanilla toss to avoid losing items.
+This event cannot be asynchronous.
+
 The `entity.damaged` callback receives schema-v1 `EntityDamaged` data: version
 `1`, stable strings for `entity_id`, `entity_type_id`, `dimension_id`, and
 `damage_type_id`, an optional stable source entity UUID, finite little-endian
@@ -378,9 +398,9 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`,
 `entity.death`, `entity.spawned`, `entity.effect.tick`, `entity.target_attempt`, `block.break`,
-`block.place`, `player.interacted`, `player.interaction`, `entity.damaged`, `world.loaded`,
+`block.place`, `player.interacted`, `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`.
-Subscribing to `block.break`, `player.interaction`, or `entity.target_attempt` additionally requires the
+Subscribing to `block.break`, `player.interaction`, `player.drop_attempt`, or `entity.target_attempt` additionally requires the
 module to request and receive the separate `events.cancel` capability. Static
 registration instances cannot subscribe. A subscription callback runs
 synchronously on the owning logical-server thread. Non-cancellable handlers may
@@ -390,8 +410,8 @@ Task-admission and async handler errors are logged; they do not affect the
 already-delivered notification. These tasks use the existing bounded
 `sjml_async_v1.wake`/poll runtime and inherit its task quota, timeout,
 cancellation, and module-shutdown behavior. The async macro rejects
-`block.break` and `player.interaction`; their cancellation results remain
-strictly synchronous.
+`block.break`, `player.interaction`, and `player.drop_attempt`; their cancellation
+results remain strictly synchronous.
 
 ## Async task and service imports
 
@@ -465,6 +485,7 @@ The Rust SDK's registration wrappers use these imports during the
 | Import | WebAssembly signature | Behavior |
 | --- | --- | --- |
 | `sjml_registry_v1.register_item` | `(path_ptr: i32, path_len: i32, max_stack: i32, fire_resistant: i32) -> i32` | Stage an item under `<package>/<module>/<path>`. |
+| `sjml_registry_v1.set_item_enchantment_value` | `(item_path_ptr: i32, item_path_len: i32, value: i32) -> i32` | Set vanilla enchantability from 0 to 255 on a previously declared item owned by the same module. |
 | `sjml_registry_v1.register_block` | `(path_ptr: i32, path_len: i32, strength_bits: i32, resistance_bits: i32, requires_tool: i32, has_item: i32) -> i32` | Stage a basic block and optionally its `BlockItem`. |
 | `sjml_registry_v1.register_block_entity` | `(path_ptr: i32, path_len: i32, block_path_ptr: i32, block_path_len: i32) -> i32` | Stage a generic block entity type for a block declared by the same module. |
 | `sjml_registry_v1.register_entity_model` | `(path_ptr: i32, path_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded colored model for an entity declared by the same module, with optional model-wide and per-cuboid sine rotations. |
@@ -676,11 +697,13 @@ actual registrations.
 ## Read-only menu import and action callback
 
 `sjml_menu_v1.open` opens a server-side, read-only vanilla chest screen for a
-live player handle:
+live player handle. `sjml_menu_v1.update` replaces the title and content only if
+that player still has a menu owned by the calling runtime module:
 
 | Import | WebAssembly signature | Behavior |
 | --- | --- | --- |
 | `sjml_menu_v1.open` | `(player_ptr: i32, player_len: i32, menu_ptr: i32, menu_len: i32) -> i32` | Opens a bounded snapshot menu for that login session. |
+| `sjml_menu_v1.update` | `(player_ptr: i32, player_len: i32, menu_ptr: i32, menu_len: i32) -> i32` | Replaces a currently open menu only when owned by the calling module. |
 
 The 24-byte player handle uses the ABI handle layout. The menu payload is at
 most 16 KiB and starts with little-endian `u32` version `2`, `u32` row count
@@ -703,8 +726,9 @@ declared action slot are ignored. Action slots dispatch the schema-v1
 `action_id: String`. This requires a live `events.subscribe` subscription for
 `menu.action` plus `entity.read` and `menu.open`; callbacks are bounded to eight
 per module per server tick. Calls and callbacks run on the owning server thread.
-This operation is unavailable from static `mod_register` and client-only
-module contexts.
+Open and update are unavailable from static `mod_register` and client-only
+module contexts. Updates require the active screen to be this module's menu and
+are limited to eight replacements per module per server tick.
 
 ## Guest command callbacks (NeoForge adapter)
 
@@ -1466,6 +1490,21 @@ does not execute death behavior or produce drops. The handle is revoked
 immediately, so later use returns `STALE_HANDLE`. It never loads chunks. Static
 registration and client calls return `PERMISSION_DENIED`. See
 [entity removal](ENTITY_REMOVAL.md).
+
+## Live entity state flags
+
+`sjml_entity_v1.is_glowing` and `is_silent` read two stable flags from loaded
+non-player entities. Both require `entity.read`. `set_glowing` and `set_silent`
+also require the separate `entity.state.write` grant and accept only a little-
+endian `i32` boolean (`0` or `1`). Reads write a little-endian `u32` boolean to
+a checked four-byte output span. All calls validate the module-owned 24-byte
+entity handle and run on the owning server thread. Static-registration and
+client calls fail closed. See [entity state flags](ENTITY_STATE_FLAGS.md).
+
+| Import | Parameters | Success output |
+| --- | --- | --- |
+| `is_glowing`, `is_silent` | `handle_ptr, handle_len, out_ptr, out_capacity` | Write little-endian `u32(0 or 1)`; status only |
+| `set_glowing`, `set_silent` | `handle_ptr, handle_len, value` | Change the requested flag; status only |
 
 ## Live non-player entity attributes
 

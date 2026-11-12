@@ -726,6 +726,8 @@ extern "C" {
     ) -> i32;
     #[link_name = "set_item_rarity"]
     fn imported_set_item_rarity(path_pointer: i32, path_length: i32, rarity: i32) -> i32;
+    #[link_name = "set_item_enchantment_value"]
+    fn imported_set_item_enchantment_value(path_pointer: i32, path_length: i32, value: i32) -> i32;
     #[link_name = "register_block"]
     fn imported_register_block(
         path_pointer: i32,
@@ -1051,6 +1053,37 @@ pub fn set_item_rarity(item_path: &str, rarity: ItemRarity) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = rarity;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets vanilla enchantability for an item declared earlier by this module.
+///
+/// Use a value from `0..=255` during `#[mod_register]`, after `register_item` or registration of a
+/// block with an item form. Zero keeps the vanilla non-enchantable behavior. The host accepts only
+/// items owned by the same package and module, and each item accepts one declaration.
+pub fn set_item_enchantment_value(item_path: &str, value: u32) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    if value > 255 {
+        return Err(invalid_argument(
+            "item enchantment value must be between 0 and 255",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the integer value.
+        let status = unsafe {
+            imported_set_item_enchantment_value(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                value as i32,
+            )
+        };
+        return status_result(status, "host rejected the item enchantment value");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = value;
         Err(unsupported_target())
     }
 }
@@ -3886,6 +3919,23 @@ mod tests {
             set_item_rarity("../ruby", ItemRarity::Epic)
                 .unwrap_err()
                 .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_enchantment_value_is_bounded_and_paths_validate_before_import() {
+        assert_eq!(
+            set_item_enchantment_value("ruby", 255).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_enchantment_value("ruby", 256).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_enchantment_value("../ruby", 1).unwrap_err().code(),
             ErrorCode::InvalidArgument
         );
     }

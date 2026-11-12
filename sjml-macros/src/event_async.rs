@@ -24,6 +24,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "block.break_attempt"
             | "block.place_attempt"
             | "player.interaction"
+            | "player.drop_attempt"
             | "entity.death_attempt"
             | "entity.damage_attempt"
             | "entity.target_attempt"
@@ -293,6 +294,13 @@ mod tests {
                 quote! { async fn interaction(_: PlayerInteractionAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "player.interaction is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.drop_attempt"),
+                quote! { async fn drop_attempt(_: PlayerDropAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.drop_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

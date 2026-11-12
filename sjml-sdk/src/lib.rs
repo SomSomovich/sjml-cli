@@ -272,8 +272,8 @@ pub mod prelude {
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
         BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
         EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft, PlayerMoved,
-        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
+        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft,
+        PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
         MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;

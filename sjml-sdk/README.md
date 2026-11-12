@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.55.0"
+sjml-sdk = "0.56.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -117,13 +117,19 @@ subscription and cancellation grants. See the [biome IDs](https://github.com/Som
 and [entity target attempts](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_TARGET_ATTEMPTS.md).
 
 SDK 0.55.0 adds module-owned integer-component access on live player inventory
-stacks, static item rarity declarations, bounded fire-tick operations for
+stacks, static item rarity and enchantability declarations, bounded fire-tick operations for
 loaded non-player entities, cancellable block-break attempts, observe-only
 global key notices, active-screen key vetoes, looping client sounds, and
 server titles/subtitles. See [player inventory components](../docs/PLAYER_INVENTORY_COMPONENTS.md),
-[item rarity](../docs/ITEM_RARITY.md), [entity fire ticks](../docs/ENTITY_FIRE_TICKS.md),
+[item rarity and enchantability](../docs/ITEM_RARITY.md), [entity fire ticks](../docs/ENTITY_FIRE_TICKS.md),
 [block-break attempts](../docs/BLOCK_BREAK_ATTEMPTS.md), [client key events](../docs/CLIENT_KEY_EVENTS.md),
 [client audio](../docs/CLIENT_AUDIO.md), and [player titles](../docs/PLAYER_TITLES.md).
+
+SDK 0.56.0 adds safe synchronous cancellation of player item drops,
+owner-scoped updates to the active read-only server menu, live non-player
+glowing/silent flags, and static item enchantability. See [player drop
+attempts](../docs/PLAYER_DROP_ATTEMPTS.md), [menu updates](../docs/MENU_UPDATES.md),
+and [entity state flags](../docs/ENTITY_STATE_FLAGS.md).
 
 ```rust
 use sjml::prelude::*;
@@ -137,7 +143,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.55.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.56.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

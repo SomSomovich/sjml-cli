@@ -112,6 +112,14 @@ extern "C" {
     fn imported_fire_ticks(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_fire_ticks"]
     fn imported_set_fire_ticks(handle: i32, handle_length: i32, ticks: i32) -> i32;
+    #[link_name = "is_glowing"]
+    fn imported_is_glowing(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_glowing"]
+    fn imported_set_glowing(handle: i32, handle_length: i32, glowing: i32) -> i32;
+    #[link_name = "is_silent"]
+    fn imported_is_silent(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_silent"]
+    fn imported_set_silent(handle: i32, handle_length: i32, silent: i32) -> i32;
     #[link_name = "set_velocity"]
     fn imported_set_velocity(
         handle: i32,
@@ -647,6 +655,128 @@ pub fn set_fire_ticks(handle: EntityHandle, ticks: u32) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads whether a loaded non-player entity is currently glowing.
+///
+/// The module must request and receive `entity.read`. The value reflects
+/// Minecraft's entity-level glowing flag. This reads the entity flag only;
+/// it does not expose client rendering state or force a client outline.
+pub fn is_glowing(handle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let value = read_output::<u32>(4, |output, capacity| {
+            // SAFETY: the handle and output allocation remain valid for this synchronous host call.
+            unsafe {
+                imported_is_glowing(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid entity glowing flag",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the entity-level glowing flag on a loaded non-player entity.
+///
+/// The module must request and receive both `entity.read` and
+/// `entity.state.write`. Normal Minecraft entity data synchronization still
+/// controls whether connected clients see the outline.
+pub fn set_glowing(handle: EntityHandle, glowing: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and boolean value remain live during the synchronous host call.
+        let status = unsafe {
+            imported_set_glowing(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                i32::from(glowing),
+            )
+        };
+        status_result(status, "host rejected the entity glowing flag mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, glowing);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads whether a loaded non-player entity suppresses its ordinary sounds.
+///
+/// Requires `entity.read` and is available only on the owning logical server.
+pub fn is_silent(handle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let value = read_output::<u32>(4, |output, capacity| {
+            // SAFETY: the handle and output allocation remain valid for this synchronous host call.
+            unsafe {
+                imported_is_silent(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid entity silent flag",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets whether a loaded non-player entity suppresses its ordinary sounds.
+///
+/// The module must request and receive both `entity.read` and
+/// `entity.state.write`. Minecraft's sound engine and entity tracking remain
+/// responsible for client-side behavior.
+pub fn set_silent(handle: EntityHandle, silent: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and boolean value remain live during the synchronous host call.
+        let status = unsafe {
+            imported_set_silent(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                i32::from(silent),
+            )
+        };
+        status_result(status, "host rejected the entity silent flag mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, silent);
         Err(unsupported_target())
     }
 }

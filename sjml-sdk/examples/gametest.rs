@@ -22,6 +22,7 @@ static SAW_WORLD_LOADED: AtomicBool = AtomicBool::new(false);
 static SAW_SERVER_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_INVENTORY_PICKUP: AtomicBool = AtomicBool::new(false);
 static SAW_MENU_ACTION: AtomicBool = AtomicBool::new(false);
+static SAW_PLAYER_DROP_ATTEMPT: AtomicBool = AtomicBool::new(false);
 
 #[mod_register]
 fn register_test_content() -> SjmlResult<()> {
@@ -41,6 +42,8 @@ fn register_test_content() -> SjmlResult<()> {
     registry::register_item("gametest_ruby", ItemDefinition::default())?;
     registry::register_item("gametest_epic_rarity", ItemDefinition::default())?;
     registry::set_item_rarity("gametest_epic_rarity", ItemRarity::Epic)?;
+    registry::register_item("gametest_enchantable", ItemDefinition::default())?;
+    registry::set_item_enchantment_value("gametest_enchantable", 31)?;
     registry::register_integer_component(
         "player_charge",
         IntegerComponentDefinition::new(-10, 10)?,
@@ -188,6 +191,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("block.place_attempt", EventPriority::Normal)?;
     events::subscribe("player.interacted", EventPriority::Normal)?;
     events::subscribe("player.interaction", EventPriority::Normal)?;
+    events::subscribe("player.drop_attempt", EventPriority::Normal)?;
     events::subscribe("entity.damaged", EventPriority::Normal)?;
     events::subscribe("entity.damage_attempt", EventPriority::Normal)?;
     events::subscribe("world.loaded", EventPriority::Normal)?;
@@ -314,6 +318,15 @@ fn veto_chest_open_interaction(event: PlayerInteractionAttempt) -> SjmlResult<bo
         && event.target_id.as_deref() == Some("minecraft:chest");
     if veto {
         SAW_PLAYER_INTERACTION_VETO.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
+}
+
+#[event(name = "player.drop_attempt")]
+fn veto_diamond_drop_attempt(event: PlayerDropAttempt) -> SjmlResult<bool> {
+    let veto = event.item_id == "minecraft:diamond" && event.can_cancel;
+    if veto {
+        SAW_PLAYER_DROP_ATTEMPT.store(true, Ordering::Relaxed);
     }
     Ok(veto)
 }
@@ -510,6 +523,18 @@ fn check_player_interaction_veto(_: EntityDeathCheckArguments) -> SjmlResult<Str
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "player.interaction callback did not veto the chest action",
+        ))
+    }
+}
+
+#[command(name = "player.drop_attempt.check")]
+fn check_player_drop_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    if SAW_PLAYER_DROP_ATTEMPT.swap(false, Ordering::Relaxed) {
+        Ok("guest vetoed the diamond drop and the stack was restored".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player.drop_attempt callback did not veto the diamond drop",
         ))
     }
 }
@@ -1135,6 +1160,12 @@ struct MenuActionOpenArguments {
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
+struct MenuUpdateArguments {
+    player_id: String,
+}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
 struct MenuActionCheckArguments {}
 
 #[command(name = "menu.action.open")]
@@ -1161,6 +1192,27 @@ fn open_menu_action(arguments: MenuActionOpenArguments) -> SjmlResult<String> {
     Ok("action menu opened".to_owned())
 }
 
+#[command(name = "menu.update.check")]
+fn update_test_menu(arguments: MenuUpdateArguments) -> SjmlResult<String> {
+    let handle = player::online()?
+        .into_iter()
+        .find(|handle| {
+            player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.player_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "requested menu player is not online",
+            )
+        })?;
+    let initial = MenuDefinition::new("Original test", 1)?;
+    initial.open(handle)?;
+    let mut replacement = MenuDefinition::new("Updated test", 2)?;
+    replacement.slot(9, MenuItem::new("minecraft:diamond")?.count(2)?)?;
+    replacement.update(handle)?;
+    Ok("the module-owned menu was replaced".to_owned())
+}
+
 #[command(name = "menu.action.check")]
 fn check_menu_action(_: MenuActionCheckArguments) -> SjmlResult<String> {
     if SAW_MENU_ACTION.swap(false, Ordering::Relaxed) {
@@ -1176,32 +1228,30 @@ fn check_menu_action(_: MenuActionCheckArguments) -> SjmlResult<String> {
 #[command(name = "player.inspect")]
 fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let players = player::online()?;
-    let snapshots = players
-        .iter()
-        .copied()
-        .map(player::snapshot)
-        .collect::<SjmlResult<Vec<_>>>()?;
-    let target_index = snapshots
-        .iter()
-        .position(|snapshot| snapshot.uuid == arguments.player_id)
-        .ok_or_else(|| {
-            SjmlError::new(
-                ErrorCode::InvalidArgument,
-                "the GameTest player must be online",
-            )
-        })?;
-    let target_player = players[target_index];
+    let mut target_player = None;
+    let mut target_snapshot = None;
+    for handle in players.iter().copied() {
+        let snapshot = player::snapshot(handle)?;
+        if snapshot.uuid == arguments.player_id {
+            target_player = Some(handle);
+            target_snapshot = Some(snapshot);
+        }
+    }
+    let target_player = target_player.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the GameTest player must be online",
+        )
+    })?;
+    let target_snapshot = target_snapshot.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the GameTest player snapshot must be available",
+        )
+    })?;
     player::send_action_bar(target_player, "SJML GameTest action-bar request")?;
-    let vitals = players
-        .iter()
-        .copied()
-        .map(player::vitals)
-        .collect::<SjmlResult<Vec<_>>>()?;
-    let game_modes = players
-        .iter()
-        .copied()
-        .map(player::game_mode)
-        .collect::<SjmlResult<Vec<_>>>()?;
+    let original_vitals = player::vitals(target_player)?;
+    let original_game_mode = player::game_mode(target_player)?;
     let equipment = player::equipment(target_player)?;
     if equipment
         .main_hand
@@ -1285,7 +1335,6 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let temporary_abilities = temporary_abilities?;
     restore_flying?;
     let restored_abilities = player::abilities(target_player)?;
-    let original_game_mode = game_modes[target_index];
     let temporary_game_mode = if original_game_mode == sjml::PlayerGameMode::Creative {
         sjml::PlayerGameMode::Adventure
     } else {
@@ -1296,7 +1345,6 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let restored_game_mode = player::set_game_mode(target_player, original_game_mode);
     let observed_game_mode = observed_game_mode?;
     restored_game_mode?;
-    let original_vitals = vitals[target_index];
     let original_motion = player::motion(target_player)?;
     let temporary_velocity = player::PlayerVelocity::new(0.125, -0.25, 0.5)?;
     let temporary_motion = (|| {
@@ -1352,9 +1400,19 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let temporary_vitals = temporary_vitals?;
     restore_vitals?;
     let restored_vitals = player::vitals(target_player)?;
-    if snapshots.is_empty()
-        || vitals.len() != snapshots.len()
-        || game_modes.len() != snapshots.len()
+    let valid_snapshot = target_snapshot.uuid.len() == 36
+        && target_snapshot.dimension_id.split_once(':').is_some()
+        && target_snapshot.x.is_finite()
+        && target_snapshot.y.is_finite()
+        && target_snapshot.z.is_finite();
+    let valid_original_vitals = original_vitals.max_health > 0.0
+        && original_vitals.health <= original_vitals.max_health
+        && original_vitals.food_level <= 20
+        && (0.0..=20.0).contains(&original_vitals.saturation)
+        && original_vitals.experience_progress <= 1.0;
+    if players.is_empty()
+        || !valid_snapshot
+        || !valid_original_vitals
         || temporary_abilities.flying != temporary_flying
         || temporary_abilities.may_fly != original_abilities.may_fly
         || temporary_abilities.invulnerable != original_abilities.invulnerable
@@ -1381,36 +1439,13 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         || (restored_vitals.saturation - original_vitals.saturation).abs() > 0.01
         || restored_vitals.experience_level != original_vitals.experience_level
         || (restored_vitals.experience_progress - original_vitals.experience_progress).abs() > 0.02
-        || !snapshots
-            .iter()
-            .map(|snapshot| snapshot.uuid.as_str())
-            .collect::<Vec<_>>()
-            .windows(2)
-            .all(|pair| pair[0] < pair[1])
-        || snapshots.iter().any(|snapshot| {
-            snapshot.uuid.len() != 36
-                || snapshot.dimension_id.split_once(':').is_none()
-                || !snapshot.x.is_finite()
-                || !snapshot.y.is_finite()
-                || !snapshot.z.is_finite()
-        })
-        || vitals.iter().any(|vitals| {
-            vitals.max_health <= 0.0
-                || vitals.health > vitals.max_health
-                || vitals.food_level > 20
-                || !(0.0..=20.0).contains(&vitals.saturation)
-                || vitals.experience_progress > 1.0
-        })
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "player read contract failed",
         ));
     }
-    Ok(format!(
-        "read {} online player snapshot(s)",
-        snapshots.len()
-    ))
+    Ok(format!("read {} online player snapshot(s)", players.len()))
 }
 
 #[command(name = "player.teleport.dimension")]
@@ -1644,6 +1679,46 @@ fn check_entity_fire_ticks(arguments: EntityRaycastArguments) -> SjmlResult<Stri
     check?;
     restore?;
     Ok("entity fire ticks were set, read, and cleared".to_owned())
+}
+
+#[command(name = "entity.state_flags.check")]
+fn check_entity_state_flags(arguments: EntityRaycastArguments) -> SjmlResult<String> {
+    let handle = entity::loaded()?
+        .into_iter()
+        .find(|handle| {
+            entity::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.entity_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity-state test target is not loaded",
+            )
+        })?;
+    let original_glowing = entity::is_glowing(handle)?;
+    let original_silent = entity::is_silent(handle)?;
+    let check = (|| {
+        entity::set_glowing(handle, !original_glowing)?;
+        if entity::is_glowing(handle)? == original_glowing {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity glowing state did not change",
+            ));
+        }
+        entity::set_silent(handle, !original_silent)?;
+        if entity::is_silent(handle)? == original_silent {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity silent state did not change",
+            ));
+        }
+        Ok(())
+    })();
+    let restore_glowing = entity::set_glowing(handle, original_glowing);
+    let restore_silent = entity::set_silent(handle, original_silent);
+    check?;
+    restore_glowing?;
+    restore_silent?;
+    Ok("entity glowing and silent flags were read, changed, and restored".to_owned())
 }
 
 #[command(name = "entity.inspect")]

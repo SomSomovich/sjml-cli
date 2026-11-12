@@ -1,9 +1,11 @@
-//! Open a bounded vanilla chest screen for an online player.
+//! Open and replace a bounded vanilla chest screen for an online player.
 //!
 //! Menu calls run synchronously on the owning server thread and require both
-//! `entity.read` (for the login-scoped player handle) and `menu.open`. The
-//! screen is a snapshot. Optional action slots emit `menu.action` callbacks, but the host rejects
-//! every attempt to move or take displayed items.
+//! `entity.read` (for the login-scoped player handle) and `menu.open`. Optional
+//! action slots emit `menu.action` callbacks, but the host rejects every attempt
+//! to move or take displayed items. An update can replace only a menu currently
+//! owned by the calling runtime module; it cannot replace another module's or a
+//! vanilla screen. Replacements are limited to eight per server tick per module.
 
 use crate::abi::PlayerHandle;
 use crate::serialization::Encoder;
@@ -194,6 +196,43 @@ impl MenuDefinition {
             Err(unsupported_target())
         }
     }
+
+    /// Replaces the title, row count, items, and action slots of this module's currently open menu.
+    ///
+    /// Returns a permission error when the player has closed the module's menu or another screen is
+    /// open. The host creates a fresh container-menu instance, so the replacement is delivered by
+    /// Minecraft's normal container synchronization path. This operation never modifies vanilla
+    /// containers or menus opened by another runtime module.
+    pub fn update(&self, player: PlayerHandle) -> SjmlResult<()> {
+        let wire = self.encode_wire()?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let handle = crate::to_bytes(&player)?;
+            // SAFETY: both encoded slices remain live, immutable, and inside this instance's linear memory
+            // until the synchronous host import returns.
+            let status = unsafe {
+                imported_update(
+                    handle.as_ptr() as usize as u32 as i32,
+                    handle.len() as u32 as i32,
+                    wire.as_ptr() as usize as u32 as i32,
+                    wire.len() as u32 as i32,
+                )
+            };
+            if status == 0 {
+                Ok(())
+            } else {
+                Err(SjmlError::from_abi_code(
+                    status as u32,
+                    "host rejected the menu replacement",
+                ))
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (player, wire);
+            Err(unsupported_target())
+        }
+    }
 }
 
 /// Detached schema-v1 payload for one clicked action slot.
@@ -232,6 +271,13 @@ impl MenuAction {
 extern "C" {
     #[link_name = "open"]
     fn imported_open(
+        player_pointer: i32,
+        player_length: i32,
+        menu_pointer: i32,
+        menu_length: i32,
+    ) -> i32;
+    #[link_name = "update"]
+    fn imported_update(
         player_pointer: i32,
         player_length: i32,
         menu_pointer: i32,
@@ -408,6 +454,16 @@ mod tests {
         let player = PlayerHandle::new(1, 1, 1, 1).unwrap();
         assert_eq!(
             menu.open(player).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn native_update_is_reported_as_unsupported() {
+        let menu = MenuDefinition::new("rewards", 1).unwrap();
+        let player = PlayerHandle::new(1, 1, 1, 1).unwrap();
+        assert_eq!(
+            menu.update(player).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
         );
     }
