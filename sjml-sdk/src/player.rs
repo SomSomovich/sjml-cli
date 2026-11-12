@@ -3,7 +3,8 @@
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
 //! `player.abilities.write`; item cooldown changes require `player.cooldown.write`; action-bar messages require `player.ui.actionbar`, and title packets
-//! require `player.ui.title`. Player handles
+//! require `player.ui.title`; advancement changes require `player.advancement.write`; vanilla custom-stat
+//! changes require `player.statistics.write`. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
 #[cfg(target_arch = "wasm32")]
@@ -215,6 +216,10 @@ pub const MAX_PLAYER_EXPERIENCE_LEVEL: u32 = 20_000;
 pub const MAX_PLAYER_ITEM_COOLDOWN_TICKS: u32 = 72_000;
 /// Maximum UTF-8 size accepted for a namespaced item ID used with player cooldown APIs.
 pub const MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES: usize = 256;
+/// Maximum UTF-8 size accepted for a registered advancement ID.
+pub const MAX_PLAYER_ADVANCEMENT_ID_BYTES: usize = 256;
+/// Maximum amount one call may add to a vanilla custom-stat counter.
+pub const MAX_PLAYER_STATISTIC_INCREMENT: u32 = 1_000_000;
 
 /// One of Minecraft's built-in player game modes.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -224,6 +229,171 @@ pub enum PlayerGameMode {
     Creative = 1,
     Adventure = 2,
     Spectator = 3,
+}
+
+/// A vanilla 1.21.1 custom player statistic supported by the SJML host.
+///
+/// Registry-backed item, block, and entity statistic types are intentionally not represented here.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum PlayerCustomStat {
+    LeaveGame,
+    PlayTime,
+    TotalWorldTime,
+    TimeSinceDeath,
+    TimeSinceRest,
+    SneakTime,
+    WalkOneCm,
+    CrouchOneCm,
+    SprintOneCm,
+    WalkOnWaterOneCm,
+    FallOneCm,
+    ClimbOneCm,
+    FlyOneCm,
+    WalkUnderWaterOneCm,
+    MinecartOneCm,
+    BoatOneCm,
+    PigOneCm,
+    HorseOneCm,
+    AviateOneCm,
+    SwimOneCm,
+    StriderOneCm,
+    Jump,
+    Drop,
+    DamageDealt,
+    DamageDealtAbsorbed,
+    DamageDealtResisted,
+    DamageTaken,
+    DamageBlockedByShield,
+    DamageAbsorbed,
+    DamageResisted,
+    Deaths,
+    MobKills,
+    AnimalsBred,
+    PlayerKills,
+    FishCaught,
+    TalkedToVillager,
+    TradedWithVillager,
+    EatCakeSlice,
+    FillCauldron,
+    UseCauldron,
+    CleanArmor,
+    CleanBanner,
+    CleanShulkerBox,
+    InteractWithBrewingStand,
+    InteractWithBeacon,
+    InspectDropper,
+    InspectHopper,
+    InspectDispenser,
+    PlayNoteBlock,
+    TuneNoteBlock,
+    PotFlower,
+    TriggerTrappedChest,
+    OpenEnderChest,
+    EnchantItem,
+    PlayRecord,
+    InteractWithFurnace,
+    InteractWithCraftingTable,
+    OpenChest,
+    SleepInBed,
+    OpenShulkerBox,
+    OpenBarrel,
+    InteractWithBlastFurnace,
+    InteractWithSmoker,
+    InteractWithLectern,
+    InteractWithCampfire,
+    InteractWithCartographyTable,
+    InteractWithLoom,
+    InteractWithStonecutter,
+    BellRing,
+    RaidTrigger,
+    RaidWin,
+    InteractWithAnvil,
+    InteractWithGrindstone,
+    TargetHit,
+    InteractWithSmithingTable,
+}
+
+impl PlayerCustomStat {
+    /// Returns the canonical vanilla resource ID for this custom statistic.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::LeaveGame => "minecraft:leave_game",
+            Self::PlayTime => "minecraft:play_time",
+            Self::TotalWorldTime => "minecraft:total_world_time",
+            Self::TimeSinceDeath => "minecraft:time_since_death",
+            Self::TimeSinceRest => "minecraft:time_since_rest",
+            Self::SneakTime => "minecraft:sneak_time",
+            Self::WalkOneCm => "minecraft:walk_one_cm",
+            Self::CrouchOneCm => "minecraft:crouch_one_cm",
+            Self::SprintOneCm => "minecraft:sprint_one_cm",
+            Self::WalkOnWaterOneCm => "minecraft:walk_on_water_one_cm",
+            Self::FallOneCm => "minecraft:fall_one_cm",
+            Self::ClimbOneCm => "minecraft:climb_one_cm",
+            Self::FlyOneCm => "minecraft:fly_one_cm",
+            Self::WalkUnderWaterOneCm => "minecraft:walk_under_water_one_cm",
+            Self::MinecartOneCm => "minecraft:minecart_one_cm",
+            Self::BoatOneCm => "minecraft:boat_one_cm",
+            Self::PigOneCm => "minecraft:pig_one_cm",
+            Self::HorseOneCm => "minecraft:horse_one_cm",
+            Self::AviateOneCm => "minecraft:aviate_one_cm",
+            Self::SwimOneCm => "minecraft:swim_one_cm",
+            Self::StriderOneCm => "minecraft:strider_one_cm",
+            Self::Jump => "minecraft:jump",
+            Self::Drop => "minecraft:drop",
+            Self::DamageDealt => "minecraft:damage_dealt",
+            Self::DamageDealtAbsorbed => "minecraft:damage_dealt_absorbed",
+            Self::DamageDealtResisted => "minecraft:damage_dealt_resisted",
+            Self::DamageTaken => "minecraft:damage_taken",
+            Self::DamageBlockedByShield => "minecraft:damage_blocked_by_shield",
+            Self::DamageAbsorbed => "minecraft:damage_absorbed",
+            Self::DamageResisted => "minecraft:damage_resisted",
+            Self::Deaths => "minecraft:deaths",
+            Self::MobKills => "minecraft:mob_kills",
+            Self::AnimalsBred => "minecraft:animals_bred",
+            Self::PlayerKills => "minecraft:player_kills",
+            Self::FishCaught => "minecraft:fish_caught",
+            Self::TalkedToVillager => "minecraft:talked_to_villager",
+            Self::TradedWithVillager => "minecraft:traded_with_villager",
+            Self::EatCakeSlice => "minecraft:eat_cake_slice",
+            Self::FillCauldron => "minecraft:fill_cauldron",
+            Self::UseCauldron => "minecraft:use_cauldron",
+            Self::CleanArmor => "minecraft:clean_armor",
+            Self::CleanBanner => "minecraft:clean_banner",
+            Self::CleanShulkerBox => "minecraft:clean_shulker_box",
+            Self::InteractWithBrewingStand => "minecraft:interact_with_brewingstand",
+            Self::InteractWithBeacon => "minecraft:interact_with_beacon",
+            Self::InspectDropper => "minecraft:inspect_dropper",
+            Self::InspectHopper => "minecraft:inspect_hopper",
+            Self::InspectDispenser => "minecraft:inspect_dispenser",
+            Self::PlayNoteBlock => "minecraft:play_noteblock",
+            Self::TuneNoteBlock => "minecraft:tune_noteblock",
+            Self::PotFlower => "minecraft:pot_flower",
+            Self::TriggerTrappedChest => "minecraft:trigger_trapped_chest",
+            Self::OpenEnderChest => "minecraft:open_enderchest",
+            Self::EnchantItem => "minecraft:enchant_item",
+            Self::PlayRecord => "minecraft:play_record",
+            Self::InteractWithFurnace => "minecraft:interact_with_furnace",
+            Self::InteractWithCraftingTable => "minecraft:interact_with_crafting_table",
+            Self::OpenChest => "minecraft:open_chest",
+            Self::SleepInBed => "minecraft:sleep_in_bed",
+            Self::OpenShulkerBox => "minecraft:open_shulker_box",
+            Self::OpenBarrel => "minecraft:open_barrel",
+            Self::InteractWithBlastFurnace => "minecraft:interact_with_blast_furnace",
+            Self::InteractWithSmoker => "minecraft:interact_with_smoker",
+            Self::InteractWithLectern => "minecraft:interact_with_lectern",
+            Self::InteractWithCampfire => "minecraft:interact_with_campfire",
+            Self::InteractWithCartographyTable => "minecraft:interact_with_cartography_table",
+            Self::InteractWithLoom => "minecraft:interact_with_loom",
+            Self::InteractWithStonecutter => "minecraft:interact_with_stonecutter",
+            Self::BellRing => "minecraft:bell_ring",
+            Self::RaidTrigger => "minecraft:raid_trigger",
+            Self::RaidWin => "minecraft:raid_win",
+            Self::InteractWithAnvil => "minecraft:interact_with_anvil",
+            Self::InteractWithGrindstone => "minecraft:interact_with_grindstone",
+            Self::TargetHit => "minecraft:target_hit",
+            Self::InteractWithSmithingTable => "minecraft:interact_with_smithing_table",
+        }
+    }
 }
 
 impl TryFrom<u32> for PlayerGameMode {
@@ -475,6 +645,41 @@ extern "C" {
         handle_length: i32,
         item_id: i32,
         item_id_length: i32,
+    ) -> i32;
+    #[link_name = "custom_stat"]
+    fn imported_custom_stat(
+        handle: i32,
+        handle_length: i32,
+        statistic_id: i32,
+        statistic_id_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "increment_custom_stat"]
+    fn imported_increment_custom_stat(
+        handle: i32,
+        handle_length: i32,
+        statistic_id: i32,
+        statistic_id_length: i32,
+        amount: i32,
+    ) -> i32;
+    #[link_name = "grant_advancement"]
+    fn imported_grant_advancement(
+        handle: i32,
+        handle_length: i32,
+        advancement_id: i32,
+        advancement_id_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "revoke_advancement"]
+    fn imported_revoke_advancement(
+        handle: i32,
+        handle_length: i32,
+        advancement_id: i32,
+        advancement_id_length: i32,
+        output: i32,
+        capacity: i32,
     ) -> i32;
     #[link_name = "apply_effect"]
     fn imported_apply_effect(
@@ -994,6 +1199,85 @@ pub fn clear_item_cooldown(handle: PlayerHandle, item_id: &str) -> SjmlResult<()
     }
 }
 
+/// Reads one vanilla 1.21.1 custom statistic from an online server player.
+///
+/// `statistic` is a typed member of vanilla `Stats.CUSTOM`; registry-backed item, block, entity,
+/// or mod-defined statistic types are not accepted. Requires `entity.read` and a live logical-server
+/// player session. The result is the stored nonnegative counter value.
+pub fn custom_stat(handle: PlayerHandle, statistic: PlayerCustomStat) -> SjmlResult<u32> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let statistic_id = statistic.id();
+        let mut value = [0u8; core::mem::size_of::<u32>()];
+        // SAFETY: the handle, static statistic ID, and four-byte output all remain valid for this synchronous import.
+        let status = unsafe {
+            imported_custom_stat(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                statistic_id.as_ptr() as usize as u32 as i32,
+                statistic_id.len() as i32,
+                value.as_mut_ptr() as usize as u32 as i32,
+                value.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the player custom-stat read")?;
+        let value = u32::from_le_bytes(value);
+        if value > i32::MAX as u32 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned a player custom-stat value outside vanilla's integer range",
+            ));
+        }
+        Ok(value)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, statistic);
+        Err(unsupported_target())
+    }
+}
+
+/// Adds a bounded positive amount to one vanilla 1.21.1 custom statistic.
+///
+/// Requires both `entity.read` and `player.statistics.write`, declared by the module and granted by
+/// the server administrator. The amount must be in `1..=MAX_PLAYER_STATISTIC_INCREMENT`. The host
+/// rejects an addition that would exceed Minecraft's signed 32-bit stat counter and validates the
+/// registered `Stats.CUSTOM` entry, active login session, and owning server thread.
+pub fn increment_custom_stat(
+    handle: PlayerHandle,
+    statistic: PlayerCustomStat,
+    amount: u32,
+) -> SjmlResult<()> {
+    if !(1..=MAX_PLAYER_STATISTIC_INCREMENT).contains(&amount) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player statistic increment must be between 1 and 1000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let statistic_id = statistic.id();
+        // SAFETY: the handle and static statistic ID remain valid throughout the synchronous import.
+        let status = unsafe {
+            imported_increment_custom_stat(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                statistic_id.as_ptr() as usize as u32 as i32,
+                statistic_id.len() as i32,
+                amount as i32,
+            )
+        };
+        status_result(status, "host rejected the player custom-stat increment")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, statistic);
+        Err(unsupported_target())
+    }
+}
+
 fn validate_cooldown_item_id(item_id: &str) -> SjmlResult<()> {
     let valid_resource_id = item_id.split_once(':').is_some_and(|(namespace, path)| {
         !namespace.is_empty()
@@ -1015,6 +1299,113 @@ fn validate_cooldown_item_id(item_id: &str) -> SjmlResult<()> {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "player cooldown item ID must be a canonical non-air namespace:path value",
+        ));
+    }
+    Ok(())
+}
+
+/// Grants every remaining criterion for a registered Minecraft advancement to an online player.
+///
+/// Returns `true` when the player's progress changed and `false` when it was already complete.
+/// Requires `entity.read` and `player.advancement.write`. Advancement IDs must be canonical,
+/// loaded `namespace:path` IDs. An operation is limited to 256 criteria, and granting can invoke
+/// vanilla advancement rewards. Only logical-server modules can call this API.
+pub fn grant_advancement(handle: PlayerHandle, advancement_id: &str) -> SjmlResult<bool> {
+    validate_advancement_id(advancement_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let mut changed = 0u8;
+        // SAFETY: input strings and the one-byte output remain live through the synchronous host call.
+        let status = unsafe {
+            imported_grant_advancement(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                advancement_id.as_ptr() as usize as u32 as i32,
+                advancement_id.len() as i32,
+                &mut changed as *mut u8 as usize as u32 as i32,
+                1,
+            )
+        };
+        status_result(status, "host rejected the player advancement grant")?;
+        match changed {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid player advancement result",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Revokes every completed criterion for a registered Minecraft advancement from an online player.
+///
+/// Returns `true` when progress changed and `false` when it was already incomplete. Requires
+/// `entity.read` and `player.advancement.write`; the advancement must be present in the active
+/// registry and contain at most 256 criteria. Only logical-server modules can call this API.
+pub fn revoke_advancement(handle: PlayerHandle, advancement_id: &str) -> SjmlResult<bool> {
+    validate_advancement_id(advancement_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let mut changed = 0u8;
+        // SAFETY: input strings and the one-byte output remain live through the synchronous host call.
+        let status = unsafe {
+            imported_revoke_advancement(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                advancement_id.as_ptr() as usize as u32 as i32,
+                advancement_id.len() as i32,
+                &mut changed as *mut u8 as usize as u32 as i32,
+                1,
+            )
+        };
+        status_result(status, "host rejected the player advancement revocation")?;
+        match changed {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid player advancement result",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_advancement_id(advancement_id: &str) -> SjmlResult<()> {
+    let valid_resource_id = advancement_id
+        .split_once(':')
+        .is_some_and(|(namespace, path)| {
+            !namespace.is_empty()
+                && !path.is_empty()
+                && namespace.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+                })
+                && path.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
+                })
+        });
+    if advancement_id.len() > MAX_PLAYER_ADVANCEMENT_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player advancement ID exceeds 256 UTF-8 bytes",
+        ));
+    }
+    if !valid_resource_id {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player advancement ID must be a canonical namespace:path value",
         ));
     }
     Ok(())

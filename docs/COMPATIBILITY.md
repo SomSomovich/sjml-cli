@@ -16,12 +16,12 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.60.0` with ABI `1.50.0`. ABI compatibility is major-version based:
+The current host is `0.61.0` with ABI `1.51.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.50.0` therefore accepts
-`1.0.x` through `1.50.0` (including earlier ABI 1.32–1.49 guests), but rejects
-a later contract it does not know. ABI `1.50.0` accepts ABI `1.0.x` through
-`1.50.0`, including packages targeting host 0.59.0 / ABI 1.49.0.
+minor/patch version is equal or newer. A host at ABI `1.51.0` therefore accepts
+`1.0.x` through `1.51.0` (including earlier ABI 1.32–1.50 guests), but rejects
+a later contract it does not know. ABI `1.51.0` accepts ABI `1.0.x` through
+`1.51.0`, including packages targeting host 0.60.0 / ABI 1.50.0.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
 
@@ -206,3 +206,5 @@ Host 0.58.0 / ABI 1.48.0 / SDK 0.56.0 adds inventory-safe cancellable player dro
 Host 0.59.0 / ABI 1.49.0 / SDK 0.57.0 adds cancellable projectile-impact attempts, literal custom names on loaded non-player entities, bounded food properties for registered items, and editable server menus. Menu slots use explicit item allowlists, transfer only existing stacks, preserve count and components, and return remaining stacks on close; each module is limited to 32 transfers per server tick. The new event uses `events.subscribe` and `events.cancel`; entity custom-name writes use `entity.read` and `entity.custom_name.write`; food declarations use `content.register`; editable-menu reads use `entity.read` and `menu.open`, while transfers also need `menu.transfer`. See [projectile impacts](PROJECTILE_IMPACT_ATTEMPT.md), [custom names](ENTITY_CUSTOM_NAMES.md), [food properties](ITEM_FOOD.md), and [editable menus](EDITABLE_MENUS.md).
 
 Host 0.60.0 / ABI 1.50.0 / SDK 0.58.0 adds vanilla max durability for registered standalone items, server-side player item cooldown reads/writes, earned-advancement notifications, and cancellable explosion-start attempts. Durability declarations require `content.register` and a same-module item with stack size one. Cooldown reads require `entity.read`, while changes also require `player.cooldown.write` and accept 1–72,000 ticks. Advancement observation uses `events.subscribe`; explosion vetoes require both `events.subscribe` and `events.cancel` and run before damage or block changes. See [item durability](ITEM_DURABILITY.md), [player item cooldowns](PLAYER_COOLDOWNS.md), and [gameplay events](GAMEPLAY_EVENTS.md).
+
+Host 0.61.0 / ABI 1.51.0 / SDK 0.59.0 adds server-side advancement grants/revocations and custom-stat reads/increments; difficulty and saved Overworld spawn-point control; cancellable entity heal, effect-application, and join attempts; bounded block-inventory names and transfers; effects applied by registered food; independent X/Y/Z model animation; and exact client GUI-layer suppression. Host calls validate IDs and bounds, enforce dedicated permissions and side/thread checks, and avoid loading chunks. The dedicated-server GameTest suite passed all 70 required cases, including the new server paths. See [advancements](PLAYER_ADVANCEMENTS.md), [statistics](PLAYER_STATISTICS.md), [world difficulty](WORLD_DIFFICULTY.md), [spawn points](WORLD_SPAWN_POINT.md), [entity events](ENTITY_HEAL_ATTEMPTS.md), [inventory names](BLOCK_INVENTORY_ITEM_NAMES.md), [inventory transfers](BLOCK_INVENTORY_MOVE.md), [food effects](ITEM_FOOD_EFFECTS.md), [model animation](MODEL_ANIMATIONS.md), and [GUI-layer suppression](GUI_LAYER_SUPPRESSION.md).

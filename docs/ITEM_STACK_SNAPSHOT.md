@@ -27,9 +27,12 @@ Slots are limited to indices 0 through 4095.
 
 `ItemStackSnapshot` contains a canonical item ID (at most 256 UTF-8 bytes),
 count, stack maximum, slot limit, optional current and maximum durability, and
-an optional custom display name. Durability values are present only for
-damageable stacks. The name is flattened to plain text without style, click, or
-hover data, normalized to Unicode NFC, stripped of control/format/line-break
+an optional custom display name. Existing stacks in `Container` block entities
+can set or clear that name with [`inventory::set_custom_name` and
+`inventory::clear_custom_name`](BLOCK_INVENTORY_ITEM_NAMES.md). Durability values
+are present only for damageable stacks. The name is flattened to plain text
+without style, click, or hover data, normalized to Unicode NFC, stripped of
+control/format/line-break
 characters, and limited to 1024 UTF-8 bytes. Non-damageable stacks and stacks
 without a custom name use `None` for those fields.
 

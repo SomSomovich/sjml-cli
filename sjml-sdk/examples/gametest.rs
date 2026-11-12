@@ -6,8 +6,26 @@
 use sjml::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "gametest/block_inventory_custom_name.rs"]
+mod block_inventory_custom_name;
+#[path = "gametest/block_inventory_move.rs"]
+mod block_inventory_move;
+#[path = "gametest/entity_effect_application.rs"]
+mod entity_effect_application;
+#[path = "gametest/entity_heal_attempt.rs"]
+mod entity_heal_attempt;
+#[path = "gametest/entity_join_attempt.rs"]
+mod entity_join_attempt;
 #[path = "gametest/gameplay_events.rs"]
 mod gameplay_events;
+#[path = "gametest/player_advancements.rs"]
+mod player_advancements;
+#[path = "gametest/player_statistics.rs"]
+mod player_statistics;
+#[path = "gametest/world_difficulty.rs"]
+mod world_difficulty;
+#[path = "gametest/world_spawn_point.rs"]
+mod world_spawn_point;
 
 static SAW_PIG_DEATH: AtomicBool = AtomicBool::new(false);
 static SAW_PIG_DEATH_ATTEMPT: AtomicBool = AtomicBool::new(false);
@@ -42,6 +60,32 @@ fn register_test_content() -> SjmlResult<()> {
         60,
         15,
     )?)?;
+    block_model.add_animation(ModelAnimation::sine_rotation(
+        ModelAnimationAxis::Y,
+        [0.5, 0.375, 0.5],
+        18.0,
+        80,
+        0,
+    )?)?;
+    block_model.add_animation(ModelAnimation::sine_rotation(
+        ModelAnimationAxis::Z,
+        [0.5, 0.375, 0.5],
+        6.0,
+        40,
+        10,
+    )?)?;
+    block_model.add_cuboid_animation(
+        0,
+        ModelAnimation::sine_rotation(ModelAnimationAxis::X, [0.5, 0.375, 0.5], 10.0, 60, 15)?,
+    )?;
+    block_model.add_cuboid_animation(
+        0,
+        ModelAnimation::sine_rotation(ModelAnimationAxis::Y, [0.5, 0.375, 0.5], 8.0, 80, 20)?,
+    )?;
+    block_model.add_cuboid_animation(
+        0,
+        ModelAnimation::sine_rotation(ModelAnimationAxis::Z, [0.5, 0.375, 0.5], 4.0, 100, 25)?,
+    )?;
     registry::register_block_entity_model("gametest_machine", block_model)?;
     registry::register_item("gametest_ruby", ItemDefinition::default())?;
     registry::register_item("gametest_epic_rarity", ItemDefinition::default())?;
@@ -49,7 +93,14 @@ fn register_test_content() -> SjmlResult<()> {
     registry::register_item("gametest_enchantable", ItemDefinition::default())?;
     registry::set_item_enchantment_value("gametest_enchantable", 31)?;
     registry::register_item("gametest_food", ItemDefinition::default())?;
-    registry::set_item_food("gametest_food", ItemFood::new(6, 0.6)?.fast().always_eat())?;
+    let food_effects = registry::ItemFoodEffects::new().with_effect(
+        registry::ItemFoodEffect::new("minecraft:poison", 1200, 1, 1.0)?,
+    )?;
+    registry::set_item_food_with_effects(
+        "gametest_food",
+        ItemFood::new(6, 0.6)?.fast().always_eat(),
+        food_effects,
+    )?;
     registry::register_item(
         "gametest_durable",
         ItemDefinition {
@@ -66,13 +117,39 @@ fn register_test_content() -> SjmlResult<()> {
     let mut entity_model = EntityModelDefinition::new();
     entity_model.add_cuboid([-0.25, 0.0, -0.25], [0.25, 0.5, 0.25], 0xFFFF_2080)?;
     entity_model.set_texture("sjml_game_test:textures/entity/gametest_model.png")?;
-    entity_model.set_animation(ModelAnimation::sine_rotation(
+    entity_model.add_animation(ModelAnimation::sine_rotation(
         ModelAnimationAxis::Y,
         [0.0, 0.25, 0.0],
         30.0,
         40,
         0,
     )?)?;
+    entity_model.add_animation(ModelAnimation::sine_rotation(
+        ModelAnimationAxis::X,
+        [0.0, 0.25, 0.0],
+        12.0,
+        60,
+        15,
+    )?)?;
+    entity_model.add_animation(ModelAnimation::sine_rotation(
+        ModelAnimationAxis::Z,
+        [0.0, 0.25, 0.0],
+        8.0,
+        80,
+        20,
+    )?)?;
+    entity_model.add_cuboid_animation(
+        0,
+        ModelAnimation::sine_rotation(ModelAnimationAxis::X, [0.0, 0.25, 0.0], 6.0, 40, 0)?,
+    )?;
+    entity_model.add_cuboid_animation(
+        0,
+        ModelAnimation::sine_rotation(ModelAnimationAxis::Y, [0.0, 0.25, 0.0], 6.0, 40, 0)?,
+    )?;
+    entity_model.add_cuboid_animation(
+        0,
+        ModelAnimation::sine_rotation(ModelAnimationAxis::Z, [0.0, 0.25, 0.0], 6.0, 40, 0)?,
+    )?;
     registry::register_entity_model("gametest_ai", entity_model)?;
     registry::register_entity_ai_goal("gametest_ai", EntityAiGoal::Swim { priority: 0 })?;
     registry::register_entity_ai_goal(
@@ -216,6 +293,9 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("resources.reloaded", EventPriority::Normal)?;
     events::subscribe("menu.action", EventPriority::Normal)?;
     gameplay_events::initialize()?;
+    entity_heal_attempt::initialize()?;
+    entity_effect_application::initialize()?;
+    entity_join_attempt::initialize()?;
     Ok(())
 }
 

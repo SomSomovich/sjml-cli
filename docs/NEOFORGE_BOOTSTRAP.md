@@ -41,14 +41,15 @@ After registry events, `FMLCommonSetupEvent.enqueueWork`
 creates and retains one compiled instance per module and execution context,
 then invokes `sjml_v1_mod_init` when present. Failed initialization closes
 that package's context-specific instances and prevents required dependent
-packages from activating. The non-cancellable `server.started`,
-`server.stopping`, `player.joined`, `player.left`, `entity.death`, and
-`entity.effect.tick`
-notifications and the
-synchronous cancellable `block.break` callback are available through explicit
-runtime subscriptions. An event macro only exports its callback; a module must
-call `events::subscribe` from its retained server instance. Subscribed handlers
-run synchronously on the owning logical-server thread in priority order.
+packages from activating. Non-cancellable server/player/entity lifecycle
+notifications and synchronous cancellable block-break/place, player
+interaction/drop, entity death/damage/target, projectile-impact, and explosion
+attempt callbacks are available through explicit runtime subscriptions. The
+`player.advancement_earned` notification reports completed vanilla progress.
+An event macro only exports its callback; a module must call
+`events::subscribe` from its retained server instance. Subscribed handlers run
+on the owning logical-server thread in priority order. Cancellable callbacks
+must remain synchronous so they can affect the originating game operation.
 Manifest commands are wired under `/sjml guest`. With requested and granted
 `world.read`, modules can look up/enumerate loaded server dimensions and read
 dimension ID/game time. The logical server is bound before integrated activation
@@ -141,6 +142,16 @@ Rejected scan packages retain their individual diagnostic.
   coordinates. The guest callback is a notification and cannot cancel the
   NeoForge event; only modules with the requested and granted
   `events.subscribe` capability receive it.
+- `AdvancementEvent.AdvancementEarnEvent` reports an earned advancement through
+  `player.advancement_earned` after Minecraft awards it. Its detached payload
+  contains player identity, dimension, advancement ID, and display text. The
+  notification requires `events.subscribe`; it cannot grant, revoke, or undo
+  advancement progress.
+- `ExplosionEvent.Start` dispatches `world.explosion_attempt` on the owning
+  server thread before explosion effects are applied. A callback can veto the
+  explosion only with both `events.subscribe` and `events.cancel`. Its bounded
+  payload contains source identity when present, dimension, center, radius, and
+  block-interaction mode; guest code cannot reshape the explosion.
 - `EntityTickEvent.Post` checks active effects on server-side living entities.
   Effects declared with `registry::register_effect_tick` dispatch an
   `EffectTickEvent` after the configured interval on the owning server thread.
@@ -175,11 +186,10 @@ Rejected scan packages retain their individual diagnostic.
 - Subscription imports are exposed only when `events.subscribe` is requested
   in the module manifest and granted by the administrator. They can be called
   only from integrated-server or dedicated-server contexts; a physical-client
-  instance of a `side = "both"` module cannot subscribe. The `block.break`
-  subscription also requires the separate `events.cancel` request and grant.
-  `block.break` remains the only cancellable event. Callback failures disable
-  only the affected module, and an invalid or failed `block.break` callback
-  does not veto. SDK `#[event_async]` callbacks can queue work only for
+  instance of a `side = "both"` module cannot subscribe. Cancellable event
+  subscriptions also require the separate `events.cancel` request and grant.
+  Callback failures disable only the affected module and do not veto. SDK
+  `#[event_async]` callbacks can queue work only for
   non-cancellable events; they return at the ABI boundary and use the existing
   bounded task runtime.
 - `ServerStoppedEvent` closes only the matching logical-server runtime and

@@ -173,8 +173,10 @@ pub use network::{
     NetworkSubscriptionHandle, Player as NetworkPlayer, Uuid,
 };
 pub use player::{
-    PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
-    PlayerSnapshot, PlayerTitleTimings, PlayerVelocity, PlayerVitals, MAX_PLAYER_TITLE_TEXT_BYTES,
+    custom_stat, grant_advancement, increment_custom_stat, revoke_advancement, PlayerAbilities,
+    PlayerCustomStat, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
+    PlayerSnapshot, PlayerTitleTimings, PlayerVelocity, PlayerVitals,
+    MAX_PLAYER_ADVANCEMENT_ID_BYTES, MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_TITLE_TEXT_BYTES,
     MAX_PLAYER_TITLE_TEXT_CODE_POINTS, MAX_PLAYER_TITLE_TIMING_TICKS,
     MAX_PLAYER_VELOCITY_COMPONENT,
 };
@@ -187,12 +189,14 @@ pub use recipe::{
 };
 pub use registry::{
     BlockEntityModelDefinition, EntityModelDefinition, IntegerComponentDefinition, ItemFood,
-    ItemRarity, ModelAnimation, ModelAnimationAxis, ModelCuboid, VillagerTradeItem,
-    VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,
+    ItemFoodEffect, ItemFoodEffects, ItemRarity, ModelAnimation, ModelAnimationAxis, ModelCuboid,
+    VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS, MAX_ITEM_FOOD_EFFECTS,
+    MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
 };
 pub use render::{
-    RenderContext, RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle,
-    WorldModelBuilder, WorldRenderFrame, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
+    suppress_gui_layer, unsuppress_gui_layer, GuiLayerSuppressionHandle, RenderContext, RenderFont,
+    RenderFrame, RenderLayer, RenderSubscriptionHandle, WorldModelBuilder, WorldRenderFrame,
+    MAX_GUI_LAYER_ID_BYTES, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
     MAX_WORLD_MODEL_VERTICES,
 };
 pub use screen_input::{
@@ -218,13 +222,14 @@ pub use widgets::{
 };
 pub use world::{
     BlockProperty, BlockStateSnapshot, ChunkPos, HeightmapType, LightSnapshot, WorldBorderSnapshot,
-    WorldGameRule, WorldIntegerGameRule, MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES,
-    MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
-    MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
-    MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
-    MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
+    WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint, MAX_WORLD_BIOME_IDS,
+    MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_COORDINATE,
+    MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
+    MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
+    MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
+    MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
     MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_CHUNKS, MAX_WORLD_CHUNKS_RESPONSE_BYTES,
-    MAX_WORLD_CHUNK_RADIUS, MAX_WORLD_GAME_TIME_TICKS,
+    MAX_WORLD_CHUNK_RADIUS, MAX_WORLD_GAME_TIME_TICKS, MAX_WORLD_SPAWN_POINT_BYTES,
 };
 
 /// Common imports for an SJML guest module.
@@ -274,11 +279,12 @@ pub mod prelude {
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
         BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
-        EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt,
-        InventoryChanged, PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerJoined, PlayerLeft, PlayerMoved, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
-        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged,
+        PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerJoined, PlayerLeft, PlayerMoved, ProjectileImpactAttempt, ResourcesReloaded,
+        ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -305,9 +311,10 @@ pub mod prelude {
     };
     pub use crate::player;
     pub use crate::player::{
-        clear_item_cooldown, has_item_cooldown, set_item_cooldown, PlayerAbilities,
-        PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerSnapshot,
-        PlayerVelocity, PlayerVitals, MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES,
+        clear_item_cooldown, grant_advancement, has_item_cooldown, revoke_advancement,
+        set_item_cooldown, PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode,
+        PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
+        MAX_PLAYER_ADVANCEMENT_ID_BYTES, MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES,
         MAX_PLAYER_ITEM_COOLDOWN_TICKS, MAX_PLAYER_VELOCITY_COMPONENT,
     };
     pub use crate::player_inventory;
@@ -327,20 +334,23 @@ pub mod prelude {
         register_particle, register_recipe_serializer, register_shaped_recipe,
         register_shapeless_recipe, register_smithing_transform_recipe, register_sound,
         register_string_component, register_villager_trade, set_entity_attribute, set_item_food,
-        set_item_integer_component, set_item_rarity, set_item_string_component,
-        AttributeModifierOperation, BlockDefinition, BlockEntityModelDefinition,
-        CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
-        EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
-        FluidVisualDefinition, IntegerComponentDefinition, ItemDefinition, ItemFood, ItemRarity,
-        ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition,
-        ShapedRecipeKey, ShapelessRecipeDefinition, SmithingTransformRecipeDefinition,
-        StringComponentDefinition, VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,
+        set_item_food_with_effects, set_item_integer_component, set_item_rarity,
+        set_item_string_component, AttributeModifierOperation, BlockDefinition,
+        BlockEntityModelDefinition, CookingRecipeDefinition, CookingRecipeKind,
+        CreativeTabDefinition, EffectCategory, EntityAiGoal, EntityAttribute, EntityDefinition,
+        EntityModelDefinition, FluidDefinition, FluidVisualDefinition, IntegerComponentDefinition,
+        ItemDefinition, ItemFood, ItemFoodEffect, ItemFoodEffects, ItemRarity, ModelAnimation,
+        ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey,
+        ShapelessRecipeDefinition, SmithingTransformRecipeDefinition, StringComponentDefinition,
+        VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS, MAX_ITEM_FOOD_EFFECTS,
+        MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
     };
     pub use crate::render;
     pub use crate::render::{
-        RenderContext, RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle,
-        WorldModelBuilder, WorldRenderFrame, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
-        MAX_WORLD_MODEL_VERTICES,
+        suppress_gui_layer, unsuppress_gui_layer, GuiLayerSuppressionHandle, RenderContext,
+        RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle, WorldModelBuilder,
+        WorldRenderFrame, MAX_GUI_LAYER_ID_BYTES, MAX_RENDER_RESOURCE_PATH_BYTES,
+        MAX_WORLD_MODEL_QUADS, MAX_WORLD_MODEL_VERTICES,
     };
     pub use crate::screen_input;
     pub use crate::screen_input::{
@@ -366,13 +376,13 @@ pub mod prelude {
     pub use crate::world::{
         BlockProperty, BlockStateSnapshot, ChunkPos, HeightmapType, LightSnapshot,
         RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, WorldBorderSnapshot,
-        WorldGameRule, WorldIntegerGameRule, MAX_WORLD_BLOCK_COORDINATE,
-        MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
-        MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
-        MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+        WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
+        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
+        MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
+        MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
         MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
         MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_RAYCAST_RESPONSE_BYTES,
-        MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
+        MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE, MAX_WORLD_SPAWN_POINT_BYTES,
     };
     pub use crate::{
         client_command, command, compute, event, event_async, mod_init, mod_register, mod_shutdown,

@@ -3,10 +3,9 @@
 use crate::abi::EventSubscriptionHandle;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
+use crate::serialization::{Decoder, Encoder, StableDecode, StableEncode};
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
-#[cfg(target_arch = "wasm32")]
-use crate::StableDecode;
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// Maximum draw commands accepted during one callback.
@@ -17,6 +16,8 @@ pub const MAX_RENDER_BATCH_BYTES: usize = 1024 * 1024;
 pub const MAX_RENDER_TEXT_BYTES: usize = 16 * 1024;
 /// Maximum UTF-8 bytes in a package font path or GUI sprite path.
 pub const MAX_RENDER_RESOURCE_PATH_BYTES: usize = 256;
+/// Maximum UTF-8 bytes in a fully qualified Minecraft GUI layer resource ID.
+pub const MAX_GUI_LAYER_ID_BYTES: usize = 256;
 /// Maximum encoded bytes in one tooltip.
 pub const MAX_TOOLTIP_BYTES: usize = 4096;
 /// Maximum combined text, tooltip, and package-resource-path bytes in one GUI batch.
@@ -33,6 +34,33 @@ const HANDLE_BYTES: u32 = 24;
 
 /// Host-scoped runtime render subscription, using the existing event handle kind.
 pub type RenderSubscriptionHandle = EventSubscriptionHandle;
+/// Host-scoped registration that suppresses one named vanilla or modded GUI layer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GuiLayerSuppressionHandle(EventSubscriptionHandle);
+
+impl GuiLayerSuppressionHandle {
+    /// Creates a handle value from its ABI owner/context and one-based slot fields.
+    pub fn new(
+        owner_token: u64,
+        context_token: u64,
+        index: u32,
+        generation: u32,
+    ) -> SjmlResult<Self> {
+        EventSubscriptionHandle::new(owner_token, context_token, index, generation).map(Self)
+    }
+}
+
+impl StableEncode for GuiLayerSuppressionHandle {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        self.0.encode(encoder)
+    }
+}
+
+impl StableDecode for GuiLayerSuppressionHandle {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        EventSubscriptionHandle::decode(decoder).map(Self)
+    }
+}
 
 /// Client callback layer selected when subscribing to a render event.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1024,6 +1052,14 @@ extern "C" {
     fn imported_unsubscribe(handle_pointer: i32, handle_length: i32) -> i32;
     #[link_name = "submit"]
     fn imported_submit(batch_pointer: i32, batch_length: i32) -> i32;
+    #[link_name = "suppress_gui_layer"]
+    fn imported_suppress_gui_layer(
+        layer_id_pointer: i32,
+        layer_id_length: i32,
+        handle_output_pointer: i32,
+    ) -> i32;
+    #[link_name = "unsuppress_gui_layer"]
+    fn imported_unsuppress_gui_layer(handle_pointer: i32, handle_length: i32) -> i32;
 }
 
 /// Subscribes a closure to the requested render layer.
@@ -1124,6 +1160,107 @@ pub fn unsubscribe(handle: RenderSubscriptionHandle) -> SjmlResult<()> {
         let _ = handle;
         Err(unsupported())
     }
+}
+
+/// Suppresses one fully qualified GUI layer such as `minecraft:chat`.
+///
+/// The independent `client.render.gui_layer.suppress` permission is required.
+/// This only controls whether Minecraft draws the named layer; replacement
+/// drawing can use an ordinary `RenderLayer::Hud` subscription.
+pub fn suppress_gui_layer(layer_id: &str) -> SjmlResult<GuiLayerSuppressionHandle> {
+    validate_gui_layer_id(layer_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let output = allocate_host_input(HANDLE_BYTES);
+        if output == 0 {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate GUI layer suppression output",
+            ));
+        }
+        // SAFETY: initialize the full live handle output allocation before the host writes it.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, HANDLE_BYTES as usize) };
+        let layer_id_bytes = layer_id.as_bytes();
+        // SAFETY: the ID slice and exact handle output span remain live during this synchronous import.
+        let status = unsafe {
+            imported_suppress_gui_layer(
+                layer_id_bytes.as_ptr() as i32,
+                layer_id_bytes.len() as i32,
+                output as i32,
+            )
+        };
+        let result = if status == 0 {
+            // SAFETY: a successful host call initializes the complete 24-byte output span.
+            crate::from_bytes::<GuiLayerSuppressionHandle>(unsafe {
+                core::slice::from_raw_parts(output as *const u8, HANDLE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected GUI layer suppression",
+            ))
+        };
+        // SAFETY: release the exact allocation returned above after the synchronous host call.
+        unsafe { deallocate_host_input(output, HANDLE_BYTES) };
+        result
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = layer_id;
+        Err(unsupported())
+    }
+}
+
+/// Restores a GUI layer suppressed by this module's handle.
+pub fn unsuppress_gui_layer(handle: GuiLayerSuppressionHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let bytes = to_bytes(&handle)?;
+        // SAFETY: stable handle bytes remain live for the complete synchronous host call.
+        let status =
+            unsafe { imported_unsuppress_gui_layer(bytes.as_ptr() as i32, bytes.len() as i32) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected GUI layer restoration",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported())
+    }
+}
+
+fn validate_gui_layer_id(layer_id: &str) -> SjmlResult<()> {
+    if layer_id.is_empty() || layer_id.len() > MAX_GUI_LAYER_ID_BYTES {
+        return Err(invalid("GUI layer ID must contain 1..=256 UTF-8 bytes"));
+    }
+    let Some((namespace, path)) = layer_id.split_once(':') else {
+        return Err(invalid(
+            "GUI layer ID must use a fully qualified namespace:path resource ID",
+        ));
+    };
+    let valid_namespace = !namespace.is_empty()
+        && namespace.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        });
+    let valid_path = !path.is_empty()
+        && !path.contains(':')
+        && path.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'_' | b'-' | b'.' | b'/')
+        });
+    if !valid_namespace || !valid_path {
+        return Err(invalid(
+            "GUI layer ID contains invalid Minecraft resource ID characters",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1395,6 +1532,59 @@ mod tests {
         assert_eq!(
             decode_render_layer(3).unwrap_err().code(),
             ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn gui_layer_resource_ids_are_canonical_bounded_and_namespaced() {
+        assert!(validate_gui_layer_id("minecraft:chat").is_ok());
+        assert!(validate_gui_layer_id("example:widgets/status").is_ok());
+        for invalid_id in [
+            "",
+            "chat",
+            ":chat",
+            "minecraft:",
+            "Minecraft:chat",
+            "minecraft:Chat",
+            "minecraft:bad layer",
+            "minecraft:chat:extra",
+        ] {
+            assert_eq!(
+                validate_gui_layer_id(invalid_id).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+                "{invalid_id:?}"
+            );
+        }
+        assert_eq!(
+            validate_gui_layer_id(&format!("example:{}", "a".repeat(MAX_GUI_LAYER_ID_BYTES)))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn gui_layer_suppression_fails_closed_without_the_wasm_host() {
+        assert_eq!(
+            suppress_gui_layer("minecraft:chat").unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            suppress_gui_layer("chat").unwrap_err().code(),
+            ErrorCode::InvalidArgument,
+            "local input validation still runs before the unsupported-host error"
+        );
+        let handle = GuiLayerSuppressionHandle::new(1, 2, 3, 4).unwrap();
+        let encoded = crate::to_bytes(&handle).unwrap();
+        assert_eq!(
+            crate::from_bytes::<GuiLayerSuppressionHandle>(&encoded).unwrap(),
+            handle,
+            "the dedicated handle type keeps the stable 24-byte event-handle representation"
+        );
+        assert_eq!(
+            unsuppress_gui_layer(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
         );
     }
 

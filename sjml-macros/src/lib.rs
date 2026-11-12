@@ -667,6 +667,48 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_entity_heal_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "entity.heal_attempt"),
+            quote! {
+                fn prevent_healing(event: EntityHealAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_entity.heal_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
+    fn cancellable_entity_effect_application_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "entity.effect_application"),
+            quote! {
+                fn reject_effect(event: EntityEffectApplicationAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_entity.effect_application"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
+    fn cancellable_entity_join_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "entity.join_attempt"),
+            quote! {
+                fn reject_entity(event: EntityJoinAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_entity.join_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
     fn cancellable_entity_target_attempt_exports_the_sync_boolean_callback() {
         let generated = expand_event(
             quote!(name = "entity.target_attempt"),

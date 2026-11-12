@@ -15,6 +15,8 @@ pub const MAX_STRING_COMPONENT_BYTES: usize = 4096;
 pub const MAX_STRING_COMPONENT_PATH_BYTES: usize = 256;
 /// Maximum plain-text bytes returned for an item's custom name.
 pub const MAX_CUSTOM_ITEM_NAME_BYTES: usize = 1024;
+/// Maximum Unicode scalar values accepted when setting a custom item name.
+pub const MAX_CUSTOM_ITEM_NAME_CHARS: usize = 256;
 /// Maximum UTF-8 bytes returned for one item registry ID.
 pub const MAX_ITEM_ID_BYTES: usize = 256;
 /// Maximum encoded bytes returned for one optional item stack snapshot.
@@ -22,6 +24,8 @@ pub const MAX_ITEM_STACK_SNAPSHOT_BYTES: usize =
     1 + 4 + 4 + MAX_ITEM_ID_BYTES + 3 * 4 + 2 * (1 + 4) + 1 + 4 + MAX_CUSTOM_ITEM_NAME_BYTES;
 /// Maximum item count one [`transfer`] call may move.
 pub const MAX_ITEM_TRANSFER_COUNT: u32 = 64;
+/// Maximum absolute X/Z coordinate accepted by block-inventory mutations.
+pub const MAX_INVENTORY_COORDINATE: i32 = 30_000_000;
 
 /// Integer block coordinates in the world named by a [`WorldHandle`].
 #[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
@@ -204,6 +208,26 @@ extern "C" {
         value_length: i32,
     ) -> i32;
 
+    #[link_name = "set_custom_name"]
+    fn imported_set_custom_name(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        name: i32,
+        name_length: i32,
+    ) -> i32;
+
+    #[link_name = "clear_custom_name"]
+    fn imported_clear_custom_name(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+    ) -> i32;
+
     #[link_name = "read_integer_component"]
     fn imported_read_integer_component(
         world: i32,
@@ -248,6 +272,19 @@ extern "C" {
         count: i32,
         output: i32,
         capacity: i32,
+    ) -> i32;
+
+    #[link_name = "move_stack"]
+    fn imported_move_stack(
+        world: i32,
+        world_length: i32,
+        source_position: i32,
+        source_position_length: i32,
+        source_slot: i32,
+        destination_position: i32,
+        destination_position_length: i32,
+        destination_slot: i32,
+        count: i32,
     ) -> i32;
 }
 
@@ -302,6 +339,66 @@ pub fn transfer(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (world, source, destination);
+        Err(unsupported_target())
+    }
+}
+
+/// Moves exactly `count` items between two slots in already-loaded block containers.
+///
+/// The source must contain the full requested count. The destination must be empty or contain
+/// the same item with exactly matching components, and the resulting stack must fit both its
+/// container and item limits. The operation requires `world.read` and `inventory.write`, runs on
+/// the owning server thread, never loads chunks, and changes only the two slot counts.
+pub fn move_stack(
+    world: WorldHandle,
+    source_position: BlockPos,
+    source_slot: u32,
+    destination_position: BlockPos,
+    destination_slot: u32,
+    count: u32,
+) -> SjmlResult<()> {
+    validate_slot(source_slot)?;
+    validate_slot(destination_slot)?;
+    validate_transfer_count(count)?;
+    validate_inventory_position(source_position)?;
+    validate_inventory_position(destination_position)?;
+    if source_position == destination_position && source_slot == destination_slot {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "inventory move source and destination slots must differ",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let source_position = to_bytes(&source_position)?;
+        let destination_position = to_bytes(&destination_position)?;
+        // SAFETY: the stable input buffers remain live for this synchronous host call.
+        let status = unsafe {
+            imported_move_stack(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                source_position.as_ptr() as usize as u32 as i32,
+                source_position.len() as i32,
+                source_slot as i32,
+                destination_position.as_ptr() as usize as u32 as i32,
+                destination_position.len() as i32,
+                destination_slot as i32,
+                count as i32,
+            )
+        };
+        status_result(status, "host rejected the block inventory move")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (
+            world,
+            source_position,
+            source_slot,
+            destination_position,
+            destination_slot,
+            count,
+        );
         Err(unsupported_target())
     }
 }
@@ -546,6 +643,76 @@ pub fn write_string_component(
     }
 }
 
+/// Sets a bounded plain custom display name on an existing non-empty block-container slot.
+///
+/// This changes only Minecraft's `CUSTOM_NAME` component; the host copies the existing stack,
+/// preserving its item, count, and other components. The block entity must implement
+/// `Container`. The operation requires `world.read` and `inventory.write`, runs on the owning
+/// server thread, and never loads a chunk. Names must contain 1–256 non-control Unicode scalar
+/// values and at most 1,024 UTF-8 bytes.
+pub fn set_custom_name(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    name: &str,
+) -> SjmlResult<()> {
+    validate_slot(slot)?;
+    validate_custom_name(name)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: stable input buffers remain live for this synchronous host call; the host copies them.
+        let status = unsafe {
+            imported_set_custom_name(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                name.as_ptr() as usize as u32 as i32,
+                name.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the custom item name")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, name);
+        Err(unsupported_target())
+    }
+}
+
+/// Clears Minecraft's custom display name from an existing non-empty block-container slot.
+///
+/// Other item components, item identity, and count are preserved. The block entity must
+/// implement `Container`; the operation requires `world.read` and `inventory.write`, runs on the
+/// owning server thread, and never loads a chunk.
+pub fn clear_custom_name(world: WorldHandle, position: BlockPos, slot: u32) -> SjmlResult<()> {
+    validate_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: stable input buffers remain live for the synchronous host call.
+        let status = unsafe {
+            imported_clear_custom_name(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+            )
+        };
+        status_result(status, "host rejected the custom item name clear")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot);
+        Err(unsupported_target())
+    }
+}
+
 /// Writes one module-owned integer component on an existing, non-empty container slot.
 ///
 /// The component path must have been registered by this module. The host checks the registered
@@ -602,6 +769,29 @@ fn validate_component_path(path: &str) -> SjmlResult<()> {
     Ok(())
 }
 
+fn validate_custom_name(name: &str) -> SjmlResult<()> {
+    if name.is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "custom item name must not be empty; use clear_custom_name",
+        ));
+    }
+    if name.len() > MAX_CUSTOM_ITEM_NAME_BYTES || name.chars().count() > MAX_CUSTOM_ITEM_NAME_CHARS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "custom item name exceeds its 1,024-byte or 256-character limit",
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "custom item name cannot contain control characters",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_slot(slot: u32) -> SjmlResult<()> {
     if slot as usize >= MAX_INVENTORY_SLOTS {
         return Err(SjmlError::new(
@@ -632,6 +822,18 @@ fn validate_transfer_count(count: u32) -> SjmlResult<()> {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "inventory transfer count must be within 1..=64",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_inventory_position(position: BlockPos) -> SjmlResult<()> {
+    if i64::from(position.x).abs() > i64::from(MAX_INVENTORY_COORDINATE)
+        || i64::from(position.z).abs() > i64::from(MAX_INVENTORY_COORDINATE)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "inventory x/z coordinates must be within ±30000000",
         ));
     }
     Ok(())
@@ -692,9 +894,11 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        read_integer_component, transfer, validate_slot, validate_transfer_count,
-        write_integer_component, BlockPos, Direction, InventoryEndpoint, ItemStackSnapshot,
-        MAX_CUSTOM_ITEM_NAME_BYTES, MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
+        clear_custom_name, move_stack, read_integer_component, set_custom_name, transfer,
+        validate_custom_name, validate_slot, validate_transfer_count, write_integer_component,
+        BlockPos, Direction, InventoryEndpoint, ItemStackSnapshot, MAX_CUSTOM_ITEM_NAME_BYTES,
+        MAX_CUSTOM_ITEM_NAME_CHARS, MAX_INVENTORY_COORDINATE, MAX_INVENTORY_SLOTS,
+        MAX_ITEM_TRANSFER_COUNT,
     };
     use crate::{ErrorCode, WorldHandle};
 
@@ -798,6 +1002,66 @@ mod tests {
     }
 
     #[test]
+    fn public_move_checks_both_slots_count_positions_and_distinct_endpoints() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let source = BlockPos { x: 0, y: 64, z: 0 };
+        let destination = BlockPos { x: 1, y: 64, z: 0 };
+        assert_eq!(
+            move_stack(world, source, 0, source, 0, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            move_stack(world, source, 0, destination, 0, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            move_stack(
+                world,
+                source,
+                0,
+                destination,
+                0,
+                MAX_ITEM_TRANSFER_COUNT + 1
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            move_stack(world, source, MAX_INVENTORY_SLOTS as u32, destination, 0, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            move_stack(
+                world,
+                BlockPos {
+                    x: MAX_INVENTORY_COORDINATE + 1,
+                    ..source
+                },
+                0,
+                destination,
+                0,
+                1,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            move_stack(world, source, 0, destination, 0, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
     fn integer_component_reads_and_writes_validate_local_inputs_before_host_access() {
         let world = WorldHandle::new(1, 2, 3, 4).unwrap();
         let position = BlockPos { x: 0, y: 64, z: 0 };
@@ -834,6 +1098,56 @@ mod tests {
         );
         assert_eq!(
             write_integer_component(world, position, 0, "charge", -10)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn custom_item_names_are_bounded_plain_values_before_host_access() {
+        assert_eq!(validate_custom_name("Café 🪨"), Ok(()));
+        assert_eq!(
+            validate_custom_name("\nname").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_custom_name("").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_custom_name(&"🪨".repeat(MAX_CUSTOM_ITEM_NAME_CHARS + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_custom_name(&"é".repeat(MAX_CUSTOM_ITEM_NAME_BYTES / 2 + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        assert_eq!(
+            set_custom_name(
+                world,
+                position,
+                0,
+                &"x".repeat(MAX_CUSTOM_ITEM_NAME_CHARS + 1)
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            clear_custom_name(world, position, MAX_INVENTORY_SLOTS as u32)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_custom_name(world, position, 0, "Valid")
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

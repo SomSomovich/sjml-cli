@@ -63,8 +63,24 @@ zero-based insertion index. Its pivot is in the model's local coordinates, so a
 head, arm, or lid can rotate around a joint while other cuboids remain still.
 When both animation methods are used, the model-wide rotation is the parent
 transform and each cuboid rotation is applied beneath it. Models remain limited
-to 32 cuboids, so they can carry at most 32 child animation tracks. The entity
+to 32 cuboids, with at most three child tracks per cuboid. The entity
 renderer retains its diagnostic wireframe for types without a model.
+
+For compound motion, use `add_animation` and `add_cuboid_animation` to assign
+up to one sine rotation to each X, Y, and Z axis on the model or a cuboid. Each
+call replaces only that axis and leaves the others in place; the renderer
+applies axes in X/Y/Z order. `clear_animation(axis)` and
+`clear_cuboid_animation_axis(index, axis)` remove one track. The older
+`set_animation` and `set_cuboid_animation` methods keep their single-track
+behavior and replace all tracks on the same model part. See
+[bounded model animation](MODEL_ANIMATIONS.md) for examples and the wire format.
+
+A client module can also suppress a named vanilla or modded GUI layer before it
+renders and draw a replacement overlay through the ordinary HUD callback. This
+requires the separate `client.render.gui_layer.suppress` capability in addition
+to `client.render` for replacement drawing. See
+[named GUI layer suppression](GUI_LAYER_SUPPRESSION.md) for its ID bounds,
+handle lifecycle, and a `minecraft:chat` example.
 
 ## Permissions and availability
 

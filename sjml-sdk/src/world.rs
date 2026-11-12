@@ -58,6 +58,8 @@ pub const MAX_WORLD_BORDER_DAMAGE_PER_BLOCK: f64 = 100.0;
 pub const MAX_WORLD_DAY_TIME_TICKS: i64 = 1_000_000_000_000;
 /// Maximum absolute game-time value accepted by [`set_game_time`].
 pub const MAX_WORLD_GAME_TIME_TICKS: i64 = 1_000_000_000_000;
+/// Stable ABI-v1 size of a world spawn-point request or response.
+pub const MAX_WORLD_SPAWN_POINT_BYTES: usize = 20;
 /// Maximum delay accepted for a guest-scheduled vanilla block tick, in ticks.
 pub const MAX_WORLD_BLOCK_TICK_DELAY_TICKS: u32 = 72_000;
 /// Maximum chunk-radius requested by [`loaded_chunks`], in chunks.
@@ -86,6 +88,75 @@ pub enum HeightmapType {
     MotionBlocking = 2,
     /// Highest motion-blocking block or fluid, excluding leaves.
     MotionBlockingNoLeaves = 3,
+}
+
+/// The four vanilla difficulty levels shared by a logical server.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(i32)]
+pub enum WorldDifficulty {
+    /// Hostile mobs do not spawn naturally and hunger cannot reduce health below 10 HP.
+    Peaceful = 0,
+    /// Easier hostile-mob damage and starvation cannot reduce health below 10 HP.
+    Easy = 1,
+    /// The standard survival difficulty.
+    Normal = 2,
+    /// Hard hostile-mob damage; starvation can be fatal.
+    Hard = 3,
+}
+
+/// Detached configured spawn coordinates and rotation for the vanilla Overworld.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct WorldSpawnPoint {
+    /// Block X coordinate.
+    pub x: i32,
+    /// Block Y coordinate, checked against the live Overworld's build-height range by the host.
+    pub y: i32,
+    /// Block Z coordinate.
+    pub z: i32,
+    /// Spawn yaw in degrees.
+    pub angle: f32,
+}
+
+impl WorldSpawnPoint {
+    /// Creates a spawn point after validating the fixed Minecraft world bounds and finite yaw.
+    pub fn new(x: i32, y: i32, z: i32, angle: f32) -> SjmlResult<Self> {
+        let point = Self { x, y, z, angle };
+        point.validate_request()?;
+        Ok(point)
+    }
+
+    fn validate_request(self) -> SjmlResult<()> {
+        if self.x < -MAX_WORLD_BLOCK_COORDINATE
+            || self.x > MAX_WORLD_BLOCK_COORDINATE
+            || self.z < -MAX_WORLD_BLOCK_COORDINATE
+            || self.z > MAX_WORLD_BLOCK_COORDINATE
+            || !self.angle.is_finite()
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "spawn x/z must be within Minecraft's world bound and angle must be finite",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<i32> for WorldDifficulty {
+    type Error = SjmlError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Peaceful),
+            1 => Ok(Self::Easy),
+            2 => Ok(Self::Normal),
+            3 => Ok(Self::Hard),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an unsupported Minecraft difficulty",
+            )),
+        }
+    }
 }
 
 /// Detached sky and emitted block-light levels at a loaded position (each in 0..=15).
@@ -477,6 +548,13 @@ struct DaylightCycleSnapshot {
     enabled: bool,
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct DifficultySnapshot {
+    difficulty: i32,
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
@@ -577,6 +655,14 @@ extern "C" {
     fn imported_dimension_id(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "game_time"]
     fn imported_game_time(handle: i32, length: i32, output: i32) -> i32;
+    #[link_name = "get_difficulty"]
+    fn imported_get_difficulty(output: i32, capacity: i32) -> i32;
+    #[link_name = "set_difficulty"]
+    fn imported_set_difficulty(difficulty: i32) -> i32;
+    #[link_name = "spawn_point"]
+    fn imported_spawn_point(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_spawn_point"]
+    fn imported_set_spawn_point(handle: i32, length: i32, point: i32, point_length: i32) -> i32;
     #[link_name = "day_time"]
     fn imported_day_time(handle: i32, length: i32, output: i32) -> i32;
     #[link_name = "daylight_cycle_enabled"]
@@ -875,6 +961,123 @@ pub fn dimension_id(handle: WorldHandle) -> SjmlResult<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the server-wide vanilla difficulty. Requires `world.read` and the owning logical-server
+/// thread; difficulty is global to the server rather than scoped to a dimension handle.
+pub fn difficulty() -> SjmlResult<WorldDifficulty> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let snapshot: DifficultySnapshot = read_output(8, |output, capacity| {
+            // SAFETY: the fixed-size output remains live through this synchronous server import.
+            unsafe { imported_get_difficulty(output, capacity) }
+        })?;
+        WorldDifficulty::try_from(snapshot.difficulty)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the server-wide vanilla difficulty. Requires `world.write` and the owning logical-server
+/// thread. This respects the world's difficulty lock and Minecraft's hardcore restriction.
+pub fn set_difficulty(difficulty: WorldDifficulty) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the enum is a closed four-value repr validated again by the host.
+        let status = unsafe { imported_set_difficulty(difficulty as i32) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the server difficulty change",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = difficulty;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the raw configured vanilla Overworld spawn point and its yaw.
+///
+/// Requires `world.read` and a live handle returned for `minecraft:overworld`. The host reads the
+/// saved level data directly and does not perform Minecraft's heightmap fallback for an out-of-
+/// border spawn, so this call never inspects or loads terrain.
+pub fn spawn_point(world: WorldHandle) -> SjmlResult<WorldSpawnPoint> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        let point: WorldSpawnPoint =
+            read_output(MAX_WORLD_SPAWN_POINT_BYTES as u32, |output, capacity| {
+                // SAFETY: the stable handle and fixed-size output remain live through the host call.
+                unsafe {
+                    imported_spawn_point(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            })?;
+        if point.x < -MAX_WORLD_BLOCK_COORDINATE
+            || point.x > MAX_WORLD_BLOCK_COORDINATE
+            || point.z < -MAX_WORLD_BLOCK_COORDINATE
+            || point.z > MAX_WORLD_BLOCK_COORDINATE
+            || !point.angle.is_finite()
+        {
+            return Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "host returned an invalid configured Overworld spawn point",
+            ));
+        }
+        Ok(point)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the vanilla Overworld spawn point and yaw on the owning server thread.
+///
+/// Requires a live `minecraft:overworld` handle plus `world.read` to validate that handle and
+/// `world.write` to change the spawn. X/Z and the finite yaw are validated here; the host checks
+/// the loaded Overworld's current build-height range and world border before changing anything.
+pub fn set_spawn_point(world: WorldHandle, spawn_point: WorldSpawnPoint) -> SjmlResult<()> {
+    spawn_point.validate_request()?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&world)?;
+        let encoded_point = to_bytes(&spawn_point)?;
+        // SAFETY: both stable byte buffers remain live through this synchronous mutation.
+        let status = unsafe {
+            imported_set_spawn_point(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as i32,
+                encoded_point.as_ptr() as usize as u32 as i32,
+                encoded_point.len() as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the Overworld spawn-point change",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
         Err(unsupported_target())
     }
 }

@@ -25,5 +25,9 @@ crate-type = ["cdylib"]
 name = "smithing_transform"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "gui_layer_replacement"
+crate-type = ["cdylib"]
+
 [dependencies]
 sjml-macros.workspace = true

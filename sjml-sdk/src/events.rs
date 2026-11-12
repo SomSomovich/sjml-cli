@@ -196,6 +196,65 @@ pub struct EntityDamageAttempt {
     pub amount: f32,
 }
 
+/// Synchronous cancellable attempt to heal a living entity on the logical server.
+///
+/// NeoForge 21.1.265 fires this from `LivingEntity::heal` before applying the amount. Return
+/// `Ok(true)` from an `entity.heal_attempt` handler to prevent the healing. The callback receives
+/// only detached entity identity, position, and bounded amount data; it runs on the owning server
+/// thread and requires both `events.subscribe` and `events.cancel`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityHealAttempt {
+    /// Canonical UUID string of the living entity that would be healed.
+    pub entity_id: String,
+    /// Registry ID of the living entity type.
+    pub entity_type_id: String,
+    /// Resource location of the entity's level.
+    pub dimension_id: String,
+    /// Entity X coordinate at the time the attempt was dispatched.
+    pub x: f64,
+    /// Entity Y coordinate at the time the attempt was dispatched.
+    pub y: f64,
+    /// Entity Z coordinate at the time the attempt was dispatched.
+    pub z: f64,
+    /// Finite vanilla heal amount, bounded to `0..=1_000_000`.
+    pub amount: f32,
+}
+
+/// Synchronous cancellable attempt to apply a status effect to a living entity.
+///
+/// NeoForge 21.1.265 fires this from `MobEffectEvent.Applicable` whenever it checks whether an
+/// effect can be applied. Return `Ok(true)` from an `entity.effect_application` handler to set the
+/// event result to `DO_NOT_APPLY`. The callback receives detached effect values and optional
+/// source identity and runs on the owning logical-server thread. It requires both
+/// `events.subscribe` and `events.cancel`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityEffectApplicationAttempt {
+    /// Canonical UUID string of the living entity that would receive the effect.
+    pub entity_id: String,
+    /// Registry ID of the affected living entity type.
+    pub entity_type_id: String,
+    /// Resource location of the affected entity's level.
+    pub dimension_id: String,
+    /// Registry ID of the status effect that would be applied.
+    pub effect_id: String,
+    /// UUID of the source entity, when NeoForge provides one.
+    pub source_entity_id: Option<String>,
+    /// Registry ID of the source entity type, when it is registered.
+    pub source_entity_type_id: Option<String>,
+    /// Affected entity X coordinate at the time of the applicability check.
+    pub x: f64,
+    /// Affected entity Y coordinate at the time of the applicability check.
+    pub y: f64,
+    /// Affected entity Z coordinate at the time of the applicability check.
+    pub z: f64,
+    /// Requested effect duration in ticks; `-1` represents an infinite duration.
+    pub duration_ticks: i32,
+    /// Zero-based effect amplifier.
+    pub amplifier: i32,
+}
+
 /// Synchronous cancellable attempt to change a living entity's target on the logical server.
 ///
 /// Return `Ok(true)` from the `entity.target_attempt` handler to keep the entity's existing
@@ -479,6 +538,32 @@ pub struct EntitySpawned {
     pub loaded_from_disk: bool,
 }
 
+/// Synchronous cancellable attempt for an entity to join a logical-server level.
+///
+/// NeoForge fires `EntityJoinLevelEvent` on both logical sides before insertion. The SJML host
+/// only dispatches the server-side event and skips level chunk queries in this pre-add hook.
+/// Return `Ok(true)` from an `entity.join_attempt` handler to cancel insertion. The callback
+/// receives only detached identity, dimension, position, and load-origin values and requires both
+/// `events.subscribe` and `events.cancel`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityJoinAttempt {
+    /// Canonical lowercase UUID of the entity that would join the level.
+    pub entity_id: String,
+    /// Registry ID of the entity type.
+    pub entity_type_id: String,
+    /// Canonical dimension ID of the target level.
+    pub dimension_id: String,
+    /// Entity X coordinate before insertion.
+    pub x: f64,
+    /// Entity Y coordinate before insertion.
+    pub y: f64,
+    /// Entity Z coordinate before insertion.
+    pub z: f64,
+    /// Whether the entity is being restored from saved world data.
+    pub loaded_from_disk: bool,
+}
+
 /// Synchronous `entity.effect.tick` snapshot emitted at a registered interval for one active effect.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -696,10 +781,11 @@ mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
         BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
-        EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt,
-        InventoryChanged, PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerMoved, PlayerRespawned, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged,
+        PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerMoved, PlayerRespawned, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -967,6 +1053,88 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_entity_heal_attempt_matches_host_schema_v1_bytes() {
+        let event = EntityHealAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            amount: 4.0,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(from_bytes::<EntityHealAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn cancellable_entity_effect_application_matches_host_schema_v1_bytes() {
+        let event = EntityEffectApplicationAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:cow".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            effect_id: "minecraft:poison".to_owned(),
+            source_entity_id: Some("00000000-0000-0000-0000-000000000002".to_owned()),
+            source_entity_type_id: Some("minecraft:pig".to_owned()),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            duration_ticks: 1234,
+            amplifier: 2,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.entity_id);
+        append_test_string(&mut expected, &event.entity_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        append_test_string(&mut expected, &event.effect_id);
+        expected.push(1);
+        append_test_string(&mut expected, event.source_entity_id.as_deref().unwrap());
+        expected.push(1);
+        append_test_string(
+            &mut expected,
+            event.source_entity_type_id.as_deref().unwrap(),
+        );
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        expected.extend_from_slice(&1234_i32.to_le_bytes());
+        expected.extend_from_slice(&2_i32.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<EntityEffectApplicationAttempt>(&encoded).unwrap(),
+            event
+        );
+
+        let environment_effect = EntityEffectApplicationAttempt {
+            source_entity_id: None,
+            source_entity_type_id: None,
+            ..event
+        };
+        let encoded = to_bytes(&environment_effect).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &environment_effect.entity_id);
+        append_test_string(&mut expected, &environment_effect.entity_type_id);
+        append_test_string(&mut expected, &environment_effect.dimension_id);
+        append_test_string(&mut expected, &environment_effect.effect_id);
+        expected.push(0);
+        expected.push(0);
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        expected.extend_from_slice(&1234_i32.to_le_bytes());
+        expected.extend_from_slice(&2_i32.to_le_bytes());
+        assert_eq!(encoded, expected, "missing source uses stable option tags");
+        assert_eq!(
+            from_bytes::<EntityEffectApplicationAttempt>(&encoded).unwrap(),
+            environment_effect
+        );
+    }
+
+    #[test]
     fn cancellable_entity_target_attempt_matches_host_schema_v1_bytes() {
         let event = EntityTargetAttempt {
             entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
@@ -1129,6 +1297,44 @@ mod tests {
         };
         let encoded = to_bytes(&event).unwrap();
         assert_eq!(from_bytes::<EntitySpawned>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn cancellable_entity_join_attempt_matches_host_schema_v1_bytes() {
+        let event = EntityJoinAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:cow".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            loaded_from_disk: true,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.entity_id);
+        append_test_string(&mut expected, &event.entity_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        expected.push(1);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<EntityJoinAttempt>(&encoded).unwrap(), event);
+
+        let fresh_entity = EntityJoinAttempt {
+            loaded_from_disk: false,
+            ..event
+        };
+        let encoded = to_bytes(&fresh_entity).unwrap();
+        assert_eq!(encoded.last(), Some(&0));
+        assert_eq!(
+            from_bytes::<EntityJoinAttempt>(&encoded).unwrap(),
+            fresh_entity
+        );
     }
 
     #[test]

@@ -6,10 +6,16 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.50.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.51.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.50.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.51.0 adds
+server-side advancement grants/revocations and custom-stat reads/increments;
+world difficulty and the saved Overworld spawn point; cancellable entity heal,
+status-effect application, and join attempts; bounded block-inventory custom
+names and item transfers; registered food-consumption effects; per-axis model
+animation tracks; and exact client GUI-layer suppression. Their permissions,
+limits, and side requirements are documented with each API. ABI 1.50.0 adds
 bounded static durability for module-owned standalone items, server-side player
 item cooldown reads/writes, non-cancellable earned-advancement notifications,
 and synchronous cancellable explosion-start events. Cooldown reads require
@@ -424,7 +430,7 @@ Guest commands are described below.
 Subscriptions are accepted only in
 integrated-server and dedicated-server execution contexts. An `ActiveModule`
 in a client context cannot subscribe. Non-cancellable callbacks may use
-`#[event_async]`; cancellable `block.break` callbacks remain synchronous.
+`#[event_async]`; all cancellable callbacks remain synchronous.
 
 ## Event subscription imports (NeoForge adapter)
 

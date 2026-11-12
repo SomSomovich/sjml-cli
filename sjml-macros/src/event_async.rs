@@ -27,6 +27,9 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "player.drop_attempt"
             | "entity.death_attempt"
             | "entity.damage_attempt"
+            | "entity.heal_attempt"
+            | "entity.effect_application"
+            | "entity.join_attempt"
             | "entity.target_attempt"
             | "world.explosion_attempt"
             | "client.screen.key_pressed"
@@ -323,6 +326,27 @@ mod tests {
                 quote! { async fn damage_attempt(_: EntityDamageAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.damage_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.heal_attempt"),
+                quote! { async fn heal_attempt(_: EntityHealAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.heal_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.effect_application"),
+                quote! { async fn effect_application(_: EntityEffectApplicationAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.effect_application is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.join_attempt"),
+                quote! { async fn join_attempt(_: EntityJoinAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.join_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

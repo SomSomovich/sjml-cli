@@ -176,3 +176,95 @@ fn native_component_api_checks_bounds_before_reporting_unsupported_import() {
         ErrorCode::PayloadTooLarge,
     );
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_custom_item_name_api_validates_before_reporting_unsupported_import() {
+    let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+    let position = BlockPos { x: 0, y: 64, z: 0 };
+    assert_eq!(
+        inventory::set_custom_name(world, position, 0, "")
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::set_custom_name(world, position, 0, "bad\nname")
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::set_custom_name(world, position, 0, &"x".repeat(257))
+            .unwrap_err()
+            .code(),
+        ErrorCode::PayloadTooLarge,
+    );
+    assert_eq!(
+        inventory::clear_custom_name(world, position, 4096)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::set_custom_name(world, position, 0, "Valid")
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode,
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_block_container_move_validates_endpoints_and_count_before_import() {
+    let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+    let source = BlockPos { x: 0, y: 64, z: 0 };
+    let destination = BlockPos { x: 1, y: 64, z: 0 };
+
+    assert_eq!(
+        inventory::move_stack(world, source, 0, destination, 0, 0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::move_stack(world, source, 0, destination, 0, 65)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::move_stack(world, source, 4096, destination, 0, 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::move_stack(world, source, 0, source, 0, 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::move_stack(
+            world,
+            BlockPos {
+                x: 30_000_001,
+                ..source
+            },
+            0,
+            destination,
+            0,
+            1,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::move_stack(world, source, 0, destination, 0, 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode,
+    );
+}

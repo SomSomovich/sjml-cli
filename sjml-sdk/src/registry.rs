@@ -9,6 +9,12 @@
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
 const MAX_CONTENT_PATH_BYTES: usize = 256;
+/// Maximum number of vanilla status effects on one registered food item.
+pub const MAX_ITEM_FOOD_EFFECTS: usize = 8;
+/// Maximum UTF-8 size of one fully qualified vanilla or modded effect ID.
+pub const MAX_ITEM_FOOD_EFFECT_ID_BYTES: usize = 256;
+/// Maximum duration for one food-applied status effect, in ticks.
+pub const MAX_ITEM_FOOD_EFFECT_DURATION_TICKS: u32 = 72_000;
 /// Maximum static vanilla damage capacity for one registered item.
 pub const MAX_ITEM_MAX_DAMAGE: u32 = 1_000_000;
 const MAX_FLUID_PATH_BYTES: usize = MAX_CONTENT_PATH_BYTES - "_flowing".len();
@@ -35,6 +41,7 @@ const MAX_MODEL_TEXTURE_ID_BYTES: usize = 256;
 const BOUND_MODEL_SCHEMA_VERSION: u32 = 1;
 const BOUND_MODEL_ANIMATION_SCHEMA_VERSION: u32 = 2;
 const BOUND_MODEL_CUBOID_ANIMATION_SCHEMA_VERSION: u32 = 3;
+const BOUND_MODEL_AXIS_ANIMATION_SCHEMA_VERSION: u32 = 4;
 const BOUND_MODEL_HEADER_BYTES: usize = 8;
 const BOUND_MODEL_CUBOID_BYTES: usize = 28;
 const BOUND_MODEL_ANIMATION_BYTES: usize = 32;
@@ -68,6 +75,93 @@ pub struct ItemFood {
     saturation_modifier: f32,
     fast: bool,
     always_eat: bool,
+}
+
+/// One bounded vanilla status effect applied when a registered food is consumed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemFoodEffect {
+    effect_id: String,
+    duration_ticks: u32,
+    amplifier: u32,
+    probability: f32,
+}
+
+impl ItemFoodEffect {
+    /// Creates an effect using a canonical, fully qualified registry ID such as `minecraft:poison`.
+    pub fn new(
+        effect_id: impl Into<String>,
+        duration_ticks: u32,
+        amplifier: u32,
+        probability: f32,
+    ) -> SjmlResult<Self> {
+        let effect_id = effect_id.into();
+        validate_villager_registry_id(&effect_id, "food effect ID")?;
+        if effect_id.len() > MAX_ITEM_FOOD_EFFECT_ID_BYTES {
+            return Err(invalid_argument(
+                "food effect ID exceeds its supported byte limit",
+            ));
+        }
+        if !(1..=MAX_ITEM_FOOD_EFFECT_DURATION_TICKS).contains(&duration_ticks)
+            || amplifier > 255
+            || !probability.is_finite()
+            || !(0.0..=1.0).contains(&probability)
+        {
+            return Err(invalid_argument(
+                "food effect values are outside their supported bounds",
+            ));
+        }
+        Ok(Self {
+            effect_id,
+            duration_ticks,
+            amplifier,
+            probability,
+        })
+    }
+
+    pub fn effect_id(&self) -> &str {
+        &self.effect_id
+    }
+
+    pub const fn duration_ticks(&self) -> u32 {
+        self.duration_ticks
+    }
+
+    pub const fn amplifier(&self) -> u32 {
+        self.amplifier
+    }
+
+    pub const fn probability(&self) -> f32 {
+        self.probability
+    }
+}
+
+/// Bounded collection of vanilla status effects attached to one food declaration.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ItemFoodEffects {
+    effects: Vec<ItemFoodEffect>,
+}
+
+impl ItemFoodEffects {
+    pub const fn new() -> Self {
+        Self {
+            effects: Vec::new(),
+        }
+    }
+
+    /// Adds one effect, rejecting a ninth effect before any host import is called.
+    pub fn with_effect(mut self, effect: ItemFoodEffect) -> SjmlResult<Self> {
+        if self.effects.len() >= MAX_ITEM_FOOD_EFFECTS {
+            return Err(invalid_argument(
+                "a food item cannot declare more than 8 status effects",
+            ));
+        }
+        self.effects.push(effect);
+        Ok(self)
+    }
+
+    pub fn effects(&self) -> &[ItemFoodEffect] {
+        &self.effects
+    }
 }
 
 impl ItemFood {
@@ -332,8 +426,10 @@ impl ModelCuboid {
 pub struct EntityModelDefinition {
     cuboids: Vec<ModelCuboid>,
     cuboid_animations: Vec<Option<ModelAnimation>>,
+    cuboid_animation_tracks: Vec<[Option<ModelAnimation>; 3]>,
     texture: Option<String>,
     animation: Option<ModelAnimation>,
+    animation_tracks: [Option<ModelAnimation>; 3],
 }
 
 impl EntityModelDefinition {
@@ -346,6 +442,7 @@ impl EntityModelDefinition {
         validate_model_cuboid(min, max, 4.0)?;
         push_model_cuboid(&mut self.cuboids, ModelCuboid { min, max, argb })?;
         self.cuboid_animations.push(None);
+        self.cuboid_animation_tracks.push([None; 3]);
         Ok(self)
     }
 
@@ -358,14 +455,39 @@ impl EntityModelDefinition {
         Ok(self)
     }
 
-    /// Adds a host-evaluated sine rotation around the entity-local pivot.
+    /// Replaces model-wide rotation tracks with a sine rotation around the entity-local pivot.
     pub fn set_animation(&mut self, animation: ModelAnimation) -> SjmlResult<&mut Self> {
         validate_model_animation(animation, -4.0, 4.0)?;
         self.animation = Some(animation);
+        self.animation_tracks = [None; 3];
         Ok(self)
     }
 
-    /// Animates one cuboid around an entity-local pivot, independently of sibling cuboids.
+    /// Adds or replaces one axis rotation while retaining the other model rotations.
+    /// Each model can carry at most one bounded track for each of X, Y, and Z.
+    pub fn add_animation(&mut self, animation: ModelAnimation) -> SjmlResult<&mut Self> {
+        validate_model_animation(animation, -4.0, 4.0)?;
+        if let Some(legacy) = self.animation.take() {
+            self.animation_tracks[legacy.axis as usize] = Some(legacy);
+        }
+        self.animation_tracks[animation.axis as usize] = Some(animation);
+        Ok(self)
+    }
+
+    /// Removes one model-wide axis rotation.
+    pub fn clear_animation(&mut self, axis: ModelAnimationAxis) -> &mut Self {
+        if self
+            .animation
+            .is_some_and(|animation| animation.axis == axis)
+        {
+            self.animation = None;
+        }
+        self.animation_tracks[axis as usize] = None;
+        self
+    }
+
+    /// Replaces this cuboid's axis tracks with a rotation around an entity-local pivot.
+    /// The animation is independent of sibling cuboids.
     /// The index is the zero-based order in which cuboids were added.
     pub fn set_cuboid_animation(
         &mut self,
@@ -377,6 +499,27 @@ impl EntityModelDefinition {
             invalid_argument("cuboid animation index does not refer to a model cuboid")
         })?;
         *track = Some(animation);
+        self.cuboid_animation_tracks[index] = [None; 3];
+        Ok(self)
+    }
+
+    /// Adds or replaces one axis rotation on a cuboid without changing its other axes.
+    pub fn add_cuboid_animation(
+        &mut self,
+        index: usize,
+        animation: ModelAnimation,
+    ) -> SjmlResult<&mut Self> {
+        validate_model_animation(animation, -4.0, 4.0)?;
+        if index >= self.cuboid_animation_tracks.len() {
+            return Err(invalid_argument(
+                "cuboid animation index does not refer to a model cuboid",
+            ));
+        }
+        let legacy = self.cuboid_animations[index].take();
+        if let Some(legacy) = legacy {
+            self.cuboid_animation_tracks[index][legacy.axis as usize] = Some(legacy);
+        }
+        self.cuboid_animation_tracks[index][animation.axis as usize] = Some(animation);
         Ok(self)
     }
 
@@ -386,6 +529,25 @@ impl EntityModelDefinition {
             invalid_argument("cuboid animation index does not refer to a model cuboid")
         })?;
         *track = None;
+        self.cuboid_animation_tracks[index] = [None; 3];
+        Ok(self)
+    }
+
+    /// Removes one axis rotation from a cuboid and leaves its other axes intact.
+    pub fn clear_cuboid_animation_axis(
+        &mut self,
+        index: usize,
+        axis: ModelAnimationAxis,
+    ) -> SjmlResult<&mut Self> {
+        if index >= self.cuboid_animation_tracks.len() {
+            return Err(invalid_argument(
+                "cuboid animation index does not refer to a model cuboid",
+            ));
+        }
+        if self.cuboid_animations[index].is_some_and(|animation| animation.axis == axis) {
+            self.cuboid_animations[index] = None;
+        }
+        self.cuboid_animation_tracks[index][axis as usize] = None;
         Ok(self)
     }
 
@@ -403,8 +565,10 @@ impl EntityModelDefinition {
 pub struct BlockEntityModelDefinition {
     cuboids: Vec<ModelCuboid>,
     cuboid_animations: Vec<Option<ModelAnimation>>,
+    cuboid_animation_tracks: Vec<[Option<ModelAnimation>; 3]>,
     texture: Option<String>,
     animation: Option<ModelAnimation>,
+    animation_tracks: [Option<ModelAnimation>; 3],
 }
 
 impl BlockEntityModelDefinition {
@@ -426,6 +590,7 @@ impl BlockEntityModelDefinition {
         }
         push_model_cuboid(&mut self.cuboids, ModelCuboid { min, max, argb })?;
         self.cuboid_animations.push(None);
+        self.cuboid_animation_tracks.push([None; 3]);
         Ok(self)
     }
 
@@ -438,14 +603,39 @@ impl BlockEntityModelDefinition {
         Ok(self)
     }
 
-    /// Adds a host-evaluated sine rotation around a block-local pivot.
+    /// Replaces model-wide rotation tracks with a sine rotation around the block-local pivot.
     pub fn set_animation(&mut self, animation: ModelAnimation) -> SjmlResult<&mut Self> {
         validate_model_animation(animation, 0.0, 1.0)?;
         self.animation = Some(animation);
+        self.animation_tracks = [None; 3];
         Ok(self)
     }
 
-    /// Animates one cuboid around a block-local pivot, independently of sibling cuboids.
+    /// Adds or replaces one axis rotation while retaining the other model rotations.
+    /// Each model can carry at most one bounded track for each of X, Y, and Z.
+    pub fn add_animation(&mut self, animation: ModelAnimation) -> SjmlResult<&mut Self> {
+        validate_model_animation(animation, 0.0, 1.0)?;
+        if let Some(legacy) = self.animation.take() {
+            self.animation_tracks[legacy.axis as usize] = Some(legacy);
+        }
+        self.animation_tracks[animation.axis as usize] = Some(animation);
+        Ok(self)
+    }
+
+    /// Removes one model-wide axis rotation.
+    pub fn clear_animation(&mut self, axis: ModelAnimationAxis) -> &mut Self {
+        if self
+            .animation
+            .is_some_and(|animation| animation.axis == axis)
+        {
+            self.animation = None;
+        }
+        self.animation_tracks[axis as usize] = None;
+        self
+    }
+
+    /// Replaces this cuboid's axis tracks with a rotation around a block-local pivot.
+    /// The animation is independent of sibling cuboids.
     /// The index is the zero-based order in which cuboids were added.
     pub fn set_cuboid_animation(
         &mut self,
@@ -457,6 +647,27 @@ impl BlockEntityModelDefinition {
             invalid_argument("cuboid animation index does not refer to a model cuboid")
         })?;
         *track = Some(animation);
+        self.cuboid_animation_tracks[index] = [None; 3];
+        Ok(self)
+    }
+
+    /// Adds or replaces one axis rotation on a cuboid without changing its other axes.
+    pub fn add_cuboid_animation(
+        &mut self,
+        index: usize,
+        animation: ModelAnimation,
+    ) -> SjmlResult<&mut Self> {
+        validate_model_animation(animation, 0.0, 1.0)?;
+        if index >= self.cuboid_animation_tracks.len() {
+            return Err(invalid_argument(
+                "cuboid animation index does not refer to a model cuboid",
+            ));
+        }
+        let legacy = self.cuboid_animations[index].take();
+        if let Some(legacy) = legacy {
+            self.cuboid_animation_tracks[index][legacy.axis as usize] = Some(legacy);
+        }
+        self.cuboid_animation_tracks[index][animation.axis as usize] = Some(animation);
         Ok(self)
     }
 
@@ -466,6 +677,25 @@ impl BlockEntityModelDefinition {
             invalid_argument("cuboid animation index does not refer to a model cuboid")
         })?;
         *track = None;
+        self.cuboid_animation_tracks[index] = [None; 3];
+        Ok(self)
+    }
+
+    /// Removes one axis rotation from a cuboid and leaves its other axes intact.
+    pub fn clear_cuboid_animation_axis(
+        &mut self,
+        index: usize,
+        axis: ModelAnimationAxis,
+    ) -> SjmlResult<&mut Self> {
+        if index >= self.cuboid_animation_tracks.len() {
+            return Err(invalid_argument(
+                "cuboid animation index does not refer to a model cuboid",
+            ));
+        }
+        if self.cuboid_animations[index].is_some_and(|animation| animation.axis == axis) {
+            self.cuboid_animations[index] = None;
+        }
+        self.cuboid_animation_tracks[index][axis as usize] = None;
         Ok(self)
     }
 
@@ -796,6 +1026,16 @@ extern "C" {
         nutrition: i32,
         saturation_modifier_bits: i32,
         flags: i32,
+    ) -> i32;
+    #[link_name = "add_item_food_effect"]
+    fn imported_add_item_food_effect(
+        item_path_pointer: i32,
+        item_path_length: i32,
+        effect_id_pointer: i32,
+        effect_id_length: i32,
+        duration_ticks: i32,
+        amplifier: i32,
+        probability_bits: i32,
     ) -> i32;
     #[link_name = "register_block"]
     fn imported_register_block(
@@ -1195,7 +1435,8 @@ pub fn set_item_max_damage(item_path: &str, max_damage: u32) -> SjmlResult<()> {
 ///
 /// Call this during `#[mod_register]`, after `register_item` or registration of a block with an
 /// item form. The declared item must belong to the same package and module. Each item can receive
-/// one food declaration; unspecified items keep their existing non-food behavior.
+/// one food declaration; unspecified items keep their existing non-food behavior. This call keeps
+/// the original `set_item_food` host-import schema; use [`set_item_food_with_effects`] for effects.
 pub fn set_item_food(item_path: &str, food: ItemFood) -> SjmlResult<()> {
     validate_path(item_path)?;
     let flags = i32::from(food.fast) | (i32::from(food.always_eat) << 1);
@@ -1216,6 +1457,48 @@ pub fn set_item_food(item_path: &str, food: ItemFood) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (food, flags);
+        Err(unsupported_target())
+    }
+}
+
+/// Declares a vanilla food item with a bounded list of status effects.
+///
+/// This first calls [`set_item_food`] with its unchanged ABI, then stages each effect using the
+/// separate bounded effect import. The package registration callback is rolled back by the host
+/// if any effect declaration fails.
+pub fn set_item_food_with_effects(
+    item_path: &str,
+    food: ItemFood,
+    effects: ItemFoodEffects,
+) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    set_item_food(item_path, food)?;
+    for effect in &effects.effects {
+        stage_item_food_effect(item_path, effect)?;
+    }
+    Ok(())
+}
+
+fn stage_item_food_effect(item_path: &str, effect: &ItemFoodEffect) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: both strings are valid for the duration of the call and host-side bounds are checked.
+        let status = unsafe {
+            imported_add_item_food_effect(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                effect.effect_id.as_ptr() as usize as u32 as i32,
+                effect.effect_id.len() as u32 as i32,
+                effect.duration_ticks as i32,
+                effect.amplifier as i32,
+                effect.probability.to_bits() as i32,
+            )
+        };
+        return status_result(status, "host rejected the item food effect");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (item_path, effect);
         Err(unsupported_target())
     }
 }
@@ -1952,6 +2235,8 @@ pub fn register_entity_model(path: &str, definition: EntityModelDefinition) -> S
         &definition.cuboids,
         definition.animation,
         &definition.cuboid_animations,
+        &definition.animation_tracks,
+        &definition.cuboid_animation_tracks,
     )?;
     let texture = definition.texture.as_deref();
     #[cfg(target_arch = "wasm32")]
@@ -2003,6 +2288,8 @@ pub fn register_block_entity_model(
         &definition.cuboids,
         definition.animation,
         &definition.cuboid_animations,
+        &definition.animation_tracks,
+        &definition.cuboid_animation_tracks,
     )?;
     let texture = definition.texture.as_deref();
     #[cfg(target_arch = "wasm32")]
@@ -2201,6 +2488,8 @@ fn encode_bound_model(
     cuboids: &[ModelCuboid],
     animation: Option<ModelAnimation>,
     cuboid_animations: &[Option<ModelAnimation>],
+    animation_tracks: &[Option<ModelAnimation>; 3],
+    cuboid_animation_tracks: &[[Option<ModelAnimation>; 3]],
 ) -> SjmlResult<Vec<u8>> {
     if cuboids.is_empty() || cuboids.len() > MAX_BOUND_MODEL_CUBOIDS {
         return Err(invalid_argument(
@@ -2212,18 +2501,47 @@ fn encode_bound_model(
             "model cuboid animations do not match the cuboid count",
         ));
     }
-    let has_cuboid_animation = cuboid_animations.iter().any(Option::is_some);
-    let animation_bytes = if has_cuboid_animation {
+    if cuboid_animation_tracks.len() != cuboids.len() {
+        return Err(invalid_argument(
+            "model cuboid animation tracks do not match the cuboid count",
+        ));
+    }
+    let mut all_tracks = cuboid_animation_tracks.to_vec();
+    for (index, legacy) in cuboid_animations.iter().enumerate() {
+        if let Some(animation) = legacy {
+            all_tracks[index][animation.axis as usize] = Some(*animation);
+        }
+    }
+    let mut root_tracks = *animation_tracks;
+    if let Some(animation) = animation {
+        root_tracks[animation.axis as usize] = Some(animation);
+    }
+    let has_compound_animation = root_tracks.iter().flatten().count() > 1
+        || all_tracks
+            .iter()
+            .any(|tracks| tracks.iter().flatten().count() > 1);
+    let has_cuboid_animation = all_tracks
+        .iter()
+        .any(|tracks| tracks.iter().any(Option::is_some));
+    let animation_bytes = if has_compound_animation {
+        (cuboids.len() + 1) * 3 * BOUND_MODEL_ANIMATION_BYTES
+    } else if has_cuboid_animation {
         (cuboids.len() + 1) * BOUND_MODEL_ANIMATION_BYTES
     } else {
-        animation.map_or(0, |_| BOUND_MODEL_ANIMATION_BYTES)
+        if root_tracks.iter().any(Option::is_some) {
+            BOUND_MODEL_ANIMATION_BYTES
+        } else {
+            0
+        }
     };
     let mut encoded = Vec::with_capacity(
         BOUND_MODEL_HEADER_BYTES + cuboids.len() * BOUND_MODEL_CUBOID_BYTES + animation_bytes,
     );
-    let schema = if has_cuboid_animation {
+    let schema = if has_compound_animation {
+        BOUND_MODEL_AXIS_ANIMATION_SCHEMA_VERSION
+    } else if has_cuboid_animation {
         BOUND_MODEL_CUBOID_ANIMATION_SCHEMA_VERSION
-    } else if animation.is_some() {
+    } else if root_tracks.iter().any(Option::is_some) {
         BOUND_MODEL_ANIMATION_SCHEMA_VERSION
     } else {
         BOUND_MODEL_SCHEMA_VERSION
@@ -2236,12 +2554,21 @@ fn encode_bound_model(
         }
         encoded.extend_from_slice(&cuboid.argb.to_le_bytes());
     }
-    if has_cuboid_animation {
-        encode_model_animation_slot(&mut encoded, animation);
-        for animation in cuboid_animations {
-            encode_model_animation_slot(&mut encoded, *animation);
+    if has_compound_animation {
+        for track in root_tracks.iter().copied() {
+            encode_model_animation_slot(&mut encoded, track);
         }
-    } else if let Some(animation) = animation {
+        for tracks in &all_tracks {
+            for animation in tracks {
+                encode_model_animation_slot(&mut encoded, *animation);
+            }
+        }
+    } else if has_cuboid_animation {
+        encode_model_animation_slot(&mut encoded, root_tracks.iter().flatten().next().copied());
+        for tracks in &all_tracks {
+            encode_model_animation_slot(&mut encoded, tracks.iter().flatten().next().copied());
+        }
+    } else if let Some(animation) = root_tracks.iter().flatten().next().copied() {
         encoded.extend_from_slice(&1_u32.to_le_bytes());
         encode_model_animation_fields(&mut encoded, animation);
     }
@@ -3031,7 +3358,7 @@ mod tests {
     #[test]
     fn model_wire_encoding_is_versioned_little_endian_and_bounded() {
         let cuboid = ModelCuboid::new([-0.5, 0.0, -0.5], [0.5, 1.0, 0.5], 0xFF12_3456).unwrap();
-        let encoded = encode_bound_model(&[cuboid], None, &[None]).unwrap();
+        let encoded = encode_legacy_bound_model(&[cuboid], None, &[None]).unwrap();
         assert_eq!(
             encoded.len(),
             BOUND_MODEL_HEADER_BYTES + BOUND_MODEL_CUBOID_BYTES
@@ -3047,7 +3374,7 @@ mod tests {
         let animation =
             ModelAnimation::sine_rotation(ModelAnimationAxis::Y, [0.0, 0.5, 0.0], 30.0, 80, 20)
                 .unwrap();
-        let encoded = encode_bound_model(&[cuboid], Some(animation), &[None]).unwrap();
+        let encoded = encode_legacy_bound_model(&[cuboid], Some(animation), &[None]).unwrap();
         assert_eq!(
             encoded.len(),
             BOUND_MODEL_HEADER_BYTES + BOUND_MODEL_CUBOID_BYTES + BOUND_MODEL_ANIMATION_BYTES
@@ -3141,7 +3468,8 @@ mod tests {
             ModelAnimation::sine_rotation(ModelAnimationAxis::X, [0.0, 0.5, 0.0], 45.0, 40, 10)
                 .unwrap();
         let encoded =
-            encode_bound_model(&[first, second], Some(global), &[None, Some(child)]).unwrap();
+            encode_legacy_bound_model(&[first, second], Some(global), &[None, Some(child)])
+                .unwrap();
         assert_eq!(encoded.len(), 8 + 2 * 28 + 3 * 32);
         assert_eq!(&encoded[..8], &[3, 0, 0, 0, 2, 0, 0, 0]);
         assert_eq!(
@@ -3198,6 +3526,122 @@ mod tests {
                 }
             )
             .is_err());
+    }
+
+    #[test]
+    fn multi_axis_model_animations_use_schema_four_and_keep_each_axis_track() {
+        let first = ModelCuboid::new([-0.5, 0.0, -0.5], [0.5, 0.5, 0.5], 0xFF12_3456).unwrap();
+        let second = ModelCuboid::new([-0.25, 0.5, -0.25], [0.25, 1.0, 0.25], 0xFF65_4321).unwrap();
+        let x = ModelAnimation::sine_rotation(ModelAnimationAxis::X, [0.0, 0.5, 0.0], 12.0, 40, 0)
+            .unwrap();
+        let y = ModelAnimation::sine_rotation(ModelAnimationAxis::Y, [0.0, 0.5, 0.0], 24.0, 60, 10)
+            .unwrap();
+        let z = ModelAnimation::sine_rotation(ModelAnimationAxis::Z, [0.0, 0.5, 0.0], 36.0, 80, 20)
+            .unwrap();
+        let cuboids = [first, second];
+        let root_tracks = [Some(x), Some(y), None];
+        let cuboid_tracks = [[None, None, None], [Some(x), None, Some(z)]];
+        let encoded =
+            encode_bound_model(&cuboids, None, &[None, None], &root_tracks, &cuboid_tracks)
+                .unwrap();
+
+        assert_eq!(
+            encoded.len(),
+            BOUND_MODEL_HEADER_BYTES
+                + 2 * BOUND_MODEL_CUBOID_BYTES
+                + 3 * 3 * BOUND_MODEL_ANIMATION_BYTES
+        );
+        assert_eq!(&encoded[..8], &[4, 0, 0, 0, 2, 0, 0, 0]);
+        let slots = &encoded[BOUND_MODEL_HEADER_BYTES + 2 * BOUND_MODEL_CUBOID_BYTES..];
+        assert_eq!(&slots[..4], &[1, 0, 0, 0], "the model has a root X track");
+        assert_eq!(
+            &slots[BOUND_MODEL_ANIMATION_BYTES..BOUND_MODEL_ANIMATION_BYTES + 4],
+            &[1, 0, 0, 0],
+            "the model has a root Y track"
+        );
+        assert_eq!(
+            &slots[2 * BOUND_MODEL_ANIMATION_BYTES..3 * BOUND_MODEL_ANIMATION_BYTES],
+            &[0; BOUND_MODEL_ANIMATION_BYTES],
+            "the model has no root Z track"
+        );
+        let second_cuboid_slots =
+            &slots[3 * BOUND_MODEL_ANIMATION_BYTES + 3 * BOUND_MODEL_ANIMATION_BYTES..];
+        assert_eq!(&second_cuboid_slots[..4], &[1, 0, 0, 0], "cuboid X track");
+        assert_eq!(
+            &second_cuboid_slots[BOUND_MODEL_ANIMATION_BYTES..2 * BOUND_MODEL_ANIMATION_BYTES],
+            &[0; BOUND_MODEL_ANIMATION_BYTES],
+            "cuboid Y track is empty"
+        );
+        assert_eq!(
+            &second_cuboid_slots
+                [2 * BOUND_MODEL_ANIMATION_BYTES..2 * BOUND_MODEL_ANIMATION_BYTES + 4],
+            &[1, 0, 0, 0],
+            "cuboid Z track"
+        );
+
+        let mut model = EntityModelDefinition::new();
+        model
+            .add_cuboid(first.min, first.max, first.argb)
+            .unwrap()
+            .add_cuboid(second.min, second.max, second.argb)
+            .unwrap()
+            .set_animation(x)
+            .unwrap()
+            .add_animation(y)
+            .unwrap()
+            .set_cuboid_animation(1, x)
+            .unwrap()
+            .add_cuboid_animation(1, z)
+            .unwrap();
+        assert_eq!(model.animation_tracks, [Some(x), Some(y), None]);
+        assert_eq!(model.cuboid_animation_tracks[1], [Some(x), None, Some(z)]);
+        model.clear_animation(ModelAnimationAxis::X);
+        model
+            .clear_cuboid_animation_axis(1, ModelAnimationAxis::Z)
+            .unwrap();
+        assert_eq!(model.animation_tracks, [None, Some(y), None]);
+        assert_eq!(model.cuboid_animation_tracks[1], [Some(x), None, None]);
+
+        let mut block_model = BlockEntityModelDefinition::new();
+        block_model
+            .add_cuboid([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 0)
+            .unwrap()
+            .set_animation(y)
+            .unwrap()
+            .add_animation(z)
+            .unwrap()
+            .set_cuboid_animation(0, x)
+            .unwrap()
+            .add_cuboid_animation(0, z)
+            .unwrap();
+        assert_eq!(block_model.animation_tracks, [None, Some(y), Some(z)]);
+        assert_eq!(
+            block_model.cuboid_animation_tracks[0],
+            [Some(x), None, Some(z)]
+        );
+        block_model.clear_animation(ModelAnimationAxis::Y);
+        block_model
+            .clear_cuboid_animation_axis(0, ModelAnimationAxis::X)
+            .unwrap();
+        assert_eq!(block_model.animation_tracks, [None, None, Some(z)]);
+        assert_eq!(
+            block_model.cuboid_animation_tracks[0],
+            [None, None, Some(z)]
+        );
+    }
+
+    fn encode_legacy_bound_model(
+        cuboids: &[ModelCuboid],
+        animation: Option<ModelAnimation>,
+        cuboid_animations: &[Option<ModelAnimation>],
+    ) -> SjmlResult<Vec<u8>> {
+        encode_bound_model(
+            cuboids,
+            animation,
+            cuboid_animations,
+            &[None; 3],
+            &vec![[None; 3]; cuboids.len()],
+        )
     }
 
     #[test]
@@ -4136,6 +4580,78 @@ mod tests {
         );
         assert_eq!(
             set_item_food("../ruby", food).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_food_effects_validate_registry_ids_and_vanilla_bounds() {
+        let effect = ItemFoodEffect::new("minecraft:poison", 72_000, 255, 1.0).unwrap();
+        assert_eq!(effect.effect_id(), "minecraft:poison");
+        assert_eq!(effect.duration_ticks(), MAX_ITEM_FOOD_EFFECT_DURATION_TICKS);
+        assert_eq!(effect.amplifier(), 255);
+        assert_eq!(effect.probability(), 1.0);
+        assert!(ItemFoodEffect::new("modid:effect/path", 1, 0, 0.0).is_ok());
+
+        for invalid_id in [
+            "poison",
+            "Minecraft:poison",
+            "minecraft:",
+            "minecraft:../poison",
+        ] {
+            assert_eq!(
+                ItemFoodEffect::new(invalid_id, 1, 0, 1.0)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument,
+                "effect IDs must be canonical and fully qualified: {invalid_id}"
+            );
+        }
+        assert_eq!(
+            ItemFoodEffect::new(format!("minecraft:{}", "x".repeat(248)), 1, 0, 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        for duration in [0, MAX_ITEM_FOOD_EFFECT_DURATION_TICKS + 1] {
+            assert_eq!(
+                ItemFoodEffect::new("minecraft:poison", duration, 0, 1.0)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for amplifier in [256, u32::MAX] {
+            assert_eq!(
+                ItemFoodEffect::new("minecraft:poison", 1, amplifier, 1.0)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for probability in [f32::NAN, f32::INFINITY, -0.01, 1.01] {
+            assert_eq!(
+                ItemFoodEffect::new("minecraft:poison", 1, 0, probability)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn item_food_allows_at_most_eight_effects() {
+        let mut effects = ItemFoodEffects::new();
+        for _ in 0..MAX_ITEM_FOOD_EFFECTS {
+            effects = effects
+                .with_effect(ItemFoodEffect::new("minecraft:poison", 1, 0, 1.0).unwrap())
+                .unwrap();
+        }
+        assert_eq!(
+            effects
+                .with_effect(ItemFoodEffect::new("minecraft:poison", 1, 0, 1.0).unwrap())
+                .unwrap_err()
+                .code(),
             ErrorCode::InvalidArgument
         );
     }

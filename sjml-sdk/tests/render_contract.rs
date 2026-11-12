@@ -1,4 +1,6 @@
-use sjml::render::{self, RenderFrame, RenderLayer, RenderSubscriptionHandle};
+use sjml::render::{
+    self, GuiLayerSuppressionHandle, RenderFrame, RenderLayer, RenderSubscriptionHandle,
+};
 use sjml::{ErrorCode, EventSubscriptionHandle, RenderResourceHandle};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -6,16 +8,19 @@ use std::rc::Rc;
 #[test]
 fn prelude_exports_the_runtime_render_surface() {
     use sjml::prelude::{
-        render as prelude_render, RenderLayer as PreludeLayer,
-        RenderSubscriptionHandle as PreludeHandle, WorldRenderFrame as PreludeWorldFrame,
+        render as prelude_render, GuiLayerSuppressionHandle as PreludeLayerSuppressionHandle,
+        RenderLayer as PreludeLayer, RenderSubscriptionHandle as PreludeHandle,
+        WorldRenderFrame as PreludeWorldFrame,
     };
 
     let _: PreludeLayer = PreludeLayer::Hud;
     let _: Option<PreludeHandle> = None;
     let _: Option<PreludeWorldFrame> = None;
+    let _: Option<PreludeLayerSuppressionHandle> = None;
     assert_eq!(prelude_render::RenderLayer::Hud.wire_name(), "hud");
     assert_eq!(prelude_render::RenderLayer::Hud.wire_value(), 0);
     assert_eq!(prelude_render::RenderLayer::World.wire_value(), 2);
+    assert_eq!(prelude_render::MAX_GUI_LAYER_ID_BYTES, 256);
 
     let frame = RenderFrame {
         width: 854,
@@ -44,6 +49,24 @@ fn native_render_subscription_reports_unsupported_imports() {
     let handle = RenderSubscriptionHandle::new(1, 2, 3, 4).unwrap();
     assert_eq!(
         render::unsubscribe(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+
+    assert_eq!(
+        render::suppress_gui_layer("minecraft:chat")
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        render::suppress_gui_layer("chat").unwrap_err().code(),
+        ErrorCode::InvalidArgument
+    );
+    let suppression = GuiLayerSuppressionHandle::new(1, 2, 3, 4).unwrap();
+    assert_eq!(
+        render::unsuppress_gui_layer(suppression)
+            .unwrap_err()
+            .code(),
         ErrorCode::UnknownErrorCode
     );
 

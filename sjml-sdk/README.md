@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.58.0"
+sjml-sdk = "0.59.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -138,6 +138,12 @@ See [projectile impact attempts](../docs/PROJECTILE_IMPACT_ATTEMPT.md),
 [entity custom names](../docs/ENTITY_CUSTOM_NAMES.md), [item food](../docs/ITEM_FOOD.md),
 and [editable menus](../docs/EDITABLE_MENUS.md).
 
+SDK 0.59.0 adds advancement control and custom-stat access, difficulty and
+Overworld spawn-point control, cancellable entity heal/effect/join attempts,
+bounded block-inventory names and transfers, food-consumption effects,
+independent model-axis animation, and exact client GUI-layer suppression. See
+the matching API guides in `../docs/` for permissions, limits, and examples.
+
 ```rust
 use sjml::prelude::*;
 
@@ -150,7 +156,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.58.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.59.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)
