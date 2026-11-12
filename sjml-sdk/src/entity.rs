@@ -21,6 +21,8 @@ pub const MAX_ENTITY_VELOCITY_COMPONENT: f64 = 64.0;
 pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
+/// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
+pub const AI_CONTROL_CAPABILITY: &str = "entity.ai.control";
 /// Maximum UTF-8 byte length for a plain entity custom name.
 pub const MAX_ENTITY_CUSTOM_NAME_BYTES: usize = 1024;
 /// Maximum Unicode scalar count for a plain entity custom name.
@@ -118,6 +120,10 @@ extern "C" {
     fn imported_fire_ticks(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_fire_ticks"]
     fn imported_set_fire_ticks(handle: i32, handle_length: i32, ticks: i32) -> i32;
+    #[link_name = "is_ai_enabled"]
+    fn imported_is_ai_enabled(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_ai_enabled"]
+    fn imported_set_ai_enabled(handle: i32, handle_length: i32, enabled: i32) -> i32;
     #[link_name = "is_glowing"]
     fn imported_is_glowing(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_glowing"]
@@ -679,6 +685,71 @@ pub fn set_fire_ticks(handle: EntityHandle, ticks: u32) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads whether AI is enabled for a loaded non-player Mob.
+///
+/// Requires both `entity.read` and [`AI_CONTROL_CAPABILITY`]. The operation
+/// runs synchronously on the owning logical-server thread and rejects stale
+/// handles and entities that are not Mobs. This flag covers vanilla Mob AI;
+/// it does not expose arbitrary goals, targets, or pathfinding.
+pub fn is_ai_enabled(handle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output::<u32>(4, |output, capacity| {
+            // SAFETY: the encoded handle and output allocation remain valid for this synchronous call.
+            unsafe {
+                imported_is_ai_enabled(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+        .and_then(|enabled| match enabled {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid entity AI enabled flag",
+            )),
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables vanilla AI for one loaded non-player Mob.
+///
+/// Requires both `entity.read` and [`AI_CONTROL_CAPABILITY`]. Calls are
+/// synchronous on the owning logical-server thread. The host changes only
+/// Minecraft's no-AI flag; it does not read, stop, or create a navigation path.
+/// Re-enabling AI resumes normal Mob AI on later ticks. The host resolves only
+/// already-loaded entity handles and never loads chunks.
+pub fn set_ai_enabled(handle: EntityHandle, enabled: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains valid during the synchronous import.
+        let status = unsafe {
+            imported_set_ai_enabled(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                i32::from(enabled),
+            )
+        };
+        status_result(status, "host rejected the entity AI control request")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, enabled);
         Err(unsupported_target())
     }
 }

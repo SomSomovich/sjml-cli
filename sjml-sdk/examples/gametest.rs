@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 mod block_inventory_custom_name;
 #[path = "gametest/block_inventory_move.rs"]
 mod block_inventory_move;
+#[path = "gametest/entity_ai_control.rs"]
+mod entity_ai_control;
 #[path = "gametest/entity_effect_application.rs"]
 mod entity_effect_application;
 #[path = "gametest/entity_heal_attempt.rs"]
@@ -20,10 +22,16 @@ mod entity_join_attempt;
 mod gameplay_events;
 #[path = "gametest/player_advancements.rs"]
 mod player_advancements;
+#[path = "gametest/player_inventory_custom_name.rs"]
+mod player_inventory_custom_name;
+#[path = "gametest/player_respawn_point.rs"]
+mod player_respawn_point;
 #[path = "gametest/player_statistics.rs"]
 mod player_statistics;
 #[path = "gametest/world_difficulty.rs"]
 mod world_difficulty;
+#[path = "gametest/world_redstone_signal.rs"]
+mod world_redstone_signal;
 #[path = "gametest/world_spawn_point.rs"]
 mod world_spawn_point;
 

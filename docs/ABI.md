@@ -6,10 +6,17 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.51.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.52.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.51.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.52.0 adds
+loaded-Mob AI enable/disable, bounded player respawn-point read/set/clear,
+literal custom names on existing player-inventory stacks, and vanilla
+neighboring-redstone-signal reads that use only loaded chunks. AI control
+requires `entity.read` and `entity.ai.control`; respawn-point writes require
+`entity.read` and `player.respawn.write`; player-stack naming requires
+`entity.read` and `inventory.write`; redstone reads require `world.read`.
+ABI 1.51.0 adds
 server-side advancement grants/revocations and custom-stat reads/increments;
 world difficulty and the saved Overworld spawn point; cancellable entity heal,
 status-effect application, and join attempts; bounded block-inventory custom

@@ -11,8 +11,10 @@ pub mod inventory {
 mod player_inventory;
 pub use player_inventory::read as player_inventory_read;
 pub use player_inventory::{
-    set_damage as player_inventory_set_damage, set_slot as player_inventory_set_slot,
-    PlayerInventorySlotUpdate,
+    clear_item_custom_name as player_inventory_clear_item_custom_name,
+    set_damage as player_inventory_set_damage,
+    set_item_custom_name as player_inventory_set_item_custom_name,
+    set_slot as player_inventory_set_slot, PlayerInventorySlotUpdate,
 };
 
 use sjml::inventory::{InventorySnapshot, ItemStackDescriptor};
@@ -90,6 +92,48 @@ fn public_player_inventory_durability_write_validates_then_fails_closed_without_
     );
     assert_eq!(
         player_inventory_set_damage(player, 41, 7)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn public_player_inventory_item_custom_name_set_and_clear_validate_then_fail_closed() {
+    let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+    assert_eq!(
+        player_inventory_set_item_custom_name(player, 0, "Café 🪨")
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        player_inventory_clear_item_custom_name(player, 40)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        player_inventory_set_item_custom_name(player, 41, "name")
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        player_inventory_clear_item_custom_name(player, 41)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        player_inventory_set_item_custom_name(player, 0, "")
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        player_inventory_set_item_custom_name(player, 0, "invalid\nname")
             .unwrap_err()
             .code(),
         ErrorCode::InvalidArgument

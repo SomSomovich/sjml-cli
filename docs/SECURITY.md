@@ -101,6 +101,11 @@ chunks. There is
 no per-dimension or per-position ACL for `world.write`; grant it only to
 modules trusted to edit any loaded dimension on that logical server.
 
+`world::best_neighbor_signal` is a read-only vanilla query under `world.read`.
+Before calling `Level.getBestNeighborSignal`, the host checks the query's
+neighboring/direct-signal neighborhood with `hasChunk`; if any required chunk
+is absent, the API returns `None` without loading it.
+
 ## Player sessions and effect application
 
 Every `sjml_player_v1` import requires the manifest's `entity.read` request and
@@ -122,6 +127,11 @@ Player item-cooldown reads use the live session's vanilla cooldown manager and
 require `entity.read`; setting or clearing cooldowns also requires
 `player.cooldown.write`. These imports are server-only, accept registered
 non-air item IDs, and bound new cooldowns to 1–72,000 ticks.
+
+Respawn-point reads require `entity.read`; set and clear additionally require
+`player.respawn.write`. The host accepts only a loaded destination dimension,
+valid build height, and an in-border position. It updates vanilla respawn
+metadata without loading or checking the target chunk.
 
 Teleportation additionally requires `player.teleport`. The host bounds every
 coordinate and rotation, revalidates the live player session, and checks the
@@ -273,6 +283,12 @@ durability on an existing damageable item, preserves its other components, and
 rejects values that would break the item. Guest code cannot set arbitrary item
 components or NBT.
 
+`player_inventory::set_item_custom_name` and `clear_item_custom_name` require
+`entity.read` plus `inventory.write`. They copy an existing player stack and
+change only its literal custom-name component, preserving its item, count,
+durability, and other components before synchronizing the active menu. They do
+not create stacks or expose arbitrary components.
+
 Player attribute reads and writes accept a live server-player handle and the
 existing attribute allowlist. Reads require `entity.read`; writes additionally
 require `entity.attributes.write`. Every call checks the login session and
@@ -291,6 +307,12 @@ the live module-scoped handle and logical-server thread. Values are limited to
 from live loaded non-player entities under `entity.read`. Their setters also
 require `entity.state.write`; the host rejects client, static-registration, and
 stale-handle calls. These flags do not expose general entity metadata or NBT.
+
+`entity::is_ai_enabled` and `entity::set_ai_enabled` operate only on loaded
+vanilla `Mob` instances. Reads require `entity.read`; writes additionally
+require `entity.ai.control`. The setter changes only Minecraft's existing
+no-AI flag on the logical-server thread; it does not expose goal selectors,
+navigation, or arbitrary guest AI code.
 
 `entity.projectile_impact_attempt` runs synchronously on the logical server before a projectile applies its hit. It requires `events.subscribe` and `events.cancel`; callbacks receive detached projectile and hit data, and only a successful guest veto cancels the impact. Block hit details are read only from an already-loaded chunk.
 

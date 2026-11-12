@@ -32,6 +32,8 @@ pub const MAX_WORLD_RAY_DISTANCE: f64 = 128.0;
 pub const MAX_WORLD_RAY_COORDINATE: f64 = 30_000_000.0;
 /// Maximum absolute block coordinate accepted for x/z world queries.
 pub const MAX_WORLD_BLOCK_COORDINATE: i32 = 30_000_000;
+/// Highest redstone signal returned by [`best_neighbor_signal`].
+pub const MAX_WORLD_REDSTONE_SIGNAL: u8 = 15;
 /// Maximum encoded optional raycast hit, including the stable snapshot headers.
 pub const MAX_WORLD_RAYCAST_RESPONSE_BYTES: usize = 65_857;
 /// Maximum number of block positions visited by one collision query.
@@ -697,6 +699,16 @@ extern "C" {
     ) -> i32;
     #[link_name = "light_at"]
     fn imported_light_at(
+        handle: i32,
+        handle_length: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "best_neighbor_signal"]
+    fn imported_best_neighbor_signal(
         handle: i32,
         handle_length: i32,
         x: i32,
@@ -1380,6 +1392,57 @@ pub fn light_at(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<Lig
             ));
         }
         Ok(light)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads vanilla's maximum neighboring redstone signal at a block position.
+///
+/// Requires `world.read` and runs on the owning logical-server thread. The result is Minecraft's
+/// `SignalGetter::getBestNeighborSignal` value in `0..=15`, considering the six blocks adjacent to
+/// `position` with vanilla's direct-power behavior. The host verifies that the target is inside
+/// build height and that every block position vanilla may inspect is within the world border and
+/// already in a full loaded chunk before reading. It returns `None` if that bounded neighborhood
+/// is unavailable and never requests or generates a chunk. x/z coordinates outside
+/// +/-30,000,000 are rejected.
+pub fn best_neighbor_signal(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<u8>> {
+    if !(-MAX_WORLD_BLOCK_COORDINATE..=MAX_WORLD_BLOCK_COORDINATE).contains(&position.x)
+        || !(-MAX_WORLD_BLOCK_COORDINATE..=MAX_WORLD_BLOCK_COORDINATE).contains(&position.z)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "world x/z coordinates must be within +/-30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        let signal: Option<u32> = read_output(1 + 4, |output, capacity| {
+            // SAFETY: the handle, coordinates, and fixed output stay live for this call.
+            unsafe {
+                imported_best_neighbor_signal(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    position.x,
+                    position.y,
+                    position.z,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        match signal {
+            Some(value) if value <= u32::from(MAX_WORLD_REDSTONE_SIGNAL) => Ok(Some(value as u8)),
+            Some(_) => Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "host returned a redstone signal outside 0..=15",
+            )),
+            None => Ok(None),
+        }
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

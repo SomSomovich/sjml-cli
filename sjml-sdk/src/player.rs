@@ -38,6 +38,62 @@ pub struct PlayerSnapshot {
     pub z: f64,
 }
 
+/// Detached vanilla respawn destination for one online player.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerRespawnPoint {
+    /// Block X coordinate used by vanilla when the player respawns.
+    pub x: i32,
+    /// Block Y coordinate used by vanilla when the player respawns.
+    pub y: i32,
+    /// Block Z coordinate used by vanilla when the player respawns.
+    pub z: i32,
+    /// Canonical namespace:path ID of an already-loaded server dimension.
+    pub dimension_id: String,
+    /// Vanilla respawn yaw in degrees.
+    pub angle: f32,
+    /// Whether vanilla should force the configured position when its spawn block is unsuitable.
+    pub forced: bool,
+}
+
+impl PlayerRespawnPoint {
+    /// Creates a respawn destination after validating its fixed coordinate, dimension, and angle bounds.
+    pub fn new(
+        x: i32,
+        y: i32,
+        z: i32,
+        dimension_id: impl Into<String>,
+        angle: f32,
+        forced: bool,
+    ) -> SjmlResult<Self> {
+        let point = Self {
+            x,
+            y,
+            z,
+            dimension_id: dimension_id.into(),
+            angle,
+            forced,
+        };
+        point.validate()?;
+        Ok(point)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        if self.x.unsigned_abs() > MAX_PLAYER_RESPAWN_COORDINATE as u32
+            || self.y.unsigned_abs() > MAX_PLAYER_RESPAWN_COORDINATE as u32
+            || self.z.unsigned_abs() > MAX_PLAYER_RESPAWN_COORDINATE as u32
+            || !self.angle.is_finite()
+            || self.angle.abs() > MAX_PLAYER_RESPAWN_ANGLE
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "player respawn coordinates or angle are outside the supported range",
+            ));
+        }
+        validate_player_respawn_dimension(&self.dimension_id)
+    }
+}
+
 /// Detached health, hunger, and experience data for one live player session.
 #[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -218,6 +274,16 @@ pub const MAX_PLAYER_ITEM_COOLDOWN_TICKS: u32 = 72_000;
 pub const MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES: usize = 256;
 /// Maximum UTF-8 size accepted for a registered advancement ID.
 pub const MAX_PLAYER_ADVANCEMENT_ID_BYTES: usize = 256;
+/// Maximum UTF-8 dimension ID accepted for a player respawn point.
+pub const MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES: usize = 256;
+/// Maximum absolute block coordinate accepted before target dimension build-height and border checks.
+pub const MAX_PLAYER_RESPAWN_COORDINATE: i32 = 30_000_000;
+/// Maximum absolute yaw accepted for a player respawn point.
+pub const MAX_PLAYER_RESPAWN_ANGLE: f32 = 36_000.0;
+/// Maximum schema-v1 encoded size of one respawn point.
+pub const MAX_PLAYER_RESPAWN_POINT_BYTES: u32 = 281;
+/// Maximum schema-v1 encoded size of an optional respawn-point snapshot.
+pub const MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES: u32 = MAX_PLAYER_RESPAWN_POINT_BYTES + 1;
 /// Maximum amount one call may add to a vanilla custom-stat counter.
 pub const MAX_PLAYER_STATISTIC_INCREMENT: u32 = 1_000_000;
 
@@ -616,6 +682,17 @@ extern "C" {
     fn imported_game_mode(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_game_mode"]
     fn imported_set_game_mode(handle: i32, length: i32, game_mode: i32) -> i32;
+    #[link_name = "respawn_point"]
+    fn imported_respawn_point(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_respawn_point"]
+    fn imported_set_respawn_point(
+        handle: i32,
+        handle_length: i32,
+        point: i32,
+        point_length: i32,
+    ) -> i32;
+    #[link_name = "clear_respawn_point"]
+    fn imported_clear_respawn_point(handle: i32, handle_length: i32) -> i32;
     #[link_name = "set_health"]
     fn imported_set_health(handle: i32, length: i32, health_bits: i32) -> i32;
     #[link_name = "set_food"]
@@ -857,6 +934,98 @@ pub fn set_game_mode(handle: PlayerHandle, game_mode: PlayerGameMode) -> SjmlRes
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (handle, game_mode);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads an online player's configured vanilla respawn point.
+///
+/// Returns `Ok(None)` when the player has no bed, anchor, or other vanilla respawn point. A
+/// present snapshot contains its block position, canonical dimension ID, yaw angle, and forced
+/// flag. This reads only the player's saved respawn metadata; it does not load a dimension or
+/// inspect a chunk. Requires `entity.read` and a live handle in a logical-server module.
+pub fn respawn_point(handle: PlayerHandle) -> SjmlResult<Option<PlayerRespawnPoint>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let point = read_output::<Option<PlayerRespawnPoint>>(
+            MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES,
+            |output, capacity| {
+                // SAFETY: handle and output storage remain live through the synchronous call.
+                unsafe {
+                    imported_respawn_point(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as u32 as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        if let Some(point) = &point {
+            point.validate()?;
+        }
+        Ok(point)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the player's vanilla respawn destination.
+///
+/// Requires `entity.read` and `player.respawn.write` in a logical-server module. The target
+/// dimension must already be loaded by this server; the host checks its build height and world
+/// border, then stores the bounded position, yaw, and forced flag through Minecraft's vanilla
+/// `ServerPlayer` respawn setter. The operation does not inspect, load, or request the target
+/// chunk. Vanilla may load that chunk later when it actually respawns the player. A NeoForge
+/// spawn hook may reject the update.
+pub fn set_respawn_point(handle: PlayerHandle, point: PlayerRespawnPoint) -> SjmlResult<()> {
+    point.validate()?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let encoded_point = to_bytes(&point)?;
+        // SAFETY: both stable byte buffers remain live through the synchronous host import.
+        let status = unsafe {
+            imported_set_respawn_point(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                encoded_point.as_ptr() as usize as u32 as i32,
+                encoded_point.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the player respawn-point change")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Clears the player's configured vanilla respawn point.
+///
+/// Requires `entity.read` and `player.respawn.write` in a logical-server module. After clearing,
+/// Minecraft chooses its normal default spawn when this player next respawns.
+pub fn clear_respawn_point(handle: PlayerHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains live during the synchronous host call.
+        let status = unsafe {
+            imported_clear_respawn_point(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected clearing the player respawn point")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
         Err(unsupported_target())
     }
 }
@@ -1406,6 +1575,34 @@ fn validate_advancement_id(advancement_id: &str) -> SjmlResult<()> {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "player advancement ID must be a canonical namespace:path value",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_player_respawn_dimension(dimension_id: &str) -> SjmlResult<()> {
+    if dimension_id.len() > MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player respawn dimension ID exceeds 256 UTF-8 bytes",
+        ));
+    }
+    let valid_resource_id = dimension_id
+        .split_once(':')
+        .is_some_and(|(namespace, path)| {
+            !namespace.is_empty()
+                && !path.is_empty()
+                && namespace.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+                })
+                && path.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
+                })
+        });
+    if !valid_resource_id {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player respawn dimension must be a canonical namespace:path value",
         ));
     }
     Ok(())

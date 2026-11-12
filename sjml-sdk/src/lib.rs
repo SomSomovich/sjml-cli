@@ -150,8 +150,8 @@ pub use client_keybindings::{
 };
 pub use client_notifications::NotificationKind;
 pub use entity::{
-    EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
-    MAX_SPATIAL_QUERY_RESULTS,
+    EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ENTITY_VELOCITY_COMPONENT,
+    MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
 };
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
@@ -173,12 +173,14 @@ pub use network::{
     NetworkSubscriptionHandle, Player as NetworkPlayer, Uuid,
 };
 pub use player::{
-    custom_stat, grant_advancement, increment_custom_stat, revoke_advancement, PlayerAbilities,
-    PlayerCustomStat, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
-    PlayerSnapshot, PlayerTitleTimings, PlayerVelocity, PlayerVitals,
-    MAX_PLAYER_ADVANCEMENT_ID_BYTES, MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_TITLE_TEXT_BYTES,
-    MAX_PLAYER_TITLE_TEXT_CODE_POINTS, MAX_PLAYER_TITLE_TIMING_TICKS,
-    MAX_PLAYER_VELOCITY_COMPONENT,
+    clear_respawn_point, custom_stat, grant_advancement, increment_custom_stat, respawn_point,
+    revoke_advancement, set_respawn_point, PlayerAbilities, PlayerCustomStat, PlayerEquipment,
+    PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint, PlayerSnapshot,
+    PlayerTitleTimings, PlayerVelocity, PlayerVitals, MAX_PLAYER_ADVANCEMENT_ID_BYTES,
+    MAX_PLAYER_RESPAWN_ANGLE, MAX_PLAYER_RESPAWN_COORDINATE, MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES,
+    MAX_PLAYER_RESPAWN_POINT_BYTES, MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES,
+    MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_PLAYER_TITLE_TEXT_CODE_POINTS,
+    MAX_PLAYER_TITLE_TIMING_TICKS, MAX_PLAYER_VELOCITY_COMPONENT,
 };
 pub use player_inventory::{
     PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
@@ -229,7 +231,8 @@ pub use world::{
     MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
     MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
     MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_CHUNKS, MAX_WORLD_CHUNKS_RESPONSE_BYTES,
-    MAX_WORLD_CHUNK_RADIUS, MAX_WORLD_GAME_TIME_TICKS, MAX_WORLD_SPAWN_POINT_BYTES,
+    MAX_WORLD_CHUNK_RADIUS, MAX_WORLD_GAME_TIME_TICKS, MAX_WORLD_REDSTONE_SIGNAL,
+    MAX_WORLD_SPAWN_POINT_BYTES,
 };
 
 /// Common imports for an SJML guest module.
@@ -265,8 +268,8 @@ pub mod prelude {
     pub use crate::client_notifications::NotificationKind;
     pub use crate::entity;
     pub use crate::entity::{
-        EntitySnapshot, EntityVelocity, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT,
-        MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
+        EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ENTITY_RAYCAST_DISTANCE,
+        MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
     };
     pub use crate::entity_attributes;
     pub use crate::entity_attributes::{AttributeValues, LivingAttribute};
@@ -311,11 +314,14 @@ pub mod prelude {
     };
     pub use crate::player;
     pub use crate::player::{
-        clear_item_cooldown, grant_advancement, has_item_cooldown, revoke_advancement,
-        set_item_cooldown, PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode,
-        PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
-        MAX_PLAYER_ADVANCEMENT_ID_BYTES, MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES,
-        MAX_PLAYER_ITEM_COOLDOWN_TICKS, MAX_PLAYER_VELOCITY_COMPONENT,
+        clear_item_cooldown, clear_respawn_point, grant_advancement, has_item_cooldown,
+        respawn_point, revoke_advancement, set_item_cooldown, set_respawn_point, PlayerAbilities,
+        PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint,
+        PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_ADVANCEMENT_ID_BYTES,
+        MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES, MAX_PLAYER_ITEM_COOLDOWN_TICKS,
+        MAX_PLAYER_RESPAWN_ANGLE, MAX_PLAYER_RESPAWN_COORDINATE,
+        MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES, MAX_PLAYER_RESPAWN_POINT_BYTES,
+        MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES, MAX_PLAYER_VELOCITY_COMPONENT,
     };
     pub use crate::player_inventory;
     pub use crate::player_inventory::{
@@ -382,7 +388,8 @@ pub mod prelude {
         MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
         MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
         MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_RAYCAST_RESPONSE_BYTES,
-        MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE, MAX_WORLD_SPAWN_POINT_BYTES,
+        MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE, MAX_WORLD_REDSTONE_SIGNAL,
+        MAX_WORLD_SPAWN_POINT_BYTES,
     };
     pub use crate::{
         client_command, command, compute, event, event_async, mod_init, mod_register, mod_shutdown,

@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.59.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.60.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.51.0"
+abi = "^1.52.0"
 minecraft = "~1.21.1"
-sjml = "^0.61.0"
+sjml = "^0.62.0"
 
 [[modules]]
 id = "main"
@@ -179,13 +179,13 @@ module's manifest request and the administrator's list.
 | `content.register` | Static registry declarations, including bounded item food/rarity/enchantment/durability values, and server guest commands. |
 | `client.command` | Register and execute bounded local commands on the physical client; does not send commands to the server. |
 | `events.subscribe` | Subscribing to supported host events. |
-| `events.cancel` | Vetoing cancellable block break/place, right-click `player.interaction`, `player.drop_attempt`, `entity.death_attempt`, `entity.damage_attempt`, `entity.target_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; also requires `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
-| `world.read`, `world.write` | Reading loaded server-world state; writes include blocks and properties, scheduled block ticks, time, weather, allowlisted boolean/integer game rules, and world-border settings, and require both. |
+| `events.cancel` | Vetoing cancellable block break/place, right-click `player.interaction`, `player.drop_attempt`, `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`, `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; also requires `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
+| `world.read`, `world.write` | Reading loaded server-world state; writes include blocks and properties, scheduled block ticks, time, weather, difficulty, Overworld spawn point, allowlisted boolean/integer game rules, and world-border settings, and require both. |
 | `entity.read`, `entity.spawn`, `entity.effect.apply`, `entity.effect.remove` | Reading player/entity snapshots, spawning registered entities, or applying/removing registered effects; effect mutation also requires `entity.read`. |
-| `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write`, `entity.custom_name.write` | Removing loaded non-player entities, changing bounded velocity, fire duration, glowing/silent flags, or literal custom names, and reading/writing allowlisted living-entity and server-player attribute base values; writes also require `entity.read`. |
-| `player.teleport`, `player.vitals.write`, `player.game_mode.write`, `player.motion.write`, `player.abilities.write`, `player.cooldown.write` | Teleporting a live player, changing bounded vitals, game mode, velocity, or current flight state, and setting or clearing vanilla item cooldowns; each also requires `entity.read` and logical-server execution. |
+| `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write`, `entity.custom_name.write`, `entity.ai.control` | Removing loaded non-player entities, changing bounded velocity, fire duration, glowing/silent flags, literal custom names, or the enabled-AI flag on loaded Mob entities, and reading/writing allowlisted living-entity and server-player attribute base values; writes also require `entity.read`. |
+| `player.teleport`, `player.respawn.write`, `player.vitals.write`, `player.game_mode.write`, `player.motion.write`, `player.abilities.write`, `player.cooldown.write`, `player.advancement.write`, `player.statistics.write` | Teleporting a live player, changing their saved respawn position, bounded vitals, game mode, velocity, flight state, vanilla item cooldowns, advancement progress, or vanilla custom statistics; player writes also require `entity.read` and logical-server execution. |
 | `entity.data.read`, `entity.data.write` | Reading or changing module-owned data attached to non-player entities. |
-| `inventory.read`, `inventory.write` | Reading loaded block/player inventories and detached item-stack snapshots, or changing registered block-inventory stacks, player slots/durability, and same-module integer components. Player operations also require `entity.read`; block operations require `world.read` and an inventory capability. |
+| `inventory.read`, `inventory.write` | Reading loaded block/player inventories and detached item-stack snapshots, or changing registered block-inventory stacks, literal custom names on existing block- and player-inventory stacks, bounded slot transfers, player slots/durability, and same-module integer components. Player operations also require `entity.read`; block operations require `world.read` and an inventory capability. |
 | `block_entity.nbt.read` | Reading bounded block-entity snapshots and NBT. |
 | `network.mod`, `network.external` | Declaring/using SJML network channels; cross-module channels need `network.external`. |
 | `storage.read`, `storage.write` | Reading or changing persistent typed records. |
@@ -204,6 +204,7 @@ module's manifest request and the administrator's list.
 | `client.audio.play` | Playing a registered sound locally through Minecraft's sound manager. |
 | `client.audio.loop` | Starting/stopping bounded module-owned local loops; cleanup stops only that module's sounds. |
 | `client.render` | Subscribing to HUD, screen, or world-render callbacks. |
+| `client.render.gui_layer.suppress` | Suppressing an exact vanilla GUI-layer ID on the physical client; requires a matching active client module, and does not provide arbitrary screen or render-state access. |
 | `client.render.opengl` | Using typed OpenGL resources and GUI textures. Most drawing also needs `client.render`. |
 
 Add only the capabilities that the code uses. The [SDK guide](SDK_GUIDE.md),

@@ -1,8 +1,8 @@
 //! Bounded reads and single-slot writes for a live player's inventory.
 //!
-//! `read` requires both `entity.read` and `inventory.read`. `set_slot` and `set_damage` require
-//! both `entity.read` and `inventory.write`. All operations are available only to logical-server
-//! modules, use the owning server thread, and resolve a live login session on every call.
+//! `read` requires both `entity.read` and `inventory.read`. Writes require both `entity.read` and
+//! `inventory.write`. All operations are available only to logical-server modules, use the owning
+//! server thread, and resolve a live login session on every call.
 
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
@@ -27,6 +27,10 @@ pub const MAX_PLAYER_INVENTORY_SLOT_COUNT: u32 = 4096;
 pub const MAX_PLAYER_INVENTORY_ITEM_ID_BYTES: usize = 256;
 /// Maximum durability value accepted for a live player inventory item.
 pub const MAX_PLAYER_INVENTORY_DAMAGE: u32 = 65_535;
+/// Maximum UTF-8 byte length of a plain player-inventory item custom name.
+pub const MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES: usize = 1_024;
+/// Maximum Unicode scalar count of a plain player-inventory item custom name.
+pub const MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS: usize = 256;
 /// Maximum UTF-8 path length for a module-owned integer data component.
 pub const MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES: usize = 256;
 
@@ -57,6 +61,18 @@ extern "C" {
 
     #[link_name = "set_player_damage"]
     fn imported_set_player_damage(player: i32, player_length: i32, slot: i32, damage: i32) -> i32;
+
+    #[link_name = "set_player_item_custom_name"]
+    fn imported_set_player_item_custom_name(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        name: i32,
+        name_length: i32,
+    ) -> i32;
+
+    #[link_name = "clear_player_item_custom_name"]
+    fn imported_clear_player_item_custom_name(player: i32, player_length: i32, slot: i32) -> i32;
 
     #[link_name = "read_player_integer_component"]
     fn imported_read_player_integer_component(
@@ -297,6 +313,111 @@ pub fn set_damage(player: PlayerHandle, slot: u32, damage: u32) -> SjmlResult<()
     }
 }
 
+/// Sets the plain literal custom name on an existing stack in the live player's inventory.
+///
+/// This changes only Minecraft's vanilla `CUSTOM_NAME` component. It keeps the existing item,
+/// count, durability, and all unrelated components. Names must contain 1..=256 Unicode scalar
+/// values, use at most 1,024 UTF-8 bytes, and contain no control characters. The host copies the
+/// existing stack, commits the update, marks the inventory changed, and synchronizes the active
+/// player menu. Slot indices use the same layout as [`read`].
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`; it runs only
+/// on the logical-server thread and fails if the slot is empty or the player handle is stale.
+pub fn set_item_custom_name(player: PlayerHandle, slot: u32, name: &str) -> SjmlResult<()> {
+    validate_custom_name(slot, name)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle bytes and borrowed UTF-8 name stay live for this synchronous import.
+        let status = unsafe {
+            imported_set_player_item_custom_name(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                name.as_ptr() as usize as u32 as i32,
+                name.len() as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory custom-name update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, name);
+        Err(unsupported_target())
+    }
+}
+
+/// Clears the plain literal custom name from an existing stack in the live player's inventory.
+///
+/// The host keeps the existing item, count, durability, and all other components, then marks the
+/// inventory changed and synchronizes the active player menu. Slot indices use the same layout as
+/// [`read`]. Empty slots are rejected.
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`; it runs only
+/// on the logical-server thread and fails if the player handle is stale.
+pub fn clear_item_custom_name(player: PlayerHandle, slot: u32) -> SjmlResult<()> {
+    validate_custom_name_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle bytes remain live for this synchronous import.
+        let status = unsafe {
+            imported_clear_player_item_custom_name(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory custom-name clear",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_custom_name(slot: u32, name: &str) -> SjmlResult<()> {
+    validate_custom_name_slot(slot)?;
+    if name.is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory custom name must not be empty; use clear_item_custom_name",
+        ));
+    }
+    if name.len() > MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES
+        || name.chars().count() > MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player inventory custom name exceeds 1,024 UTF-8 bytes or 256 characters",
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory custom name cannot contain control characters",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_custom_name_slot(slot: u32) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory slot must be between 0 and 40",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_damage(slot: u32, damage: u32) -> SjmlResult<()> {
     if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX || damage > MAX_PLAYER_INVENTORY_DAMAGE {
         return Err(SjmlError::new(
@@ -419,14 +540,16 @@ fn unsupported_target() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(target_arch = "wasm32"))]
-    use super::{read, read_integer_component, write_integer_component};
     use super::{
-        set_damage, set_slot, validate_damage, validate_inventory, PlayerInventorySlotUpdate,
-        MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_DAMAGE,
+        clear_item_custom_name, set_damage, set_item_custom_name, set_slot, validate_custom_name,
+        validate_damage, validate_inventory, PlayerInventorySlotUpdate,
+        MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES,
+        MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS, MAX_PLAYER_INVENTORY_DAMAGE,
         MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
         MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
+    #[cfg(not(target_arch = "wasm32"))]
+    use super::{read, read_integer_component, write_integer_component};
     use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
     use crate::ErrorCode;
     #[cfg(not(target_arch = "wasm32"))]
@@ -566,6 +689,63 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn player_inventory_custom_names_are_bounded_plain_text() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert!(validate_custom_name(40, "Café 🪨").is_ok());
+        assert_eq!(
+            set_item_custom_name(player, 0, "literal §c name")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "a valid name reaches the wasm-only host on native builds"
+        );
+        assert_eq!(
+            clear_item_custom_name(player, 40).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "a valid clear reaches the wasm-only host on native builds"
+        );
+        for slot in [41, u32::MAX] {
+            assert_eq!(
+                set_item_custom_name(player, slot, "name")
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                clear_item_custom_name(player, slot).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for name in ["", "line\nbreak", "tab\tname"] {
+            assert_eq!(
+                set_item_custom_name(player, 0, name).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+                "invalid name {name:?} must be rejected before host access"
+            );
+        }
+        assert_eq!(
+            validate_custom_name(
+                0,
+                &"é".repeat(MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES / 2 + 1)
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::PayloadTooLarge,
+            "UTF-8 byte length, not Rust string byte storage details, bounds the name"
+        );
+        assert_eq!(
+            validate_custom_name(
+                0,
+                &"a".repeat(MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS + 1)
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::PayloadTooLarge
         );
     }
 
