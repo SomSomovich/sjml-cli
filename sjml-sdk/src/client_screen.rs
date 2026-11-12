@@ -8,6 +8,8 @@ pub const CLIENT_SCREEN_SCHEMA_VERSION: u32 = 1;
 pub const CLIENT_SCREEN_FORM_SCHEMA_VERSION: u32 = 2;
 /// Schema version used by client list form definitions sent to the host.
 pub const CLIENT_SCREEN_LIST_FORM_SCHEMA_VERSION: u32 = 3;
+/// Schema version used by checkbox settings forms sent to the host.
+pub const CLIENT_SCREEN_SETTINGS_FORM_SCHEMA_VERSION: u32 = 4;
 /// Maximum UTF-8 length of a screen or button ID.
 pub const MAX_CLIENT_SCREEN_ID_BYTES: usize = 64;
 /// Maximum UTF-8 length of a screen title.
@@ -30,6 +32,8 @@ pub const MAX_CLIENT_SCREEN_TEXT_FIELD_LABEL_BYTES: usize = MAX_CLIENT_SCREEN_BU
 pub const MAX_CLIENT_SCREEN_TEXT_FIELD_VALUE_BYTES: u32 = 128;
 /// Maximum number of options in a client selection list.
 pub const MAX_CLIENT_SCREEN_SELECTION_OPTIONS: usize = 32;
+/// Maximum number of checkbox fields in a client settings form.
+pub const MAX_CLIENT_SCREEN_CHECKBOXES: usize = 8;
 /// Maximum UTF-8 length of one selection list or option label.
 pub const MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES: usize = 96;
 /// Maximum encoded size of a complete screen definition.
@@ -447,6 +451,155 @@ impl ClientScreenListFormDefinition {
     }
 }
 
+/// One literal boolean input displayed on a settings form screen.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenCheckbox {
+    /// Stable lowercase key included in the submit callback.
+    pub id: String,
+    /// Literal label displayed beside the checkbox.
+    pub label: String,
+    /// Initial checked state.
+    pub initial_checked: bool,
+}
+
+impl ClientScreenCheckbox {
+    /// Builds and validates one checkbox field.
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        initial_checked: bool,
+    ) -> SjmlResult<Self> {
+        let checkbox = Self {
+            id: id.into(),
+            label: label.into(),
+            initial_checked,
+        };
+        checkbox.validate()?;
+        Ok(checkbox)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        validate_id(&self.id, "checkbox ID")?;
+        validate_text(
+            &self.label,
+            1,
+            MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES,
+            "checkbox label",
+        )
+    }
+}
+
+/// A settings form with zero to four text fields, an optional selection list, and one to eight checkboxes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenSettingsFormDefinition {
+    /// Screen content and submit buttons.
+    pub screen: ClientScreenDefinition,
+    /// Zero to four uniquely identified text input fields.
+    pub fields: Vec<ClientScreenTextField>,
+    /// Optional single-choice list.
+    pub list: Option<ClientScreenSelectionList>,
+    /// One to eight uniquely identified checkbox fields.
+    pub checkboxes: Vec<ClientScreenCheckbox>,
+}
+
+impl ClientScreenSettingsFormDefinition {
+    /// Builds and validates a bounded settings form screen.
+    pub fn new(
+        screen: ClientScreenDefinition,
+        fields: Vec<ClientScreenTextField>,
+        list: Option<ClientScreenSelectionList>,
+        checkboxes: Vec<ClientScreenCheckbox>,
+    ) -> SjmlResult<Self> {
+        let definition = Self {
+            screen,
+            fields,
+            list,
+            checkboxes,
+        };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    fn validate(&self) -> SjmlResult<usize> {
+        let mut size = self.screen.validate()?;
+        if self.fields.len() > MAX_CLIENT_SCREEN_TEXT_FIELDS {
+            return Err(invalid(format!(
+                "a settings form supports at most {MAX_CLIENT_SCREEN_TEXT_FIELDS} text fields"
+            )));
+        }
+        if !(1..=MAX_CLIENT_SCREEN_CHECKBOXES).contains(&self.checkboxes.len()) {
+            return Err(invalid(format!(
+                "a settings form must contain between 1 and {MAX_CLIENT_SCREEN_CHECKBOXES} checkboxes"
+            )));
+        }
+
+        let mut ids: Vec<String> = self
+            .screen
+            .buttons
+            .iter()
+            .map(|button| button.id.clone())
+            .collect();
+        for field in &self.fields {
+            field.validate()?;
+            if ids.contains(&field.id) {
+                return Err(invalid(
+                    "settings form element IDs must be unique and cannot match a button ID",
+                ));
+            }
+            ids.push(field.id.clone());
+        }
+        if let Some(list) = &self.list {
+            list.validate()?;
+            if ids.contains(&list.id) {
+                return Err(invalid(
+                    "settings form element IDs must be unique and cannot match a button ID",
+                ));
+            }
+            ids.push(list.id.clone());
+        }
+        for checkbox in &self.checkboxes {
+            checkbox.validate()?;
+            if ids.contains(&checkbox.id) {
+                return Err(invalid(
+                    "settings form element IDs must be unique and cannot match a button ID",
+                ));
+            }
+            ids.push(checkbox.id.clone());
+        }
+
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for field in &self.fields {
+            size = checked_string_size(size, &field.id)?;
+            size = checked_string_size(size, &field.label)?;
+            size = checked_string_size(size, &field.initial_value)?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        if let Some(list) = &self.list {
+            size = checked_string_size(size, &list.id)?;
+            size = checked_string_size(size, &list.label)?;
+            size = checked_string_size(size, list.initial_selected_id.as_deref().unwrap_or(""))?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+            for option in &list.options {
+                size = checked_string_size(size, &option.id)?;
+                size = checked_string_size(size, &option.label)?;
+            }
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for checkbox in &self.checkboxes {
+            size = checked_string_size(size, &checkbox.id)?;
+            size = checked_string_size(size, &checkbox.label)?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        }
+        if size > MAX_CLIENT_SCREEN_PAYLOAD_BYTES {
+            return Err(too_large(format!(
+                "encoded client settings form exceeds {MAX_CLIENT_SCREEN_PAYLOAD_BYTES} bytes"
+            )));
+        }
+        Ok(size)
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_client_ui_v1")]
 extern "C" {
@@ -479,6 +632,15 @@ pub fn open_form(definition: &ClientScreenFormDefinition) -> SjmlResult<()> {
 /// value when no option is selected) directly to the owning module as `client.screen.form_submit`.
 pub fn open_list_form(definition: &ClientScreenListFormDefinition) -> SjmlResult<()> {
     let payload = encode_list_form_definition(definition)?;
+    open_payload(&payload)
+}
+
+/// Opens a settings form with optional text/list controls and one to eight checkboxes.
+///
+/// On submit, values follow declaration order: text fields, optional selection, then checkboxes.
+/// Checkbox values use the strings `"true"` and `"false"` in `client.screen.form_submit`.
+pub fn open_settings_form(definition: &ClientScreenSettingsFormDefinition) -> SjmlResult<()> {
+    let payload = encode_settings_form_definition(definition)?;
     open_payload(&payload)
 }
 
@@ -574,6 +736,44 @@ fn encode_list_form_definition(definition: &ClientScreenListFormDefinition) -> S
     Ok(payload)
 }
 
+fn encode_settings_form_definition(
+    definition: &ClientScreenSettingsFormDefinition,
+) -> SjmlResult<Vec<u8>> {
+    let capacity = definition.validate()?;
+    let mut payload = encode_definition(&definition.screen)?;
+    payload.reserve(capacity.saturating_sub(payload.len()));
+    payload[..4].copy_from_slice(&CLIENT_SCREEN_SETTINGS_FORM_SCHEMA_VERSION.to_le_bytes());
+    write_u32(&mut payload, definition.fields.len() as u32);
+    for field in &definition.fields {
+        write_string(&mut payload, &field.id)?;
+        write_string(&mut payload, &field.label)?;
+        write_string(&mut payload, &field.initial_value)?;
+        write_u32(&mut payload, field.max_utf8_bytes);
+    }
+    write_u32(&mut payload, u32::from(definition.list.is_some()));
+    if let Some(list) = &definition.list {
+        write_string(&mut payload, &list.id)?;
+        write_string(&mut payload, &list.label)?;
+        write_string(
+            &mut payload,
+            list.initial_selected_id.as_deref().unwrap_or(""),
+        )?;
+        write_u32(&mut payload, list.options.len() as u32);
+        for option in &list.options {
+            write_string(&mut payload, &option.id)?;
+            write_string(&mut payload, &option.label)?;
+        }
+    }
+    write_u32(&mut payload, definition.checkboxes.len() as u32);
+    for checkbox in &definition.checkboxes {
+        write_string(&mut payload, &checkbox.id)?;
+        write_string(&mut payload, &checkbox.label)?;
+        write_u32(&mut payload, u32::from(checkbox.initial_checked));
+    }
+    debug_assert!(payload.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    Ok(payload)
+}
+
 fn write_string(payload: &mut Vec<u8>, value: &str) -> SjmlResult<()> {
     let length = u32::try_from(value.len()).map_err(|_| payload_overflow())?;
     write_u32(payload, length);
@@ -634,10 +834,11 @@ fn payload_overflow() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_definition, encode_form_definition, encode_list_form_definition, ClientScreenButton,
+        encode_definition, encode_form_definition, encode_list_form_definition,
+        encode_settings_form_definition, ClientScreenButton, ClientScreenCheckbox,
         ClientScreenDefinition, ClientScreenFormDefinition, ClientScreenListFormDefinition,
-        ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenTextField,
-        MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
+        ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+        ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES, MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
     };
 
     #[test]
@@ -808,6 +1009,139 @@ mod tests {
             list(),
         )
         .is_err());
+    }
+
+    #[test]
+    fn encodes_schema_v4_settings_form_with_optional_list_and_checkbox_values() {
+        let screen = ClientScreenDefinition::new(
+            "demo:settings",
+            "Settings",
+            vec!["Configure options".to_owned()],
+            vec![ClientScreenButton::new("save", "Save").unwrap()],
+        )
+        .unwrap();
+        let list = ClientScreenSelectionList::new(
+            "mode",
+            "Mode",
+            vec![
+                ClientScreenSelectionOption::new("easy", "Easy").unwrap(),
+                ClientScreenSelectionOption::new("hard", "Hard").unwrap(),
+            ],
+            Some("hard".to_owned()),
+        )
+        .unwrap();
+        let form = ClientScreenSettingsFormDefinition::new(
+            screen.clone(),
+            vec![ClientScreenTextField::new("name", "Name", "Ada", 64).unwrap()],
+            Some(list),
+            vec![
+                ClientScreenCheckbox::new("sound", "Enable sound", true).unwrap(),
+                ClientScreenCheckbox::new("music", "Enable music", false).unwrap(),
+                ClientScreenCheckbox::new("cache", "Cache responses", true).unwrap(),
+                ClientScreenCheckbox::new("telemetry", "Share usage data", false).unwrap(),
+                ClientScreenCheckbox::new("cloud_sync", "Sync settings", true).unwrap(),
+                ClientScreenCheckbox::new("compact_ui", "Use compact layout", false).unwrap(),
+                ClientScreenCheckbox::new("updates", "Check for updates", true).unwrap(),
+                ClientScreenCheckbox::new("analytics", "Send diagnostics", false).unwrap(),
+            ],
+        )
+        .unwrap();
+        let encoded = encode_settings_form_definition(&form).unwrap();
+
+        let mut expected = encode_definition(&screen).unwrap();
+        expected[..4].copy_from_slice(&4_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "name");
+        append_string(&mut expected, "Name");
+        append_string(&mut expected, "Ada");
+        expected.extend_from_slice(&64_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "mode");
+        append_string(&mut expected, "Mode");
+        append_string(&mut expected, "hard");
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        append_string(&mut expected, "easy");
+        append_string(&mut expected, "Easy");
+        append_string(&mut expected, "hard");
+        append_string(&mut expected, "Hard");
+        expected.extend_from_slice(&(form.checkboxes.len() as u32).to_le_bytes());
+        for checkbox in &form.checkboxes {
+            append_string(&mut expected, &checkbox.id);
+            append_string(&mut expected, &checkbox.label);
+            expected.extend_from_slice(&u32::from(checkbox.initial_checked).to_le_bytes());
+        }
+        assert_eq!(encoded, expected);
+        assert!(encoded.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+
+        let checkbox_only = ClientScreenSettingsFormDefinition::new(
+            screen,
+            Vec::new(),
+            None,
+            vec![ClientScreenCheckbox::new("enabled", "Enabled", false).unwrap()],
+        )
+        .unwrap();
+        let checkbox_only_payload = encode_settings_form_definition(&checkbox_only).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(checkbox_only_payload[..4].try_into().unwrap()),
+            4
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                checkbox_only_payload[checkbox_only_payload.len() - 4..]
+                    .try_into()
+                    .unwrap()
+            ),
+            0,
+            "a checkbox-only definition writes false as the final boolean word"
+        );
+    }
+
+    #[test]
+    fn settings_form_bounds_checkbox_count_labels_and_combined_ids() {
+        let screen = || {
+            ClientScreenDefinition::new(
+                "demo:settings",
+                "Settings",
+                Vec::new(),
+                vec![ClientScreenButton::new("save", "Save").unwrap()],
+            )
+            .unwrap()
+        };
+        assert!(
+            ClientScreenSettingsFormDefinition::new(screen(), Vec::new(), None, Vec::new())
+                .is_err()
+        );
+        assert!(ClientScreenCheckbox::new("bad?", "Enabled", true).is_err());
+        assert!(ClientScreenCheckbox::new("enabled", "", true).is_err());
+        let duplicate = ClientScreenCheckbox::new("enabled", "Enabled", true).unwrap();
+        assert!(ClientScreenSettingsFormDefinition::new(
+            screen(),
+            vec![ClientScreenTextField::new("enabled", "Name", "", 32).unwrap()],
+            None,
+            vec![duplicate.clone()],
+        )
+        .is_err());
+        assert!(ClientScreenSettingsFormDefinition::new(
+            screen(),
+            Vec::new(),
+            None,
+            vec![
+                duplicate.clone(),
+                duplicate.clone(),
+                duplicate.clone(),
+                duplicate.clone(),
+                duplicate
+            ],
+        )
+        .is_err());
+        let too_many = (0..=MAX_CLIENT_SCREEN_CHECKBOXES)
+            .map(|index| {
+                ClientScreenCheckbox::new(format!("checkbox_{index}"), "Checkbox", false).unwrap()
+            })
+            .collect();
+        assert!(
+            ClientScreenSettingsFormDefinition::new(screen(), Vec::new(), None, too_many).is_err()
+        );
     }
 
     fn append_string(target: &mut Vec<u8>, value: &str) {

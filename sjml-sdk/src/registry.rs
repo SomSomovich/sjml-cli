@@ -1144,6 +1144,26 @@ extern "C" {
         output_item_length: i32,
         output_count: i32,
     ) -> i32;
+    #[link_name = "register_brewing_recipe"]
+    fn imported_register_brewing_recipe(
+        path_pointer: i32,
+        path_length: i32,
+        input_potion_pointer: i32,
+        input_potion_length: i32,
+        ingredient_item_pointer: i32,
+        ingredient_item_length: i32,
+        output_potion_pointer: i32,
+        output_potion_length: i32,
+    ) -> i32;
+    #[link_name = "register_potion"]
+    fn imported_register_potion(
+        path_pointer: i32,
+        path_length: i32,
+        effect_id_pointer: i32,
+        effect_id_length: i32,
+        duration_ticks: i32,
+        amplifier: i32,
+    ) -> i32;
     #[link_name = "register_entity"]
     fn imported_register_entity(
         path_pointer: i32,
@@ -1306,6 +1326,16 @@ extern "C" {
     ) -> i32;
     #[link_name = "set_item_integer_component"]
     fn imported_set_item_integer_component(
+        item_path_pointer: i32,
+        item_path_length: i32,
+        component_path_pointer: i32,
+        component_path_length: i32,
+        value: i32,
+    ) -> i32;
+    #[link_name = "register_boolean_component"]
+    fn imported_register_boolean_component(path_pointer: i32, path_length: i32) -> i32;
+    #[link_name = "set_item_boolean_component"]
+    fn imported_set_item_boolean_component(
         item_path_pointer: i32,
         item_path_length: i32,
         component_path_pointer: i32,
@@ -2025,6 +2055,94 @@ pub fn register_smithing_transform_recipe(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (template, base, addition);
+        Err(unsupported_target())
+    }
+}
+
+/// Registers one bounded vanilla brewing mix from an existing potion and item to an existing potion.
+///
+/// This declaration is applied by NeoForge on both physical sides, but the module must use
+/// `side = "server"` or `side = "both"` because it changes server gameplay. IDs must be fully
+/// qualified registry IDs such as `minecraft:water`, `minecraft:emerald`, and `minecraft:awkward`.
+/// Call this from `#[mod_register]` with `content.register` granted.
+pub fn register_brewing_recipe(
+    path: &str,
+    input_potion_id: &str,
+    ingredient_item_id: &str,
+    output_potion_id: &str,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    if path.len() > 128 || path == "." || path == ".." {
+        return Err(invalid_argument(
+            "brewing recipe path must be at most 128 bytes and cannot be . or ..",
+        ));
+    }
+    validate_villager_registry_id(input_potion_id, "input potion ID")?;
+    validate_villager_registry_id(ingredient_item_id, "brewing ingredient item ID")?;
+    validate_villager_registry_id(output_potion_id, "output potion ID")?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies these bounded canonical IDs before returning.
+        let status = unsafe {
+            imported_register_brewing_recipe(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                input_potion_id.as_ptr() as usize as u32 as i32,
+                input_potion_id.len() as u32 as i32,
+                ingredient_item_id.as_ptr() as usize as u32 as i32,
+                ingredient_item_id.len() as u32 as i32,
+                output_potion_id.as_ptr() as usize as u32 as i32,
+                output_potion_id.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the brewing recipe declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported_target())
+    }
+}
+
+/// Registers a package-owned potion containing one bounded instance of an existing mob effect.
+///
+/// The potion ID is formed as `package:module/path`. Use it as an existing potion ID in
+/// [`register_brewing_recipe`]. Duration is `1..=72_000` ticks and amplifier is `0..=255`.
+/// The module must request `content.register` and use `side = "server"` or `side = "both"`.
+pub fn register_potion(
+    path: &str,
+    effect_id: &str,
+    duration_ticks: u32,
+    amplifier: u32,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    if path.len() > 128 || path == "." || path == ".." {
+        return Err(invalid_argument(
+            "potion path must be at most 128 bytes and cannot be . or ..",
+        ));
+    }
+    validate_villager_registry_id(effect_id, "potion effect ID")?;
+    if !(1..=72_000).contains(&duration_ticks) || amplifier > 255 {
+        return Err(invalid_argument(
+            "potion effect duration must be 1–72000 ticks and amplifier 0–255",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and canonical effect ID before returning.
+        let status = unsafe {
+            imported_register_potion(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                effect_id.as_ptr() as usize as u32 as i32,
+                effect_id.len() as u32 as i32,
+                duration_ticks as i32,
+                amplifier as i32,
+            )
+        };
+        return status_result(status, "host rejected the potion declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
         Err(unsupported_target())
     }
 }
@@ -3125,6 +3243,55 @@ pub fn set_item_integer_component(
     }
 }
 
+/// Registers a persistent, network-synchronized boolean data component type.
+pub fn register_boolean_component(path: &str) -> SjmlResult<()> {
+    validate_path(path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded UTF-8 path before returning.
+        let status = unsafe {
+            imported_register_boolean_component(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the boolean component declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported_target())
+    }
+}
+
+/// Sets a boolean component default on an item registered by this module.
+pub fn set_item_boolean_component(
+    item_path: &str,
+    component_path: &str,
+    value: bool,
+) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    validate_path(component_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies both bounded paths and the scalar value before returning.
+        let status = unsafe {
+            imported_set_item_boolean_component(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as u32 as i32,
+                i32::from(value),
+            )
+        };
+        return status_result(status, "host rejected the boolean component default");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = value;
+        Err(unsupported_target())
+    }
+}
+
 fn validate_path(path: &str) -> SjmlResult<()> {
     if path.is_empty()
         || path.len() > MAX_CONTENT_PATH_BYTES
@@ -3275,6 +3442,30 @@ mod tests {
         );
         assert_eq!(
             set_item_integer_component("../ruby", "charge", 5)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn boolean_components_validate_paths_before_host_access() {
+        assert_eq!(
+            register_boolean_component("../enabled").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            register_boolean_component("enabled").unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_item_boolean_component("ruby", "enabled", true)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_item_boolean_component("../ruby", "enabled", false)
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument
@@ -4414,6 +4605,59 @@ mod tests {
                 .code(),
             ErrorCode::InvalidArgument,
         );
+    }
+
+    #[test]
+    fn brewing_recipe_ids_and_paths_are_validated_before_host_access() {
+        let valid = ("minecraft:water", "minecraft:emerald", "minecraft:awkward");
+        assert_eq!(
+            register_brewing_recipe("water_to_awkward", valid.0, valid.1, valid.2)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+        );
+        for (input, ingredient, output) in [
+            ("water", valid.1, valid.2),
+            (valid.0, "minecraft:", valid.2),
+            (valid.0, valid.1, "minecraft:bad id"),
+        ] {
+            assert_eq!(
+                register_brewing_recipe("water_to_awkward", input, ingredient, output)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument,
+            );
+        }
+        assert_eq!(
+            register_brewing_recipe("..", valid.0, valid.1, valid.2)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument,
+        );
+    }
+
+    #[test]
+    fn potion_effect_and_path_bounds_are_validated_before_host_access() {
+        assert_eq!(
+            register_potion("ruby_tonic", "minecraft:jump_boost", 1200, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+        );
+        for (path, effect, duration, amplifier) in [
+            ("ruby_tonic", "jump_boost", 1200, 1),
+            ("ruby_tonic", "minecraft:jump_boost", 0, 1),
+            ("ruby_tonic", "minecraft:jump_boost", 72_001, 1),
+            ("ruby_tonic", "minecraft:jump_boost", 1200, 256),
+            ("..", "minecraft:jump_boost", 1200, 1),
+        ] {
+            assert_eq!(
+                register_potion(path, effect, duration, amplifier)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument,
+            );
+        }
     }
 
     #[test]

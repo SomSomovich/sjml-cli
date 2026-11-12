@@ -34,11 +34,13 @@ event subscription, world, and player handle registries during module teardown a
 
 Client input is split by effect: `client.input.observe` exposes detached
 global-key notices after Minecraft has processed them, so callbacks cannot
-cancel gameplay keys. `client.input.screen_cancel` can synchronously veto a
-key press delivered to an active screen. The older `client.input` grant
-continues to govern the existing key/mouse callbacks, and a mouse-button press
-can be consumed only through its documented hook. Input subscriptions are
-module-owned and removed when their runtime closes.
+cancel gameplay keys. The same grant allows bounded polling of held GLFW keys
+and mouse buttons on the physical client's main thread; results are detached
+booleans and do not consume or mutate input. `client.input.screen_cancel` can
+synchronously veto a key press delivered to an active screen. The older
+`client.input` grant continues to govern the existing key/mouse callbacks, and
+a mouse-button press can be consumed only through its documented hook. Input
+subscriptions are module-owned and removed when their runtime closes.
 
 The `client.item.tooltip` event passes only a registry ID, stack count, and
 durability values to a synchronous client callback. Appended output is bounded
@@ -326,6 +328,14 @@ change only its literal custom-name component, preserving its item, count,
 durability, and other components before synchronizing the active menu. They do
 not create stacks or expose arbitrary components.
 
+Module-owned boolean item components follow the same boundary as integer
+components: `content.register` creates only the caller's own component type,
+and runtime block/player inventory reads and writes resolve that type through
+the caller's package/module identity. Reads and writes have separate inventory
+grants, reject empty slots, and copy existing stacks before changing one value.
+The boolean ABI accepts only `0` and `1`; it does not expose arbitrary vanilla
+components or NBT. See [boolean item components](BOOLEAN_ITEM_COMPONENTS.md).
+
 Player attribute reads and writes accept a live server-player handle and the
 existing attribute allowlist. Reads require `entity.read`; writes additionally
 require `entity.attributes.write`. Every call checks the login session and
@@ -377,3 +387,11 @@ thread, and operate on existing objectives; writes cannot create objectives or
 change read-only criteria. `player.sleep_attempt` requires both event grants and
 can only replace an allowed sleep result with a denial; an existing vanilla or
 other-mod denial is preserved.
+
+Declared network rate limits are enforced by the host. On a server, inbound
+client-to-server traffic is bucketed per authenticated player and channel, so
+one player cannot spend another player's rate allowance. The host caps retained
+peer buckets at 4096 per module, prunes idle entries only after their burst has
+had time to refill, and clears them on module close. Valid over-limit packets
+are dropped before guest callbacks; they do not bypass the channel direction,
+schema, session, or payload-size checks.

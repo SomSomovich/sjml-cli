@@ -26,6 +26,8 @@ pub const MAX_WORLD_BLOCK_PROPERTY_UPDATES: usize = 32;
 pub const MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES: usize = 10_932;
 /// Maximum output bytes reserved for one block-property snapshot.
 pub const MAX_WORLD_BLOCK_PROPERTIES_RESPONSE_BYTES: usize = 21_257;
+/// Maximum output bytes reserved for one fluid-state snapshot.
+pub const MAX_WORLD_FLUID_STATE_RESPONSE_BYTES: usize = 275;
 /// Maximum length of one raycast segment in blocks.
 pub const MAX_WORLD_RAY_DISTANCE: f64 = 128.0;
 /// Maximum absolute coordinate accepted for a raycast endpoint or hit location.
@@ -77,6 +79,25 @@ pub const MAX_WORLD_BIOME_ID_BYTES: usize = 256;
 /// Maximum stable response size for [`biome_ids`].
 pub const MAX_WORLD_BIOME_IDS_RESPONSE_BYTES: usize =
     8 + MAX_WORLD_BIOME_IDS * (4 + MAX_WORLD_BIOME_ID_BYTES);
+/// Maximum number of structure IDs returned for one already-loaded block position.
+pub const MAX_WORLD_STRUCTURES_AT: usize = 128;
+/// Maximum UTF-8 bytes in one structure ID returned by [`structures_at`].
+pub const MAX_WORLD_STRUCTURE_ID_BYTES: usize = 256;
+/// Maximum number of structure references examined for one position.
+pub const MAX_WORLD_STRUCTURE_REFERENCE_CHECKS: usize = 4_096;
+/// Maximum UTF-8 bytes in one block tag ID accepted by [`block_has_tag`].
+pub const MAX_WORLD_BLOCK_TAG_ID_BYTES: usize = 256;
+/// Maximum output bytes reserved for [`block_has_tag`].
+pub const MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES: usize = 6;
+/// Maximum UTF-8 bytes accepted for an item ID or tag ID by [`item_has_tag`].
+pub const MAX_WORLD_ITEM_TAG_ID_BYTES: usize = 256;
+/// Maximum encoded query size for [`item_has_tag`].
+pub const MAX_WORLD_ITEM_TAG_QUERY_BYTES: usize = 4 + 24 + 2 * (4 + MAX_WORLD_ITEM_TAG_ID_BYTES);
+/// Maximum output bytes reserved for [`item_has_tag`].
+pub const MAX_WORLD_ITEM_TAG_RESPONSE_BYTES: usize = 5;
+/// Maximum stable response size reserved by [`structures_at`].
+pub const MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES: usize =
+    9 + MAX_WORLD_STRUCTURES_AT * (4 + MAX_WORLD_STRUCTURE_ID_BYTES);
 
 /// Runtime heightmap used by [`heightmap`]. ABI values are stable for world-v1.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -332,6 +353,20 @@ pub struct BlockStateSnapshot {
     pub state: String,
 }
 
+/// Detached fluid registry state at one already-loaded block position.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct FluidStateSnapshot {
+    /// Canonical registered fluid ID such as `minecraft:water`.
+    pub fluid_id: String,
+    /// Vanilla fluid level in 0..=8; source states normally report 8.
+    pub amount: u8,
+    /// Whether Minecraft marks this state as a source.
+    pub source: bool,
+    /// Intrinsic `FluidState::getOwnHeight()` in blocks, bounded to 0..=1.
+    pub height: f32,
+}
+
 /// One immutable, detached, canonically named property on a loaded block state.
 #[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -489,6 +524,149 @@ struct BiomeIdsResponse {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct StructuresAtQuery {
+    world: WorldHandle,
+    position: BlockPos,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct BlockTagQuery {
+    world: WorldHandle,
+    position: BlockPos,
+    tag_id: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct ItemTagQuery {
+    world: WorldHandle,
+    item_id: String,
+    tag_id: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
+struct StructuresAtResponse {
+    result: Option<Vec<String>>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for StructuresAtResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported structure-at response schema",
+            ));
+        }
+        let available = match decoder.read_u8()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "structure-at availability flag must be 0 or 1",
+                ));
+            }
+        };
+        let count = decoder.read_length(MAX_WORLD_STRUCTURES_AT)?;
+        if !available && count != 0 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "unavailable structure-at response must have an empty result list",
+            ));
+        }
+        let mut ids = Vec::new();
+        ids.try_reserve_exact(count).map_err(|_| {
+            SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not reserve memory for structure results",
+            )
+        })?;
+        for _ in 0..count {
+            let length = decoder.read_length(MAX_WORLD_STRUCTURE_ID_BYTES)?;
+            let id = String::from_utf8(decoder.read_raw(length)?.to_vec()).map_err(|_| {
+                SjmlError::new(
+                    ErrorCode::InvalidUtf8,
+                    "structure ID contains malformed UTF-8",
+                )
+            })?;
+            ids.push(id);
+        }
+        validate_structure_ids(&ids)?;
+        Ok(Self {
+            result: available.then_some(ids),
+        })
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
+struct BlockTagResponse {
+    result: Option<bool>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for BlockTagResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        if decoder.read_u32()? != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported block-tag response schema",
+            ));
+        }
+        let available = decoder.read_u8()?;
+        let contains = decoder.read_u8()?;
+        match (available, contains) {
+            (0, 0) => Ok(Self { result: None }),
+            (1, 0) => Ok(Self {
+                result: Some(false),
+            }),
+            (1, 1) => Ok(Self { result: Some(true) }),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "block-tag response flags are invalid",
+            )),
+        }
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
+struct ItemTagResponse {
+    contains: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for ItemTagResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        if decoder.read_u32()? != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported item-tag response schema",
+            ));
+        }
+        let contains = match decoder.read_u8()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "item-tag membership flag must be 0 or 1",
+                ));
+            }
+        };
+        Ok(Self { contains })
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 impl StableDecode for BiomeIdsResponse {
     fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
         let schema = decoder.read_u32()?;
@@ -531,6 +709,21 @@ struct BlockPropertiesQuery {
 #[sjml(version = 1)]
 struct BlockPropertiesResponse {
     properties: Option<Vec<BlockProperty>>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct FluidStateQuery {
+    world: WorldHandle,
+    position: BlockPos,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct FluidStateResponse {
+    state: Option<FluidStateSnapshot>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -687,6 +880,12 @@ extern "C" {
     ) -> i32;
     #[link_name = "biome_ids"]
     fn imported_biome_ids(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "structures_at"]
+    fn imported_structures_at(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "block_has_tag"]
+    fn imported_block_has_tag(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "item_has_tag"]
+    fn imported_item_has_tag(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "heightmap"]
     fn imported_heightmap(
         handle: i32,
@@ -757,6 +956,8 @@ extern "C" {
     fn imported_block_states(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "block_properties"]
     fn imported_block_properties(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "fluid_at"]
+    fn imported_fluid_at(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "raycast"]
     fn imported_raycast(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "collides"]
@@ -786,6 +987,9 @@ extern "C" {
         expected_block_id_length: i32,
         delay_ticks: i32,
     ) -> i32;
+    #[link_name = "notify_neighbors_at"]
+    fn imported_notify_neighbors_at(handle: i32, handle_length: i32, x: i32, y: i32, z: i32)
+        -> i32;
     #[link_name = "spawn_particle"]
     fn imported_spawn_particle(
         handle: i32,
@@ -1286,6 +1490,176 @@ pub fn biome_ids(world: WorldHandle) -> SjmlResult<Vec<String>> {
         let _ = world;
         Err(unsupported_target())
     }
+}
+
+/// Returns the structures whose generated pieces contain `position` in this server world.
+///
+/// Requires `world.read`. Both the position's chunk and every referenced structure-start chunk
+/// must already be loaded; otherwise this returns `Ok(None)` and requests no chunk loads. A
+/// loaded position outside the dimension's build height also returns `None`. `Some(vec![])`
+/// means the loaded position was checked and no structure piece contains it. IDs are canonical,
+/// lexically sorted, and bounded to [`MAX_WORLD_STRUCTURES_AT`] entries.
+pub fn structures_at(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<Vec<String>>> {
+    validate_world_position(position)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&StructuresAtQuery { world, position })?;
+        let response: StructuresAtResponse = read_output(
+            MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the versioned query and bounded output remain live for this synchronous import.
+                unsafe {
+                    imported_structures_at(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        if let Some(ids) = &response.result {
+            validate_structure_ids(ids)?;
+        }
+        Ok(response.result)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+/// Checks whether the block at `position` belongs to a registered block tag such as
+/// `minecraft:logs`. Requires `world.read`. Returns `None` for unloaded/out-of-height positions and
+/// never loads chunks; `Some(false)` means the position was available and the block is not a member.
+pub fn block_has_tag(
+    world: WorldHandle,
+    position: BlockPos,
+    tag_id: &str,
+) -> SjmlResult<Option<bool>> {
+    validate_world_position(position)?;
+    if tag_id.len() > MAX_WORLD_BLOCK_TAG_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "block tag ID exceeds the 256-byte limit",
+        ));
+    }
+    validate_resource_id(tag_id, "block tag")?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&BlockTagQuery {
+            world,
+            position,
+            tag_id: tag_id.to_owned(),
+        })?;
+        let response: BlockTagResponse = read_output(
+            MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the versioned query and fixed-size output remain live for this synchronous import.
+                unsafe {
+                    imported_block_has_tag(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        Ok(response.result)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+/// Checks whether a canonical item ID belongs to a vanilla, mod, or data-pack item tag.
+///
+/// Requires a live logical-server world handle and `world.read`. Membership uses the current
+/// server registry tag set and reflects resource reloads. Unknown item IDs and absent tags return
+/// `false`; this registry-only query does not inspect inventories or load chunks.
+pub fn item_has_tag(world: WorldHandle, item_id: &str, tag_id: &str) -> SjmlResult<bool> {
+    if item_id.len() > MAX_WORLD_ITEM_TAG_ID_BYTES || tag_id.len() > MAX_WORLD_ITEM_TAG_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "item and item-tag IDs are limited to 256 UTF-8 bytes each",
+        ));
+    }
+    validate_resource_id(item_id, "item")?;
+    validate_resource_id(tag_id, "item tag")?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&ItemTagQuery {
+            world,
+            item_id: item_id.to_owned(),
+            tag_id: tag_id.to_owned(),
+        })?;
+        let response: ItemTagResponse = read_output(
+            MAX_WORLD_ITEM_TAG_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the versioned query and fixed-size output live for this synchronous import.
+                unsafe {
+                    imported_item_has_tag(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        Ok(response.contains)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_world_position(position: BlockPos) -> SjmlResult<()> {
+    if position.x < -MAX_WORLD_BLOCK_COORDINATE
+        || position.x > MAX_WORLD_BLOCK_COORDINATE
+        || position.z < -MAX_WORLD_BLOCK_COORDINATE
+        || position.z > MAX_WORLD_BLOCK_COORDINATE
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "world query x/z coordinates must be within Minecraft's +/-30,000,000 bound",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_structure_ids(ids: &[String]) -> SjmlResult<()> {
+    if ids.len() > MAX_WORLD_STRUCTURES_AT {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "host returned more than 128 structure IDs",
+        ));
+    }
+    let mut previous: Option<&str> = None;
+    for id in ids {
+        if id.len() > MAX_WORLD_STRUCTURE_ID_BYTES {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "structure ID exceeds the 256-byte limit",
+            ));
+        }
+        validate_resource_id(id, "structure")?;
+        if previous.is_some_and(|previous| previous >= id.as_str()) {
+            return Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "host returned duplicate or unsorted structure IDs",
+            ));
+        }
+        previous = Some(id);
+    }
+    Ok(())
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -1995,6 +2369,73 @@ pub fn block_properties(
     }
 }
 
+/// Reads the detached fluid state at one already-loaded block position.
+///
+/// Returns `None` when the position is outside build height or its chunk is not already loaded;
+/// the host never loads a chunk. `height` is the fluid state's intrinsic own-height value, bounded
+/// to 0..=1 blocks and independent of neighboring block shapes. Requires `world.read` and the
+/// logical server context.
+pub fn fluid_at(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<FluidStateSnapshot>> {
+    if position.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block x/z coordinates must be within ±30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&FluidStateQuery { world, position })?;
+        let response: FluidStateResponse = read_output(
+            MAX_WORLD_FLUID_STATE_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: query and bounded output live through the synchronous world import.
+                unsafe {
+                    imported_fluid_at(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        validate_fluid_state(response.state)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_fluid_state(
+    state: Option<FluidStateSnapshot>,
+) -> SjmlResult<Option<FluidStateSnapshot>> {
+    let Some(state) = state else {
+        return Ok(None);
+    };
+    validate_resource_id(&state.fluid_id, "fluid")?;
+    if state.amount > 8 || !state.height.is_finite() || !(0.0..=1.0).contains(&state.height) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "host returned a fluid amount outside 0..=8 or own-height outside 0..=1",
+        ));
+    }
+    let empty = state.fluid_id == "minecraft:empty";
+    if (empty && (state.amount != 0 || state.source || state.height != 0.0))
+        || (!empty && state.amount == 0)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "host returned inconsistent empty or non-empty fluid values",
+        ));
+    }
+    Ok(Some(state))
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn validate_block_properties(
     properties: Option<Vec<BlockProperty>>,
@@ -2454,6 +2895,52 @@ pub fn schedule_block_tick(
     }
 }
 
+/// Runs the normal vanilla neighbor update around a block at a loaded position.
+///
+/// The module must request and receive both `world.read` and `world.write`. The call runs
+/// synchronously on the owning server thread and requires the target to be within build height,
+/// inside the world border, and in an already loaded chunk. Every in-height direct neighbor must
+/// also be loaded, so vanilla's six neighbor reads cannot cause a chunk load. An unloaded target
+/// or direct neighbor is rejected. Vanilla neighbor callbacks run normally and may update blocks
+/// according to Minecraft's rules.
+pub fn notify_neighbors_at(world: WorldHandle, position: BlockPos) -> SjmlResult<()> {
+    if position.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "neighbor update x/z coordinates must be within ±30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        // SAFETY: the fixed-size handle and coordinates remain live for this synchronous host call.
+        let status = unsafe {
+            imported_notify_neighbors_at(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                position.x,
+                position.y,
+                position.z,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the vanilla neighbor update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
 /// Spawns one registered simple particle at the center of a loaded block position.
 ///
 /// The module must request and receive `world.read` and `world.write`. The host
@@ -2676,22 +3163,30 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        biome_ids, block_properties, collides, day_time, daylight_cycle_enabled, integer_game_rule,
-        loaded_chunks, play_sound, raycast, schedule_block_tick, set_block, set_block_properties,
-        set_daylight_cycle_enabled, set_game_time, set_integer_game_rule, set_time, spawn_entity,
-        spawn_particle, validate_biome_ids, validate_block_property_updates,
-        validate_loaded_chunk_query, validate_loaded_chunk_results, Aabb, BiomeIdsQuery,
-        BiomeIdsResponse, BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse,
-        BlockProperty, BlockStateBatch, BlockStateQuery, BlockStateSnapshot, ChunkPos,
-        DaylightCycleSnapshot, LoadedChunksQuery, LoadedChunksResponse, RaycastBlockMode,
-        RaycastFluidMode, RaycastHit, RaycastPoint, WeatherCondition, WeatherSnapshot,
+        biome_ids, block_has_tag, block_properties, collides, day_time, daylight_cycle_enabled,
+        fluid_at, integer_game_rule, item_has_tag, loaded_chunks, notify_neighbors_at, play_sound,
+        raycast, schedule_block_tick, set_block, set_block_properties, set_daylight_cycle_enabled,
+        set_game_time, set_integer_game_rule, set_time, spawn_entity, spawn_particle,
+        structures_at, validate_biome_ids, validate_block_property_updates,
+        validate_loaded_chunk_query, validate_loaded_chunk_results, validate_structure_ids,
+        validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse, BlockPropertiesMutation,
+        BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateBatch,
+        BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse, ChunkPos,
+        DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemTagQuery, ItemTagResponse,
+        LoadedChunksQuery, LoadedChunksResponse, RaycastBlockMode, RaycastFluidMode, RaycastHit,
+        RaycastPoint, StructuresAtQuery, StructuresAtResponse, WeatherCondition, WeatherSnapshot,
         WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation,
         WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
         WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot,
         WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BIOME_IDS,
         MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_PROPERTIES,
         MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
-        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_GAME_TIME_TICKS,
+        MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
+        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
+        MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
+        MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
+        MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_STRUCTURES_AT,
+        MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES, MAX_WORLD_STRUCTURE_ID_BYTES,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -2871,6 +3366,290 @@ mod tests {
                 .unwrap_err()
                 .code(),
             "response count is bounded before allocating strings"
+        );
+    }
+
+    #[test]
+    fn structure_query_response_and_enumeration_are_bounded_and_canonical() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos {
+            x: -12,
+            y: 80,
+            z: 34,
+        };
+        let query = crate::to_bytes(&StructuresAtQuery { world, position }).unwrap();
+        assert_eq!(44, query.len());
+        assert_eq!(1_u32.to_le_bytes(), query[0..4]);
+        assert_eq!(1_u32.to_le_bytes(), query[28..32], "nested BlockPos schema");
+        assert_eq!((-12_i32).to_le_bytes(), query[32..36]);
+        assert_eq!(80_i32.to_le_bytes(), query[36..40]);
+        assert_eq!(34_i32.to_le_bytes(), query[40..44]);
+
+        let ids = vec![
+            "minecraft:ancient_city".to_owned(),
+            "minecraft:stronghold".to_owned(),
+        ];
+        let mut encoded = Vec::new();
+        encoded.extend_from_slice(&1_u32.to_le_bytes());
+        encoded.push(1);
+        encoded.extend_from_slice(&(ids.len() as u32).to_le_bytes());
+        for id in &ids {
+            encoded.extend_from_slice(&(id.len() as u32).to_le_bytes());
+            encoded.extend_from_slice(id.as_bytes());
+        }
+        assert_eq!(
+            Some(ids.clone()),
+            crate::from_bytes::<StructuresAtResponse>(&encoded)
+                .unwrap()
+                .result
+        );
+
+        let unavailable = [
+            1_u32.to_le_bytes().as_slice(),
+            [0_u8].as_slice(),
+            0_u32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            None,
+            crate::from_bytes::<StructuresAtResponse>(&unavailable)
+                .unwrap()
+                .result
+        );
+        assert_eq!(
+            9 + MAX_WORLD_STRUCTURES_AT * (4 + MAX_WORLD_STRUCTURE_ID_BYTES),
+            MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES
+        );
+        assert!(validate_structure_ids(&ids).is_ok());
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            validate_structure_ids(&["zeta:ruin".to_owned(), "alpha:fort".to_owned()])
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            validate_structure_ids(&["Minecraft:Stronghold".to_owned()])
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            validate_structure_ids(&[format!("mod:{}", "a".repeat(MAX_WORLD_STRUCTURE_ID_BYTES))])
+                .unwrap_err()
+                .code()
+        );
+        let too_many: Vec<String> = (0..=MAX_WORLD_STRUCTURES_AT)
+            .map(|index| format!("mod:structure_{index:03}"))
+            .collect();
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            validate_structure_ids(&too_many).unwrap_err().code()
+        );
+
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            validate_world_position(BlockPos {
+                x: 30_000_001,
+                y: 0,
+                z: 0
+            })
+            .unwrap_err()
+            .code()
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            structures_at(world, BlockPos { x: 0, y: 64, z: 0 })
+                .unwrap_err()
+                .code(),
+            "native targets fail closed without fabricating structure results"
+        );
+
+        let invalid_flag = [
+            1_u32.to_le_bytes().as_slice(),
+            [2_u8].as_slice(),
+            0_u32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            crate::from_bytes::<StructuresAtResponse>(&invalid_flag)
+                .unwrap_err()
+                .code()
+        );
+        let unavailable_with_count = [
+            1_u32.to_le_bytes().as_slice(),
+            [0_u8].as_slice(),
+            1_u32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            crate::from_bytes::<StructuresAtResponse>(&unavailable_with_count)
+                .unwrap_err()
+                .code()
+        );
+        let oversized_count = [
+            1_u32.to_le_bytes().as_slice(),
+            [1_u8].as_slice(),
+            (MAX_WORLD_STRUCTURES_AT as u32 + 1)
+                .to_le_bytes()
+                .as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            crate::from_bytes::<StructuresAtResponse>(&oversized_count)
+                .unwrap_err()
+                .code()
+        );
+    }
+
+    #[test]
+    fn block_tag_query_and_response_match_the_host_wire_contract() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos {
+            x: -12,
+            y: 80,
+            z: 34,
+        };
+        let tag_id = "minecraft:logs";
+        let query = crate::to_bytes(&BlockTagQuery {
+            world,
+            position,
+            tag_id: tag_id.to_owned(),
+        })
+        .unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&(-12_i32).to_le_bytes());
+        expected.extend_from_slice(&80_i32.to_le_bytes());
+        expected.extend_from_slice(&34_i32.to_le_bytes());
+        expected.extend_from_slice(&(tag_id.len() as u32).to_le_bytes());
+        expected.extend_from_slice(tag_id.as_bytes());
+        assert_eq!(expected, query);
+
+        for (available, contains, expected_result) in
+            [(0_u8, 0_u8, None), (1, 0, Some(false)), (1, 1, Some(true))]
+        {
+            let encoded = [1_u32.to_le_bytes().as_slice(), &[available, contains]].concat();
+            assert_eq!(
+                expected_result,
+                crate::from_bytes::<BlockTagResponse>(&encoded)
+                    .unwrap()
+                    .result
+            );
+        }
+        assert_eq!(MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES, 6);
+        assert_eq!(MAX_WORLD_BLOCK_TAG_ID_BYTES, 256);
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            block_has_tag(world, position, "Minecraft:logs")
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            block_has_tag(
+                world,
+                position,
+                &format!("mod:{}", "a".repeat(MAX_WORLD_BLOCK_TAG_ID_BYTES))
+            )
+            .unwrap_err()
+            .code()
+        );
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            block_has_tag(
+                world,
+                BlockPos {
+                    x: 30_000_001,
+                    y: 64,
+                    z: 0
+                },
+                "minecraft:logs"
+            )
+            .unwrap_err()
+            .code()
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            block_has_tag(world, position, tag_id).unwrap_err().code(),
+            "native targets must not fabricate Minecraft tag membership"
+        );
+        let invalid = [1_u32.to_le_bytes().as_slice(), &[0_u8, 1_u8]].concat();
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            crate::from_bytes::<BlockTagResponse>(&invalid)
+                .unwrap_err()
+                .code()
+        );
+    }
+
+    #[test]
+    fn item_tag_query_and_response_match_the_host_wire_contract() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let item_id = "minecraft:oak_planks";
+        let tag_id = "minecraft:planks";
+        let query = crate::to_bytes(&ItemTagQuery {
+            world,
+            item_id: item_id.to_owned(),
+            tag_id: tag_id.to_owned(),
+        })
+        .unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&(item_id.len() as u32).to_le_bytes());
+        expected.extend_from_slice(item_id.as_bytes());
+        expected.extend_from_slice(&(tag_id.len() as u32).to_le_bytes());
+        expected.extend_from_slice(tag_id.as_bytes());
+        assert_eq!(expected, query);
+        assert_eq!(MAX_WORLD_ITEM_TAG_QUERY_BYTES, 548);
+        assert_eq!(MAX_WORLD_ITEM_TAG_ID_BYTES, 256);
+        assert_eq!(MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, 5);
+        assert!(
+            !crate::from_bytes::<ItemTagResponse>(&[1_u32.to_le_bytes().as_slice(), &[0]].concat())
+                .unwrap()
+                .contains
+        );
+        assert!(
+            crate::from_bytes::<ItemTagResponse>(&[1_u32.to_le_bytes().as_slice(), &[1]].concat())
+                .unwrap()
+                .contains
+        );
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            item_has_tag(world, "Minecraft:oak_planks", tag_id)
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            item_has_tag(
+                world,
+                &format!("mod:{}", "a".repeat(MAX_WORLD_ITEM_TAG_ID_BYTES)),
+                tag_id
+            )
+            .unwrap_err()
+            .code()
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            item_has_tag(world, item_id, tag_id).unwrap_err().code(),
+            "native targets must not fabricate Minecraft item-tag membership"
+        );
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            crate::from_bytes::<ItemTagResponse>(&[1_u32.to_le_bytes().as_slice(), &[2]].concat())
+                .unwrap_err()
+                .code()
         );
     }
 
@@ -3654,6 +4433,126 @@ mod tests {
     }
 
     #[test]
+    fn fluid_state_query_and_snapshot_match_the_stable_little_endian_contract() {
+        let query = FluidStateQuery {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            position: BlockPos { x: -3, y: 64, z: 8 },
+        };
+        let mut expected_query = Vec::new();
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&1_u64.to_le_bytes());
+        expected_query.extend_from_slice(&2_u64.to_le_bytes());
+        expected_query.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected_query.extend_from_slice(&64_i32.to_le_bytes());
+        expected_query.extend_from_slice(&8_i32.to_le_bytes());
+        assert_eq!(crate::to_bytes(&query).unwrap(), expected_query);
+
+        let state = super::FluidStateSnapshot {
+            fluid_id: "minecraft:water".to_owned(),
+            amount: 4,
+            source: false,
+            height: 0.5,
+        };
+        let encoded_state = crate::to_bytes(&state).unwrap();
+        assert_eq!(
+            encoded_state,
+            [
+                1_u32.to_le_bytes().as_slice(),
+                15_u32.to_le_bytes().as_slice(),
+                b"minecraft:water",
+                &[4, 0],
+                &0.5_f32.to_le_bytes(),
+            ]
+            .concat()
+        );
+        assert_eq!(
+            crate::from_bytes::<super::FluidStateSnapshot>(&encoded_state).unwrap(),
+            state
+        );
+
+        let encoded_response = crate::to_bytes(&FluidStateResponse {
+            state: Some(state.clone()),
+        })
+        .unwrap();
+        assert_eq!(
+            crate::from_bytes::<FluidStateResponse>(&encoded_response)
+                .unwrap()
+                .state,
+            Some(state)
+        );
+        assert_eq!(MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, 275);
+    }
+
+    #[test]
+    fn fluid_state_response_values_and_query_coordinates_are_checked() {
+        let valid = super::FluidStateSnapshot {
+            fluid_id: "minecraft:water".to_owned(),
+            amount: 8,
+            source: true,
+            height: 1.0,
+        };
+        assert_eq!(
+            super::validate_fluid_state(Some(valid.clone())).unwrap(),
+            Some(valid)
+        );
+        assert_eq!(super::validate_fluid_state(None).unwrap(), None);
+        for state in [
+            super::FluidStateSnapshot {
+                fluid_id: "Minecraft:water".to_owned(),
+                amount: 8,
+                source: true,
+                height: 1.0,
+            },
+            super::FluidStateSnapshot {
+                fluid_id: "minecraft:water".to_owned(),
+                amount: 9,
+                source: true,
+                height: 1.0,
+            },
+            super::FluidStateSnapshot {
+                fluid_id: "minecraft:water".to_owned(),
+                amount: 4,
+                source: false,
+                height: f32::NAN,
+            },
+            super::FluidStateSnapshot {
+                fluid_id: "minecraft:empty".to_owned(),
+                amount: 0,
+                source: false,
+                height: 0.5,
+            },
+        ] {
+            assert_eq!(
+                super::validate_fluid_state(Some(state)).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            fluid_at(
+                world,
+                BlockPos {
+                    x: i32::MIN,
+                    y: 0,
+                    z: 0,
+                },
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            fluid_at(world, BlockPos { x: 0, y: 64, z: 0 })
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
     fn block_property_queries_reject_out_of_range_coordinates_before_host_access() {
         let world = WorldHandle::new(1, 2, 3, 4).unwrap();
         assert_eq!(
@@ -3668,6 +4567,30 @@ mod tests {
             .unwrap_err()
             .code(),
             ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn notify_neighbors_rejects_out_of_range_coordinates_and_requires_wasm_host() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            notify_neighbors_at(
+                world,
+                BlockPos {
+                    x: i32::MIN,
+                    y: 0,
+                    z: 0,
+                },
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            notify_neighbors_at(world, BlockPos { x: 0, y: 64, z: 0 })
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
         );
     }
 }

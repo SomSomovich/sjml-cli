@@ -505,6 +505,59 @@ impl RenderContext {
         )
     }
 
+    /// Draws one bounded rectangle from a package-owned PNG sprite sheet.
+    /// `source_region` is `(x, y, width, height)` in PNG pixels and must be fully inside
+    /// `source_dimensions`; the path is relative to `assets/<package-id>/textures/gui/`.
+    #[allow(clippy::too_many_arguments)] // Destination rectangle plus source image and crop bounds are separate values.
+    pub fn draw_sprite_region(
+        &mut self,
+        path: &str,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        source_dimensions: (u32, u32),
+        source_region: (u32, u32, u32, u32),
+    ) -> SjmlResult<()> {
+        self.require_gui_layer()?;
+        validate_gui_sprite_path(path)?;
+        validate_dimensions(x, y, width, height)?;
+        let (source_width, source_height) = source_dimensions;
+        if source_width == 0 || source_width > 4096 || source_height == 0 || source_height > 4096 {
+            return Err(invalid(
+                "GUI sprite source dimensions must be within [1, 4096]",
+            ));
+        }
+        let (source_x, source_y, source_region_width, source_region_height) = source_region;
+        if source_region_width == 0
+            || source_region_height == 0
+            || source_x > source_width
+            || source_y > source_height
+            || source_region_width > source_width - source_x
+            || source_region_height > source_height - source_y
+        {
+            return Err(invalid(
+                "GUI sprite source region must be non-empty and inside the source dimensions",
+            ));
+        }
+        self.push(
+            RenderCommand::SpriteRegion {
+                path: path.to_owned(),
+                x,
+                y,
+                width,
+                height,
+                source_width,
+                source_height,
+                source_x,
+                source_y,
+                source_region_width,
+                source_region_height,
+            },
+            path.len(),
+        )
+    }
+
     /// Adds a filled rectangle with an ARGB color.
     pub fn draw_rect(
         &mut self,
@@ -707,6 +760,35 @@ impl RenderContext {
                     put_u32(&mut bytes, *source_width);
                     put_u32(&mut bytes, *source_height);
                 }
+                RenderCommand::SpriteRegion {
+                    path,
+                    x,
+                    y,
+                    width,
+                    height,
+                    source_width,
+                    source_height,
+                    source_x,
+                    source_y,
+                    source_region_width,
+                    source_region_height,
+                } => {
+                    bytes.push(7);
+                    put_string(&mut bytes, path)?;
+                    for value in [x, y, width, height] {
+                        put_f32(&mut bytes, *value)?;
+                    }
+                    for value in [
+                        source_width,
+                        source_height,
+                        source_x,
+                        source_y,
+                        source_region_width,
+                        source_region_height,
+                    ] {
+                        put_u32(&mut bytes, *value);
+                    }
+                }
                 RenderCommand::Rect {
                     x,
                     y,
@@ -900,6 +982,19 @@ enum RenderCommand {
         height: f32,
         source_width: u32,
         source_height: u32,
+    },
+    SpriteRegion {
+        path: String,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        source_width: u32,
+        source_height: u32,
+        source_x: u32,
+        source_y: u32,
+        source_region_width: u32,
+        source_region_height: u32,
     },
     Rect {
         x: f32,
@@ -1617,15 +1712,31 @@ mod tests {
         context
             .draw_sprite("hud/status.png", 8.0, 9.0, 32.0, 16.0, (64, 32))
             .unwrap();
+        context
+            .draw_sprite_region(
+                "hud/icons.png",
+                48.0,
+                9.0,
+                16.0,
+                16.0,
+                (128, 64),
+                (32, 16, 16, 16),
+            )
+            .unwrap();
 
         let bytes = context.encode_batch().unwrap();
         assert_eq!(bytes[8], 5);
         assert_eq!(bytes[17], 3); // package-font selector follows the text string
         let sprite_tag = 8 + 1 + 4 + 4 + 1 + 4 + "fonts/pixel".len() + 8 + 4 + 1;
         assert_eq!(bytes[sprite_tag], 6);
+        let sprite_region_tag = bytes.len() - (1 + 4 + "hud/icons.png".len() + 16 + 24);
+        assert_eq!(bytes[sprite_region_tag], 7);
         assert!(bytes
             .windows("hud/status.png".len())
             .any(|window| window == "hud/status.png".as_bytes()));
+        assert!(bytes
+            .windows("hud/icons.png".len())
+            .any(|window| window == "hud/icons.png".as_bytes()));
 
         assert!(RenderFont::package("../foreign").is_err());
         assert!(RenderFont::package("fonts/pixel.json").is_err());
@@ -1634,6 +1745,12 @@ mod tests {
             .is_err());
         assert!(context
             .draw_sprite("hud/icon.png", 0.0, 0.0, 8.0, 8.0, (4097, 16))
+            .is_err());
+        assert!(context
+            .draw_sprite_region("hud/icons.png", 0.0, 0.0, 8.0, 8.0, (32, 16), (24, 0, 9, 8))
+            .is_err());
+        assert!(context
+            .draw_sprite_region("hud/icons.png", 0.0, 0.0, 8.0, 8.0, (32, 16), (0, 0, 0, 8))
             .is_err());
     }
 

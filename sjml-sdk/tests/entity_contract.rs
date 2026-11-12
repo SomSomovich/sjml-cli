@@ -14,6 +14,30 @@ fn native_entity_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        entity::riding_snapshot(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::start_riding(handle, handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::stop_riding(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::riding_snapshot(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::start_riding(handle, handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::stop_riding(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
         entity::active_effects(handle).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );
@@ -163,6 +187,70 @@ fn entity_snapshot_uses_schema_v1_stable_field_encoding() {
         from_bytes::<entity::EntitySnapshot>(&encoded).unwrap(),
         snapshot
     );
+}
+
+#[test]
+fn riding_snapshot_uses_schema_v1_stable_field_encoding_and_validates_relationships() {
+    let vehicle = entity::EntityRidingRelationship {
+        uuid: "00112233-4455-6677-8899-aabbccddeeff".to_owned(),
+        entity_type_id: "minecraft:boat".to_owned(),
+        is_player: false,
+    };
+    let player = entity::EntityRidingRelationship {
+        uuid: "10112233-4455-6677-8899-aabbccddeeff".to_owned(),
+        entity_type_id: "minecraft:player".to_owned(),
+        is_player: true,
+    };
+    let passenger = entity::EntityRidingRelationship {
+        uuid: "00112233-4455-6677-8899-aabbccdde001".to_owned(),
+        entity_type_id: "minecraft:pig".to_owned(),
+        is_player: false,
+    };
+    let snapshot = entity::EntityRidingSnapshot {
+        vehicle: Some(vehicle.clone()),
+        passengers: vec![passenger.clone(), player.clone()],
+    };
+    // The record contains one vehicle option followed by a separately sized passenger vector.
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    expected.push(1);
+    append_relationship(&mut expected, &vehicle);
+    expected.extend_from_slice(&2_u32.to_le_bytes());
+    append_relationship(&mut expected, &passenger);
+    append_relationship(&mut expected, &player);
+    assert_eq!(to_bytes(&snapshot).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<entity::EntityRidingSnapshot>(&expected).unwrap(),
+        snapshot
+    );
+
+    let unsorted = entity::EntityRidingSnapshot {
+        vehicle: None,
+        passengers: vec![player.clone(), passenger.clone()],
+    };
+    assert_eq!(
+        unsorted.validate().unwrap_err().code(),
+        ErrorCode::InvalidArgument
+    );
+    let too_many = entity::EntityRidingSnapshot {
+        vehicle: None,
+        passengers: vec![passenger; entity::MAX_ENTITY_PASSENGERS + 1],
+    };
+    assert_eq!(
+        too_many.validate().unwrap_err().code(),
+        ErrorCode::PayloadTooLarge
+    );
+}
+
+fn append_relationship(output: &mut Vec<u8>, relationship: &entity::EntityRidingRelationship) {
+    output.extend_from_slice(&1_u32.to_le_bytes());
+    for value in [
+        relationship.uuid.as_str(),
+        relationship.entity_type_id.as_str(),
+    ] {
+        output.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        output.extend_from_slice(value.as_bytes());
+    }
+    output.push(u8::from(relationship.is_player));
 }
 
 #[test]

@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.60.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.73.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.57.0"
+abi = "^1.65.0"
 minecraft = "~1.21.1"
-sjml = "^0.67.0"
+sjml = "^0.75.0"
 
 [[modules]]
 id = "main"
@@ -177,14 +177,15 @@ module's manifest request and the administrator's list.
 
 | Capability | Enables |
 | --- | --- |
-| `content.register` | Static registry declarations, including bounded item food/rarity/enchantment/durability values, and server guest commands. |
+| `content.register` | Static registry declarations, including sound events and bounded item food/rarity/enchantment/durability values, and server guest commands. |
 | `client.command` | Register and execute bounded local commands on the physical client; does not send commands to the server. |
 | `events.subscribe` | Subscribing to supported host events. |
 | `client.item.tooltip.modify` | Appending bounded literal lines from synchronous `client.item.tooltip` callbacks on the physical client; also requires `events.subscribe`. |
 | `client.chat.send.observe` | Reading original outgoing chat text from the local client's synchronous `client.chat.send_attempt` callback; also requires `events.subscribe` and `events.cancel`. |
-| `events.cancel` | Vetoing cancellable block break/place, right-click `player.interaction`, `player.drop_attempt`, `client.chat.send_attempt`, `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`, `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; also requires `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
+| `events.cancel` | Vetoing cancellable block break/place, right-click `player.interaction`, `player.drop_attempt`, `player.fished_attempt`, `client.chat.send_attempt`, `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`, `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; also requires `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
 | `world.read`, `world.write` | Reading loaded server-world state; writes include blocks and properties, scheduled block ticks, time, weather, difficulty, Overworld spawn point, allowlisted boolean/integer game rules, and world-border settings, and require both. |
 | `entity.read`, `entity.spawn`, `entity.effect.apply`, `entity.effect.remove` | Reading player/entity snapshots, spawning registered entities, or applying/removing registered effects; effect mutation also requires `entity.read`. |
+| `entity.mount.write` | Starting or stopping a non-forced ride between two loaded non-player entities; also requires `entity.read` and same-world live handles. |
 | `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write`, `entity.custom_name.write`, `entity.ai.control` | Removing loaded non-player entities, changing bounded velocity, fire duration, glowing/silent flags, literal custom names, or the enabled-AI flag on loaded Mob entities, and reading/writing allowlisted living-entity and server-player attribute base values; writes also require `entity.read`. |
 | `player.teleport`, `player.respawn.write`, `player.vitals.write`, `player.game_mode.write`, `player.motion.write`, `player.abilities.write`, `player.cooldown.write`, `player.advancement.write`, `player.statistics.write` | Teleporting a live player, changing their saved respawn position, bounded vitals, game mode, velocity, flight state, vanilla item cooldowns, advancement progress, or vanilla custom statistics; player writes also require `entity.read` and logical-server execution. |
 | `entity.data.read`, `entity.data.write` | Reading or changing module-owned data attached to non-player entities. |
@@ -197,7 +198,7 @@ module's manifest request and the administrator's list.
 | `menu.open` | Opening/updating a bounded read-only server menu or opening an allowlisted editable menu; updates are limited to eight per module per server tick. Editable-menu reads also require `entity.read`; action callbacks require `entity.read` and `events.subscribe`. |
 | `menu.transfer` | Moving 1–64 existing items between declared editable-menu slots and the player inventory; also requires `entity.read` and `menu.open`, with at most 32 transfers per module per server tick. |
 | `client.input` | Receiving bounded client screen/global input events, named keybindings, and scaled cursor coordinates. |
-| `client.input.observe` | Receiving observe-only global keyboard notices after Minecraft processes the key. |
+| `client.input.observe` | Receiving observe-only global keyboard notices after Minecraft processes the key and polling bounded held key/mouse-button state. |
 | `client.input.screen_cancel` | Vetoing supported key presses delivered to the active screen; does not cancel global gameplay keys. |
 | `client.input.screen_scroll` | Receiving/consuming active-screen scroll callbacks; requires `client.input`. |
 | `player.ui.actionbar` | Sending bounded literal action-bar text to a live player; also requires `entity.read`. |
@@ -205,8 +206,9 @@ module's manifest request and the administrator's list.
 | `client.ui.screen` | Opening a bounded literal vanilla screen with up to four buttons on the physical client; button actions are dispatched directly to their owning module. |
 | `client.chat.observe`, `client.chat.filter`, `client.chat.rewrite`, `client.chat.send`, `client.chat.send.observe` | Observing bounded incoming chat text, hiding its display insertion, replacing it with bounded rich text, sending ordinary signed chat through Minecraft's local player connection, or reading the local user's original outgoing text. Incoming filtering/replacement need their separate grants; outgoing observation also requires `events.subscribe`, and veto requires `events.cancel`. |
 | `client.ui.notify` | Showing bounded vanilla toast notifications on the physical client. |
-| `client.audio.play` | Playing a registered sound locally through Minecraft's sound manager. |
+| `client.audio.play` | Playing, stopping, and fading a tracked client-local one-shot owned by the module runtime. |
 | `client.audio.loop` | Starting/stopping bounded module-owned local loops; cleanup stops only that module's sounds. |
+| `client.audio.music` | Subscribing on a physical client to bounded situational music-selection callbacks; replacement tracks must be registered by that exact module. |
 | `client.render` | Subscribing to HUD, screen, or world-render callbacks. |
 | `client.render.gui_layer.suppress` | Suppressing an exact vanilla GUI-layer ID on the physical client; requires a matching active client module, and does not provide arbitrary screen or render-state access. |
 | `client.render.opengl` | Using typed OpenGL resources and GUI textures. Most drawing also needs `client.render`. |

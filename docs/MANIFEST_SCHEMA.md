@@ -87,9 +87,17 @@ calls and client service providers are currently unavailable. See
 
 Each argument accepts `name` (unique identifier) and `type` (`word`, `string`,
 `greedy_string`, `integer`, or `boolean`). Integer arguments may also set
-inclusive signed-32-bit `min` and `max`. A `greedy_string` must be the final
-argument. Command names are limited to 128 characters, 64 commands per module,
-and 16 arguments per command. Commands require the `content.register`
+inclusive signed-32-bit `min` and `max`. Any argument may set the optional
+boolean `suggestions = true` to call a synchronous guest completion callback.
+That feature additionally requires the module's requested and administrator-
+granted `command.suggest` capability. The callback receives the unfinished
+text, argument index, source player UUID when available, and prior parsed
+arguments; it returns up to 64 unique values of up to 256 UTF-8 bytes each.
+A `greedy_string` must be the final argument. Command names are limited to 128
+characters. Each module can declare up to 128 server and client commands
+combined across the two command arrays,
+with up to 16 arguments per command. Command names must be unique between both
+arrays. Server commands require the `content.register`
 capability. See [guest command declarations](FORMAT.md#guest-command-declarations)
 and the [SDK command guide](SDK_GUIDE.md#manifest-declared-commands).
 
@@ -104,6 +112,9 @@ callback uses `#[client_command(name = "...")]` and returns
 `SjmlResult<String>`. The module must request and receive `client.command` on
 that local installation. Commands are registered beneath
 `/sjmlclient <package> <module> <command>` and never invoke server commands.
+The 128-command per-module limit is shared with `[[modules.commands]]`; names
+must be unique across both arrays. Client-only modules cannot declare server
+commands, and server-only modules cannot declare client commands.
 See [client command declarations](CLIENT_COMMANDS.md).
 
 ### `[[modules.channels]]`
@@ -113,10 +124,15 @@ See [client command declarations](CLIENT_COMMANDS.md).
 | `name` | string | yes | Dot-separated lowercase channel name, at most 128 characters. |
 | `schema_version` | integer | yes | Positive `u32`; peers must declare matching versions for a shared channel. |
 | `directions` | array of strings | yes | Non-empty set containing `client_to_server`, `server_to_client`, or both. |
+| `messages_per_second` | integer | no | Local token refill rate, `1..=1000`; defaults to `100`. |
+| `burst` | integer | no | Local token-bucket capacity, `1..=2000`; defaults to `200`. |
 
 Channel use requires `network.mod`; using a channel declared by another module
 also requires `network.external`. Declaring channels can make a
 `server_only` package peer-required. See [networking](NETWORKING.md).
+The two rate values are local policy per module/channel/direction: outgoing
+excess returns `TASK_LIMIT_REACHED`, and excess valid inbound messages are
+dropped before callbacks. They do not change the channel payload or handshake.
 
 ## `[[dependencies]]`, `conflicts`, and `[[files]]`
 
@@ -145,8 +161,8 @@ not prove publisher identity or package authenticity.
 
 The host accepts at most 1 MiB of UTF-8 manifest text, nesting of 32 TOML
 levels, 256 entries in a manifest array, and strings up to 4,096 characters.
-There can be at most 256 modules, 64 commands per module, 16 arguments per
-command, and 1,024 channels total. Metadata has the tighter bounds listed
+There can be at most 256 modules, 128 combined server and client commands per
+module, 16 arguments per command, and 1,024 channels total. Metadata has the tighter bounds listed
 above. Archive path rules and ZIP limits are listed in the
 [package format](FORMAT.md#archive-rules-and-current-limits).
 

@@ -17,6 +17,12 @@ const CLIENT_INPUT_SCHEMA_VERSION: u32 = 1;
 const HANDLE_BYTES: u32 = 24;
 #[cfg(target_arch = "wasm32")]
 const CURSOR_POSITION_BYTES: u32 = 16;
+#[cfg(target_arch = "wasm32")]
+const INPUT_STATE_BYTES: u32 = 1;
+/// Largest GLFW keyboard key code accepted by the held-state query.
+pub const MAX_GLFW_KEY_CODE: i32 = 348;
+/// Largest GLFW mouse-button index accepted by the held-state query.
+pub const MAX_MOUSE_BUTTON: u8 = 7;
 /// Largest supported logical GUI coordinate returned by the host.
 pub const MAX_CURSOR_COORDINATE: f64 = 1_000_000.0;
 
@@ -236,6 +242,10 @@ extern "C" {
     fn imported_unsubscribe_scroll(handle_pointer: i32, handle_length: i32) -> i32;
     #[link_name = "cursor_position"]
     fn imported_cursor_position(output_pointer: i32) -> i32;
+    #[link_name = "is_key_down"]
+    fn imported_is_key_down(key_code: i32, output_pointer: i32) -> i32;
+    #[link_name = "is_mouse_button_down"]
+    fn imported_is_mouse_button_down(button: i32, output_pointer: i32) -> i32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -668,6 +678,110 @@ pub fn cursor_position() -> SjmlResult<CursorPosition> {
     }
 }
 
+/// Reads whether a GLFW keyboard key is currently held on the physical client.
+///
+/// Key codes are bounded to `0..=348`; scan codes are intentionally not accepted. This synchronous
+/// poll requires a client module with `client.input.observe` and runs only on the client main thread.
+/// It reports held state without intercepting or changing input handling.
+pub fn is_key_down(key_code: i32) -> SjmlResult<bool> {
+    if !(0..=MAX_GLFW_KEY_CODE).contains(&key_code) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "GLFW key code must be between 0 and 348",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let output = allocate_host_input(INPUT_STATE_BYTES);
+        if output == 0 {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate key-state output",
+            ));
+        }
+        // SAFETY: initialize the exact output byte before the synchronous host call.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, INPUT_STATE_BYTES as usize) };
+        // SAFETY: the output allocation remains live during the host import.
+        let status = unsafe { imported_is_key_down(key_code, output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful call initializes exactly one boolean byte.
+            decode_input_state(unsafe {
+                core::slice::from_raw_parts(output as *const u8, INPUT_STATE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host could not read the physical client key state",
+            ))
+        };
+        // SAFETY: release the exact allocation passed to the host.
+        unsafe { deallocate_host_input(output, INPUT_STATE_BYTES) };
+        result
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported())
+    }
+}
+
+/// Reads whether a GLFW mouse button is currently held on the physical client.
+///
+/// Button indices are bounded to `0..=7`. This synchronous poll requires a client module with
+/// `client.input.observe` and runs only on the client main thread. It reports held state without
+/// intercepting or changing input handling.
+pub fn is_mouse_button_down(button: u8) -> SjmlResult<bool> {
+    if button > MAX_MOUSE_BUTTON {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "GLFW mouse button must be between 0 and 7",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let output = allocate_host_input(INPUT_STATE_BYTES);
+        if output == 0 {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate mouse-button-state output",
+            ));
+        }
+        // SAFETY: initialize the exact output byte before the synchronous host call.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, INPUT_STATE_BYTES as usize) };
+        // SAFETY: the output allocation remains live during the host import.
+        let status = unsafe { imported_is_mouse_button_down(i32::from(button), output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful call initializes exactly one boolean byte.
+            decode_input_state(unsafe {
+                core::slice::from_raw_parts(output as *const u8, INPUT_STATE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host could not read the physical client mouse-button state",
+            ))
+        };
+        // SAFETY: release the exact allocation passed to the host.
+        unsafe { deallocate_host_input(output, INPUT_STATE_BYTES) };
+        result
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn decode_input_state(bytes: &[u8]) -> SjmlResult<bool> {
+    match bytes {
+        [0] => Ok(false),
+        [1] => Ok(true),
+        _ => Err(SjmlError::new(
+            ErrorCode::InvalidTransfer,
+            "held input state must be one boolean byte",
+        )),
+    }
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn decode_cursor_position(bytes: &[u8]) -> SjmlResult<CursorPosition> {
     if bytes.len() != 16 {
@@ -868,8 +982,9 @@ fn unsupported() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_cursor_position, ClientInputAction, ClientInputEvent, CursorPosition,
-        GlobalKeyObservation, MouseScrollEvent,
+        decode_cursor_position, decode_input_state, is_key_down, is_mouse_button_down,
+        ClientInputAction, ClientInputEvent, CursorPosition, GlobalKeyObservation,
+        MouseScrollEvent, MAX_GLFW_KEY_CODE, MAX_MOUSE_BUTTON,
     };
 
     #[test]
@@ -985,5 +1100,19 @@ mod tests {
             assert!(decode_cursor_position(&invalid).is_err());
         }
         assert!(decode_cursor_position(&[0; 15]).is_err());
+    }
+
+    #[test]
+    fn held_state_queries_enforce_glfw_bounds_and_decode_only_boolean_bytes() {
+        assert_eq!(MAX_GLFW_KEY_CODE, 348);
+        assert_eq!(MAX_MOUSE_BUTTON, 7);
+        assert!(is_key_down(-1).is_err());
+        assert!(is_key_down(MAX_GLFW_KEY_CODE + 1).is_err());
+        assert!(is_mouse_button_down(MAX_MOUSE_BUTTON + 1).is_err());
+
+        assert!(!decode_input_state(&[0]).unwrap());
+        assert!(decode_input_state(&[1]).unwrap());
+        assert!(decode_input_state(&[2]).is_err());
+        assert!(decode_input_state(&[]).is_err());
     }
 }

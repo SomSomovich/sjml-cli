@@ -39,3 +39,5 @@ inclusive `minimum..=maximum` range. Unrelated item data and the stack count are
 The `inventory.read` and `inventory.write` permissions are separate. The host's persistent codec
 and network codec both enforce the registered range, and a write rechecks it before changing the
 stack. The string component APIs retain their existing behavior.
+
+For module-owned boolean item data, see [boolean item components](BOOLEAN_ITEM_COMPONENTS.md).

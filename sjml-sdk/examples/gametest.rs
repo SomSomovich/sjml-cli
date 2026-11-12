@@ -6,32 +6,62 @@
 use sjml::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "gametest/block_fertilize_attempt.rs"]
+mod block_fertilize_attempt;
+#[path = "gametest/block_grow_attempt.rs"]
+mod block_grow_attempt;
 #[path = "gametest/block_inventory_custom_name.rs"]
 mod block_inventory_custom_name;
 #[path = "gametest/block_inventory_move.rs"]
 mod block_inventory_move;
 #[path = "gametest/entity_ai_control.rs"]
 mod entity_ai_control;
+#[path = "gametest/entity_breed_attempt.rs"]
+mod entity_breed_attempt;
 #[path = "gametest/entity_effect_application.rs"]
 mod entity_effect_application;
 #[path = "gametest/entity_heal_attempt.rs"]
 mod entity_heal_attempt;
 #[path = "gametest/entity_join_attempt.rs"]
 mod entity_join_attempt;
+#[path = "gametest/entity_riding.rs"]
+mod entity_riding;
+#[path = "gametest/entity_tick.rs"]
+mod entity_tick;
 #[path = "gametest/gameplay_events.rs"]
 mod gameplay_events;
 #[path = "gametest/player_advancements.rs"]
 mod player_advancements;
+#[path = "gametest/player_fished_attempt.rs"]
+mod player_fished_attempt;
 #[path = "gametest/player_inventory_custom_name.rs"]
 mod player_inventory_custom_name;
+#[path = "gametest/player_inventory_enchantment.rs"]
+mod player_inventory_enchantment;
+#[path = "gametest/player_item_use_attempt.rs"]
+mod player_item_use_attempt;
 #[path = "gametest/player_respawn_point.rs"]
 mod player_respawn_point;
 #[path = "gametest/player_statistics.rs"]
 mod player_statistics;
+#[path = "gametest/player_tick.rs"]
+mod player_tick;
 #[path = "gametest/scoreboard.rs"]
 mod scoreboard;
+#[path = "gametest/scoreboard_teams.rs"]
+mod scoreboard_teams;
+#[path = "gametest/world_block_tag.rs"]
+mod world_block_tag;
 #[path = "gametest/world_difficulty.rs"]
 mod world_difficulty;
+#[path = "gametest/world_fluid_state.rs"]
+mod world_fluid_state;
+#[path = "gametest/world_item_tag.rs"]
+mod world_item_tag;
+#[path = "gametest/world_light_at.rs"]
+mod world_light_at;
+#[path = "gametest/world_neighbor_update.rs"]
+mod world_neighbor_update;
 #[path = "gametest/world_redstone_signal.rs"]
 mod world_redstone_signal;
 #[path = "gametest/world_spawn_point.rs"]
@@ -123,9 +153,11 @@ fn register_test_content() -> SjmlResult<()> {
         "player_charge",
         IntegerComponentDefinition::new(-10, 10)?,
     )?;
+    registry::register_boolean_component("player_enabled")?;
     registry::register_entity("gametest_ai", EntityDefinition::default())?;
     let mut entity_model = EntityModelDefinition::new();
     entity_model.add_cuboid([-0.25, 0.0, -0.25], [0.25, 0.5, 0.25], 0xFFFF_2080)?;
+    entity_model.add_cuboid([-0.125, 0.5, -0.125], [0.125, 0.75, 0.125], 0xFF80_FF80)?;
     entity_model.set_texture("sjml_game_test:textures/entity/gametest_model.png")?;
     entity_model.add_animation(ModelAnimation::sine_rotation(
         ModelAnimationAxis::Y,
@@ -161,6 +193,17 @@ fn register_test_content() -> SjmlResult<()> {
         ModelAnimation::sine_rotation(ModelAnimationAxis::Z, [0.0, 0.25, 0.0], 6.0, 40, 0)?,
     )?;
     registry::register_entity_model("gametest_ai", entity_model)?;
+    let keyframe_track = ModelKeyframeTrack::new(
+        ModelAnimationAxis::X,
+        [0.0, 0.625, 0.0],
+        40,
+        vec![ModelKeyframe::new(0, 0.0)?, ModelKeyframe::new(20, 35.0)?],
+    )?;
+    model_animation::register_entity_model_keyframe_track(
+        "gametest_ai",
+        ModelAnimationTarget::Cuboid(1),
+        keyframe_track,
+    )?;
     registry::register_entity_ai_goal("gametest_ai", EntityAiGoal::Swim { priority: 0 })?;
     registry::register_entity_ai_goal(
         "gametest_ai",
@@ -229,6 +272,18 @@ fn register_test_content() -> SjmlResult<()> {
             output_item: "minecraft:netherite_sword".into(),
             output_count: 1,
         },
+    )?;
+    registry::register_brewing_recipe(
+        "gametest_brewing",
+        "minecraft:water",
+        "minecraft:emerald",
+        "sjml_game_test:content/gametest_potion",
+    )?;
+    registry::register_potion(
+        "gametest_potion",
+        "sjml_game_test:content/gametest_tick",
+        1200,
+        1,
     )?;
     for (path, kind) in [
         ("gametest_smelting", CookingRecipeKind::Smelting),
@@ -303,9 +358,16 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("resources.reloaded", EventPriority::Normal)?;
     events::subscribe("menu.action", EventPriority::Normal)?;
     gameplay_events::initialize()?;
+    player_tick::initialize()?;
+    player_item_use_attempt::initialize()?;
+    player_fished_attempt::initialize()?;
     entity_heal_attempt::initialize()?;
     entity_effect_application::initialize()?;
     entity_join_attempt::initialize()?;
+    entity_breed_attempt::initialize()?;
+    block_grow_attempt::initialize()?;
+    block_fertilize_attempt::initialize()?;
+    entity_tick::initialize()?;
     Ok(())
 }
 
@@ -1561,6 +1623,37 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         target_player,
         sjml::entity_attributes::LivingAttribute::AttackDamage,
     )?;
+    let original_interaction_range = sjml::entity_attributes::read_player(
+        target_player,
+        sjml::entity_attributes::LivingAttribute::BlockInteractionRange,
+    )?;
+    let temporary_interaction_range = if original_interaction_range.base_value < 64.0 {
+        original_interaction_range.base_value + 0.25
+    } else {
+        original_interaction_range.base_value - 0.25
+    };
+    let changed_interaction_range = (|| {
+        sjml::entity_attributes::set_player_base_value(
+            target_player,
+            sjml::entity_attributes::LivingAttribute::BlockInteractionRange,
+            temporary_interaction_range,
+        )?;
+        sjml::entity_attributes::read_player(
+            target_player,
+            sjml::entity_attributes::LivingAttribute::BlockInteractionRange,
+        )
+    })();
+    let restore_interaction_range = sjml::entity_attributes::set_player_base_value(
+        target_player,
+        sjml::entity_attributes::LivingAttribute::BlockInteractionRange,
+        original_interaction_range.base_value,
+    );
+    let changed_interaction_range = changed_interaction_range?;
+    restore_interaction_range?;
+    let restored_interaction_range = sjml::entity_attributes::read_player(
+        target_player,
+        sjml::entity_attributes::LivingAttribute::BlockInteractionRange,
+    )?;
     let original_abilities = player::abilities(target_player)?;
     if !original_abilities.may_fly {
         return Err(SjmlError::new(
@@ -1662,6 +1755,9 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         || restored_abilities != original_abilities
         || (changed_attack_damage.base_value - temporary_attack_damage).abs() > 0.0001
         || (restored_attack_damage.base_value - original_attack_damage.base_value).abs() > 0.0001
+        || (changed_interaction_range.base_value - temporary_interaction_range).abs() > 0.0001
+        || (restored_interaction_range.base_value - original_interaction_range.base_value).abs()
+            > 0.0001
         || observed_game_mode != temporary_game_mode
         || (temporary_motion.velocity_x - temporary_velocity.x).abs() > 0.0001
         || (temporary_motion.velocity_y - temporary_velocity.y).abs() > 0.0001
@@ -1831,7 +1927,22 @@ fn player_inventory_integer_component(arguments: PlayerArguments) -> SjmlResult<
             "the player inventory component did not round-trip through the guest API",
         ));
     }
-    Ok("player inventory integer component read/write succeeded".to_owned())
+    let boolean_path = "player_enabled";
+    if sjml::player_inventory::read_boolean_component(target_player, 1, boolean_path)?.is_some() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the player inventory boolean fixture must start without the module component",
+        ));
+    }
+    sjml::player_inventory::write_boolean_component(target_player, 1, boolean_path, true)?;
+    if sjml::player_inventory::read_boolean_component(target_player, 1, boolean_path)? != Some(true)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the player inventory boolean component did not round-trip through the guest API",
+        ));
+    }
+    Ok("player inventory integer and boolean component read/write succeeded".to_owned())
 }
 
 #[derive(StableDecode)]

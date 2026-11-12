@@ -109,7 +109,7 @@ fn generated_project_builds_tests_packages_and_inspects_offline() {
     assert!(
         fs::read_to_string(project.join("sjml.toml"))
             .unwrap()
-            .contains("sjml = \"^0.68.0\"")
+            .contains("sjml = \"^0.75.0\"")
     );
     // Re-initialization must never overwrite user files.
     fs::write(project.join("keep.txt"), "owned").unwrap();
@@ -187,11 +187,11 @@ fn generated_default_template_tracks_current_sdk_host_and_abi_versions() {
     ]));
 
     let cargo_manifest = fs::read_to_string(project.join("Cargo.toml")).unwrap();
-    assert!(cargo_manifest.contains("sjml-sdk = \"0.66.0\""));
+    assert!(cargo_manifest.contains("sjml-sdk = \"0.73.0\""));
 
     let package_manifest = fs::read_to_string(project.join("sjml.toml")).unwrap();
-    assert!(package_manifest.contains("abi = \"^1.58.0\""));
-    assert!(package_manifest.contains("sjml = \"^0.68.0\""));
+    assert!(package_manifest.contains("abi = \"^1.65.0\""));
+    assert!(package_manifest.contains("sjml = \"^0.75.0\""));
 }
 
 #[test]
@@ -674,7 +674,7 @@ fn test_release_runs_native_tests_with_the_requested_optimization_profile() {
 fn network_channel_declarations_round_trip_and_validate_the_host_contract() {
     let tmp = sandbox();
     raw_project(tmp.path());
-    let channel = "\n[[modules.channels]]\nname = 'chat.message'\nschema_version = 4294967295\ndirections = ['client_to_server', 'server_to_client']\n";
+    let channel = "\n[[modules.channels]]\nname = 'chat.message'\nschema_version = 4294967295\ndirections = ['client_to_server', 'server_to_client']\nmessages_per_second = 24\nburst = 48\n";
     fs::write(
         tmp.path().join("sjml.toml"),
         format!("{}{channel}", manifest()),
@@ -700,6 +700,10 @@ fn network_channel_declarations_round_trip_and_validate_the_host_contract() {
         channel.replace("'server_to_client'", "'client_to_server'"),
         channel.replace("'server_to_client'", "'both'"),
         channel.replace("directions =", "direction ="),
+        channel.replace("messages_per_second = 24", "messages_per_second = 0"),
+        channel.replace("messages_per_second = 24", "messages_per_second = 1001"),
+        channel.replace("burst = 48", "burst = 0"),
+        channel.replace("burst = 48", "burst = 2001"),
         format!("{channel}{channel}"),
     ];
     for declaration in invalid {
@@ -945,4 +949,114 @@ fn inspect_measures_deflate_streams_instead_of_accepting_padded_size_claims() {
     bytes[end + 16..end + 20].copy_from_slice(&((directory_offset + 1000) as u32).to_le_bytes());
     fs::write(&path, bytes).unwrap();
     fails(run(&["inspect", path.to_str().unwrap()]), "E_ARCHIVE");
+}
+
+fn command_block(table: &str, name: &str) -> String {
+    format!("\n[[modules.{table}]]\nname = '{name}'\nschema_version = 1\npermission_level = 0\n")
+}
+
+#[test]
+fn client_command_declarations_validate_side_arguments_and_cross_list_names() {
+    let tmp = sandbox();
+    raw_project(tmp.path());
+    let base = manifest().replace("side = 'server'", "side = 'both'");
+    let mut valid = base.clone();
+    valid += &command_block("commands", "tools.status");
+    valid += &command_block("client_commands", "tools.local_status");
+    valid += "[[modules.client_commands.arguments]]\nname = 'count'\ntype = 'integer'\nmin = -4\nmax = 8\n";
+    fs::write(tmp.path().join("sjml.toml"), valid).unwrap();
+    let output = tmp.path().join("commands.sjml");
+    let package = [
+        "package",
+        "--no-build",
+        "--project",
+        tmp.path().to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ];
+    ok(run(&package));
+
+    let invalid_manifests = vec![
+        // Client commands are forbidden on server-only modules.
+        format!(
+            "{}{}",
+            manifest(),
+            command_block("client_commands", "tools.local")
+        ),
+        // Server commands are forbidden on client-only modules.
+        format!(
+            "{}{}",
+            manifest().replace("side = 'server'", "side = 'client'"),
+            command_block("commands", "tools.remote")
+        ),
+        // Name uniqueness spans both declaration arrays.
+        format!(
+            "{}{}{}",
+            base,
+            command_block("commands", "tools.same"),
+            command_block("client_commands", "tools.same")
+        ),
+        // Client declarations use the same strict argument type validation.
+        format!(
+            "{}{}[[modules.client_commands.arguments]]\nname = 'value'\ntype = 'unknown'\n",
+            base,
+            command_block("client_commands", "tools.invalid_argument")
+        ),
+        // Unknown keys are rejected in client command records too.
+        format!(
+            "{}{}unexpected = true\n",
+            base,
+            command_block("client_commands", "tools.unknown_key")
+        ),
+        // A greedy string must be the final argument.
+        format!(
+            "{}{}[[modules.client_commands.arguments]]\nname = 'text'\ntype = 'greedy_string'\n[[modules.client_commands.arguments]]\nname = 'after'\ntype = 'word'\n",
+            base,
+            command_block("client_commands", "tools.invalid_argument_order")
+        ),
+        // Integer bounds must be ordered and cannot be used on other types.
+        format!(
+            "{}{}[[modules.client_commands.arguments]]\nname = 'count'\ntype = 'integer'\nmin = 8\nmax = 2\n",
+            base,
+            command_block("client_commands", "tools.invalid_argument_bounds")
+        ),
+        format!(
+            "{}{}[[modules.client_commands.arguments]]\nname = 'count'\ntype = 'word'\nmin = 1\n",
+            base,
+            command_block("client_commands", "tools.invalid_argument_min")
+        ),
+    ];
+    for invalid in invalid_manifests {
+        fs::write(tmp.path().join("sjml.toml"), invalid).unwrap();
+        fails(run(&package), "E_MANIFEST");
+    }
+}
+
+#[test]
+fn server_and_client_command_declarations_share_a_128_entry_limit() {
+    let tmp = sandbox();
+    raw_project(tmp.path());
+    let base = manifest().replace("side = 'server'", "side = 'both'");
+    let mut text = base;
+    for index in 0..64 {
+        text += &command_block("commands", &format!("server.command{index}"));
+        text += &command_block("client_commands", &format!("client.command{index}"));
+    }
+    fs::write(tmp.path().join("sjml.toml"), &text).unwrap();
+    let output = tmp.path().join("command_limit.sjml");
+    let package = [
+        "package",
+        "--no-build",
+        "--project",
+        tmp.path().to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ];
+    ok(run(&package));
+    let accepted = fs::read(&output).unwrap();
+
+    text += &command_block("client_commands", "client.command64");
+    fs::write(tmp.path().join("sjml.toml"), text).unwrap();
+    fails(run(&package), "E_MANIFEST");
+    assert_eq!(fs::read(&output).unwrap(), accepted);
 }

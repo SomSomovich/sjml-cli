@@ -6,11 +6,36 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.58.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.65.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.57.0 adds
-bounded schema-v2 text-entry forms to interactive physical-client screens,
+incompatible. Build metadata does not affect version ordering. ABI 1.65.0 adds
+loaded-only block and item tag membership queries. ABI 1.64.0 adds bounded physical-client
+translation lookup, loaded-only structure queries, and synchronous cancellable
+bonemeal/fertilization attempts. ABI 1.63.0 adds
+bounded Brigadier command suggestions, owner-scoped registered-item use
+callbacks, package sprite-region rendering, brewing mixes and single-effect
+potions, player-inventory enchantment operations, tracked sound fading and
+music selection, module-owned scoreboard teams, and synchronous cancellable
+`entity.breed_attempt`, `block.grow_attempt`, and `player.fished_attempt`
+events. ABI 1.62.0 adds
+criterion-level advancement progress reads and single-criterion grant/revoke,
+bounded reads and increments for six vanilla registry-backed statistic
+families, and host-evaluated periodic keyframe rotation tracks for registered
+entity/block-entity models. ABI 1.60.0 adds
+owner-scoped handles for stopping exact one-shot client sounds, bounded held-key
+and mouse-button state reads, server-side entity riding snapshots and guarded
+non-forced mount/dismount calls, the observational `entity.tick` callback, and
+loaded-only vanilla neighbor updates. Network inbound rate limits are now
+isolated per authenticated player without changing the handshake or payload
+format. ABI 1.59.0 adds schema-v4 client settings forms with bounded checkboxes,
+physical-client FOV scaling, bounded `player.tick` / `client.tick` subscriptions,
+detached world fluid snapshots, module-owned boolean item components, and the
+synchronous cancellable `player.item_use_attempt` event. Schema-v1 through
+schema-v3 screen requests remain compatible. ABI 1.58.0 adds schema-v3 client
+list forms with one bounded selection list
+alongside text fields.
+ABI 1.57.0 adds bounded schema-v2 text-entry forms to interactive physical-client screens,
 with owner-directed `client.screen.form_submit` callbacks. ABI 1.56.0 adds
 schema-v1 screens under `client.ui.screen`, with owner-directed
 `client.screen.action` callbacks. ABI 1.55.0 adds the
@@ -274,14 +299,16 @@ subscription. It dispatches the non-cancellable unit-valued
 `sjml_v1_event_server.started` and `sjml_v1_event_server.stopping` exports,
 plus the non-cancellable `sjml_v1_event_player.joined`,
 `sjml_v1_event_player.left`, `sjml_v1_event_player.moved`,
-`sjml_v1_event_player.respawned`,
+`sjml_v1_event_player.respawned`, `sjml_v1_event_player.tick`,
 `sjml_v1_event_entity.death`, and
 `sjml_v1_event_entity.spawned`, `sjml_v1_event_entity.effect.tick`,
+`sjml_v1_event_entity.tick`,
 `sjml_v1_event_entity.projectile_impact_attempt`,
 `sjml_v1_event_block.place`, `sjml_v1_event_player.interacted`,
 `sjml_v1_event_player.interaction`,
 `sjml_v1_event_entity.damaged`, `sjml_v1_event_world.loaded`,
 `sjml_v1_event_world.unloaded`, `sjml_v1_event_server.tick`,
+`sjml_v1_event_client.tick`,
 `sjml_v1_event_inventory.changed`, and `sjml_v1_event_resources.reloaded`
 exports. The
 player join/leave events receive their SDK schema-v1 identity record
@@ -385,6 +412,15 @@ duration of `-1` means infinite. The callback is delivered after living-entity
 ticks on the logical server thread only. The module must first declare the
 effect tick interval during static content registration and separately
 subscribe to `entity.effect.tick`; intervals are limited to 1–1,200 ticks.
+The `entity.tick` callback receives schema-v1 `EntityTick`: little-endian
+version `1`, stable UTF-8 strings in order (canonical `entity_id`,
+`entity_type_id`, `dimension_id`), finite little-endian IEEE-754 `f64`
+coordinates `x`, `y`, and `z`, then a non-negative little-endian `i64`
+entity-local `tick_count`. It runs after loaded non-player entity ticks on the
+owning logical-server thread, is observation-only, and does not cause chunks to
+load. Default cadence is 20 entity ticks; `subscribe_interval` accepts 1–1,200.
+To bound guest work, at most 4,096 `entity.tick` callbacks are invoked per
+logical-server tick; excess callbacks are skipped for that server tick.
 The `player.interacted` callback receives schema-v1 `PlayerInteracted` data:
 version `1`, stable strings for the canonical `player_id`, `dimension_id`,
 `action`, and `hand`, optional stable strings for `target_id` and `face`, then an
@@ -415,6 +451,44 @@ host can restore the whole stack into the player's inventory. If capacity is
 insufficient, the host preserves the vanilla toss to avoid losing items.
 This event cannot be asynchronous.
 
+The non-cancellable `sjml_v1_event_player.item_crafted` callback receives a
+schema-v1 `PlayerItemCrafted`: little-endian `u32(1)`, stable length-prefixed
+UTF-8 strings for canonical player UUID, matched recipe ID, and output item
+ID, followed by little-endian `u32` output count. Each string is limited to
+256 UTF-8 bytes, count to `1..=1,000,000`, and the complete payload to 2 KiB.
+NeoForge emits it on the owning logical-server thread after a normal crafting
+result is taken. It also sends the existing `inventory.changed` notification;
+this new event does not expose ingredients, mutate the result, or cancel the
+craft. It requires `events.subscribe` and cannot be asynchronous.
+
+The synchronous cancellable `sjml_v1_event_player.item_use_attempt` callback
+receives schema-v1 `PlayerItemUseAttempt`: little-endian `u32(1)`, stable
+length-prefixed UTF-8 strings for canonical player UUID, dimension ID, hand,
+and item registry ID, then little-endian `u32` stack count. Hand is `main_hand`
+or `off_hand`; an empty hand is `minecraft:air` with count zero. Count is
+limited to `0..=1,000,000` and each string to 256 UTF-8 bytes. NeoForge emits
+it on the owning logical-server thread before `Item.use`, after the general
+`player.interaction` veto. It has no live stack handle and cannot rewrite the
+item or count. Return exactly one stable boolean byte after the status prefix;
+`true` cancels the use. It requires `events.subscribe` and `events.cancel`, and
+cannot be asynchronous.
+
+The synchronous cancellable `sjml_v1_event_player.fished_attempt` callback
+receives schema-v1 `PlayerFishedAttempt`: little-endian `u32(1)`, stable
+length-prefixed UTF-8 strings for canonical player UUID and dimension ID,
+little-endian `f64` hook X/Y/Z coordinates, `u32` requested rod damage, a
+`u32` drop count, then that many nested schema-v1 `FishedDropSnapshot` values
+(each has `u32(1)`, a stable item registry ID string, and `u32` count), and a
+strict boolean byte indicating whether source drops were truncated. Strings
+are limited to 256 UTF-8 bytes, coordinates to finite values within ±30,000,000,
+rod damage to `0..=1,000,000`, each count to `1..=1,000,000`, and the drop list
+to 16 entries; the complete payload is limited to 8 KiB. NeoForge emits this
+only for a logical-server `ItemFishedEvent` on the owning server thread. Return
+exactly one stable boolean byte after the status prefix; `true` cancels the
+catch drops, while requested rod damage remains unchanged. Drop snapshots
+contain only item IDs and counts, with no components or NBT. The callback
+requires `events.subscribe` and `events.cancel` and cannot be asynchronous.
+
 The `entity.damaged` callback receives schema-v1 `EntityDamaged` data: version
 `1`, stable strings for `entity_id`, `entity_type_id`, `dimension_id`, and
 `damage_type_id`, an optional stable source entity UUID, finite little-endian
@@ -433,6 +507,17 @@ the server tick on its owning thread. Plain `events::subscribe("server.tick",
 priority)` uses a 20-tick cadence; `events::subscribe_with_interval` allows a
 cadence from 1 through 1,200 ticks. This callback cannot cancel or change the
 server tick.
+The `player.tick` callback receives schema-v1 `PlayerTick`: version `1`, a
+stable UTF-8 canonical player UUID, a stable UTF-8 dimension ID, then a
+non-negative little-endian `i64` player tick count. NeoForge dispatches after a
+live server player's tick on the owning logical-server thread. Its default
+cadence is 20 ticks; `subscribe_interval` accepts 1–1,200 ticks per
+subscription. This callback cannot cancel or change the player tick.
+The `client.tick` callback receives schema-v1 `ClientTick`: version `1`, then
+a non-negative little-endian `i64` physical-client tick count. It runs after
+the client tick on the client main thread. Its default cadence is 20 ticks;
+`subscribe_interval` accepts 1–1,200 ticks. It is observational and cannot
+change the client tick.
 The `resources.reloaded` callback receives schema-v1 `ResourcesReloaded`:
 version `1`, then the non-negative little-endian `i64` server tick when the
 server observes that successfully reloaded resources have become active. The
@@ -452,8 +537,9 @@ exact player inventory slot. No live inventory or item stack is exposed, and
 the callback cannot alter the completed change.
 Guest commands are described below.
 Server event subscriptions are accepted only in integrated-server and
-dedicated-server execution contexts. `client.item.tooltip` and
-`client.chat.send_attempt` are accepted only in the physical-client context.
+dedicated-server execution contexts. `client.item.tooltip`,
+`client.chat.send_attempt`, and `client.tick` are accepted only in the
+physical-client context.
 Non-cancellable notification callbacks may use
 `#[event_async]`; cancellable callbacks and callbacks that return a value to
 Minecraft synchronously, including `client.item.tooltip`, must use `#[event]`.
@@ -470,7 +556,7 @@ granted by the administrator:
 | Host import | WebAssembly signature | Behavior |
 | --- | --- | --- |
 | `sjml_events_v1.subscribe` | `(event_ptr: i32, event_len: i32, priority: i32, handle_output_ptr: i32) -> i32` | Adds one callback subscription and writes its 24-byte handle to guest memory. |
-| `sjml_events_v1.subscribe_interval` | `(event_ptr: i32, event_len: i32, priority: i32, interval_ticks: i32, handle_output_ptr: i32) -> i32` | Adds a bounded-cadence `server.tick` subscription and writes its handle. |
+| `sjml_events_v1.subscribe_interval` | `(event_ptr: i32, event_len: i32, priority: i32, interval_ticks: i32, handle_output_ptr: i32) -> i32` | Adds a bounded-cadence tick subscription and writes its handle. |
 | `sjml_events_v1.unsubscribe` | `(handle_ptr: i32, handle_len: i32) -> i32` | Removes exactly one live subscription represented by a 24-byte handle. |
 
 All three imports return `0` on success or a nonzero stable ABI error code. The
@@ -482,29 +568,32 @@ The `priority` values are `0=Highest`, `1=High`, `2=Normal`, `3=Low`, and
 `4=Lowest`; lower values run first and equal priorities retain module
 activation and registration order. An active module instance may hold at most
 256 live event subscriptions.
-`subscribe_interval` is valid only for `server.tick` and requires an interval
-from 1 through 1,200 ticks. Plain `subscribe` uses a 20-tick cadence for that
-event.
+`subscribe_interval` is valid only for `server.tick`, `player.tick`,
+`entity.tick`, and `client.tick`, with an interval from 1 through 1,200 ticks. Plain `subscribe`
+uses a 20-tick cadence for each event.
 
 The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`, `player.advancement_earned`,
-`player.sleep_attempt`, `entity.death`, `entity.death_attempt`,
+`player.sleep_attempt`, `player.item_use_attempt`, `entity.death`, `entity.death_attempt`,
 `entity.damage_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.heal_attempt`, `block.break`,
 `block.break_attempt`, `block.place`, `block.place_attempt`, `player.interacted`,
 `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
-`inventory.changed`, `resources.reloaded`, `menu.action`, `client.item.tooltip`,
-and `client.chat.send_attempt`.
+`inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
+`entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`, and
+`player.fished_attempt`, `client.chat.send_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.interaction`, `player.drop_attempt`, `player.sleep_attempt`,
+`player.item_use_attempt`,
 `client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
-`entity.projectile_impact_attempt`, or `world.explosion_attempt` additionally
+`entity.projectile_impact_attempt`, `player.fished_attempt`, or
+`world.explosion_attempt` additionally
 requires the module to request and receive the separate `events.cancel`
 capability. Static registration instances cannot subscribe. Server event
 callbacks run synchronously on the owning logical-server thread. Non-cancellable
@@ -649,6 +738,8 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_cooking_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_token_ptr: i32, ingredient_token_len: i32, kind: i32, experience_bits: i32, cooking_time: i32) -> i32` | Stage a vanilla cooking recipe with an item or item-tag input. |
 | `sjml_registry_v1.register_stonecutting_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_token_ptr: i32, ingredient_token_len: i32) -> i32` | Stage one vanilla stonecutting recipe with one item or item-tag input. |
 | `sjml_registry_v1.register_smithing_transform_recipe` | `(path_ptr: i32, path_len: i32, template_ptr: i32, template_len: i32, base_ptr: i32, base_len: i32, addition_ptr: i32, addition_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32) -> i32` | Stage a vanilla smithing transform with template, base, and addition item or item-tag inputs. |
+| `sjml_registry_v1.register_brewing_recipe` | `(path_ptr: i32, path_len: i32, input_potion_ptr: i32, input_potion_len: i32, ingredient_item_ptr: i32, ingredient_item_len: i32, output_potion_ptr: i32, output_potion_len: i32) -> i32` | Stage a vanilla brewing mix from an existing input potion and item to an existing output potion. |
+| `sjml_registry_v1.register_potion` | `(path_ptr: i32, path_len: i32, effect_id_ptr: i32, effect_id_len: i32, duration_ticks: i32, amplifier: i32) -> i32` | Stage a package-owned potion containing one bounded instance of an existing mob effect. |
 | `sjml_registry_v1.register_recipe_serializer` | `(path_ptr: i32, path_len: i32) -> i32` | Register a guest callback serializer for package-owned crafting recipe JSON. |
 | `sjml_registry_v1.register_particle` | `(path_ptr: i32, path_len: i32) -> i32` | Stage a simple particle type using the vanilla `minecraft:generic_0` sprite fallback. |
 | `sjml_registry_v1.register_particle_visual` | `(path_ptr: i32, path_len: i32, texture_ptr: i32, texture_len: i32, scale_bits: i32) -> i32` | Stage a simple particle with a package-owned `particle/` atlas resource and a scale from 0.05 through 4.0. |
@@ -665,6 +756,8 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.set_item_string_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value_ptr: i32, value_len: i32) -> i32` | Set a static string-component default on a previously declared item or block item. |
 | `sjml_registry_v1.register_integer_component` | `(path_ptr: i32, path_len: i32, minimum: i32, maximum: i32) -> i32` | Register a module-owned integer component with inclusive bounds. |
 | `sjml_registry_v1.set_item_integer_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value: i32) -> i32` | Set an in-range static integer-component default on a previously declared item or block item. |
+| `sjml_registry_v1.register_boolean_component` | `(path_ptr: i32, path_len: i32) -> i32` | Register a module-owned persistent/network-synchronized boolean component type. |
+| `sjml_registry_v1.set_item_boolean_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value: i32) -> i32` | Set a boolean component default on a previously declared item or block item; value must be 0 or 1. |
 
 Paths are 1–256 lowercase ASCII letters, digits, `.`, `_`, or `-`. Boolean
 fields accept exactly zero or one. Item stack sizes are 1–99; block strengths
@@ -771,9 +864,11 @@ shapeless, shaped, cooking, stonecutting, and smithing families. Smithing
 transform recipes accept one template, one base, and one addition item or tag.
 The host limits recipe
 declarations to 256 aggregate content entries per module and 4,096 recipes
-globally. See [stonecutting recipes](STONECUTTING.md) and
-[smithing transform recipes](SMITHING_TRANSFORM.md) for their Rust helpers and
-input conventions.
+globally. See [stonecutting recipes](STONECUTTING.md),
+[smithing transform recipes](SMITHING_TRANSFORM.md), and
+[brewing recipes](BREWING_RECIPES.md) for their Rust helpers and input
+conventions. Brewing mixes are applied through NeoForge's `RegisterBrewingRecipesEvent`; module-owned potions are registered with one
+existing mob effect before the brewing registry phase.
 The path, output-item ID, and ingredient token are passed as separate UTF-8
 pointer/length spans; a tag token includes its leading `#`. The declaration
 requires requested and granted `content.register` and is accepted only during
@@ -788,9 +883,11 @@ three uppercase-letter or space cells, with one item or tag binding for every
 used letter and no unused keys. Both families accept an output count of one to
 64. Cooking kind codes are `0=smelting`, `1=blasting`, `2=smoking`, and
 `3=campfire cooking`. Cooking recipes use one item or tag input, experience
-from 0 to 1,000, and cooking time from 1 to 36,000 ticks. All recipe families
-share the output-count range of one to 64. Brewing and arbitrary Java recipe
-serializers are not provided. Guest-defined WASM serializers are registered
+from 0 to 1,000, and cooking time from 1 to 36,000 ticks. Item-output recipe
+families share the output-count range of one to 64. Brewing declarations use
+fully qualified potion and item IDs; potion declarations use an effect duration
+of 1–72,000 ticks and amplifier 0–255. Arbitrary Java recipe serializers are
+not provided. Guest-defined WASM serializers are registered
 with `register_recipe_serializer` and a `#[recipe(name = "...")]` export; their
 callback name must match the registered path and their module must declare
 `side = "both"`. Package files under
@@ -933,10 +1030,10 @@ supported argument types and stable Rust field types are:
 omitted, the respective bound is the full `i32` limit. A `greedy_string` must
 be the final argument. String values are limited to 65,536 UTF-8 bytes each,
 and the complete input record is limited to 1 MiB. A module may declare up to
-64 commands, and a command may declare up to 16 arguments; the host stages at
-most 8,192 commands across all packages. Client-only module command declarations
-are rejected. The manifest format and a complete example are documented in
-`FORMAT.md`.
+128 combined server and client commands, and a command may declare up to 16
+arguments; the host stages at most 8,192 commands across all packages.
+Client-only modules cannot declare server commands. Local client-command
+declarations and their permissions are described in `FORMAT.md`.
 
 For a command with schema version `N`, the host encodes its callback input as
 the little-endian `u32` value `N`, followed by each declared argument in
@@ -956,6 +1053,38 @@ invocation. On invocation it resolves the currently active module for the
 command's logical server, so a Brigadier tree rebuilt during resource reload
 does not retain a closed WASM instance. Command callbacks run synchronously
 on the owning server thread.
+
+### Dynamic argument suggestions
+
+An argument entry may set `suggestions = true`. The module must request and
+receive `command.suggest` in addition to `content.register`; the command's
+`permission_level` is checked before calling the guest. All suggested
+arguments of one command use export
+`sjml_v1_command_suggestions_<command-name>`, generated by
+`#[command_suggestions(name = "...")]`. The host requires this export to have
+the normal byte-callback ABI before staging the package. A callback is invoked
+synchronously on the owning server thread; recursive calls to the same
+callback are suppressed.
+
+The input is `CommandSuggestionRequest` schema version 1. Fields are encoded
+in this order: `u32(1)` schema, a length-prefixed command name, a stable
+`Option<String>` source player UUID (`u8(0)` or `u8(1)` followed by a string),
+`u32` zero-based argument index, a length-prefixed argument name, a
+length-prefixed partial argument, then a stable `Vec<CommandSuggestionArgument>`.
+The vector count is `u32`; every nested argument record starts with `u32(1)`,
+then contains its name, kind (`word`, `string`, `greedy_string`, `integer`, or
+`boolean`), and canonical textual value as length-prefixed UTF-8 strings.
+Console suggestions have no source-player UUID. The whole callback input is
+limited to 1 MiB and each string is limited to 65,536 bytes.
+
+The result is `CommandSuggestions` schema version 1: `u32(1)`, `u32` count,
+then that many length-prefixed strings. It accepts at most 64 unique, nonempty
+values, each at most 256 UTF-8 bytes, with no control characters. The host
+rejects malformed records, filters nonmatching partial text, and verifies
+values against the declared parser and integer bounds before passing them to
+Brigadier. A malformed callback disables only its module instance and returns
+no suggestions. Suggestions from client commands, command-tree mutation, and
+structured feedback are not exposed.
 
 ## Error values
 
@@ -1237,6 +1366,14 @@ and option IDs use the 1–64 lowercase ASCII identifier syntax. Labels are
 1–96 UTF-8 bytes; all text remains strict UTF-8 without control characters,
 and the total payload remains capped at 4,096 bytes.
 
+ABI 1.59.0 adds schema-v4 settings forms. Schema v4 keeps the schema-v3 text
+field and selection-list layout, then appends `u32 checkbox_count` (1–4),
+followed by each stable UTF-8 checkbox ID, literal label, and initial checked
+value as `u32` (`0` or `1`). Checkbox IDs are unique across buttons and all
+form elements. Labels are 1–96 bytes; text stays strict UTF-8 without control
+characters and the complete request remains capped at 4,096 bytes. Schema-v1,
+v2, and v3 requests keep their previous encodings.
+
 When a button is clicked, the screen closes and the owning module receives the
 direct callback export `sjml_v1_event_client.screen.action`. Its schema-v1
 payload is `u32 schema_version` (`1`), stable UTF-8 `screen_id`, and stable
@@ -1292,6 +1429,69 @@ is finite in 0..=4, and pitch is finite in 0.5..=2. Each module is limited to
 five requests per two-second window. Playback is local and sends no packets.
 See [client-local audio](CLIENT_AUDIO.md).
 
+ABI 1.60.0 adds `sjml_client_audio_v1.play_tracked(sound_id_ptr, sound_id_len,
+category, volume_bits, pitch_bits) -> i64`, `stop_tracked(handle) -> i32`, and
+`fade_tracked(handle, target_volume_bits, duration_ticks) -> i32`.
+The start result packs the status in its upper 32 bits and a nonzero
+runtime-owned handle in its lower 32 bits. Tracked playback uses
+`client.audio.play`, shares its start rate limit, and is bounded to sixteen
+handles per runtime and 512 across the physical client. Stop and runtime cleanup
+target only the exact `SoundInstance` created by that runtime. Fade targets are
+finite `0..=4`, durations are `1..=1200` client ticks, and an active ramp is
+updated on the Minecraft client sound tick. A new fade starts at the current
+volume. Disconnect cleanup stops every client-owned tracked sound. If a NeoForge
+sound listener cancels or replaces the instance, the host returns
+`SERVICE_BUSY` and does not stop the replacement. See [client-local audio](CLIENT_AUDIO.md).
+
+## Client situational music selection
+
+The physical-client imports `sjml_client_music_v1.subscribe() -> i32` and
+`unsubscribe() -> i32` require the separately requested and granted
+`client.audio.music` capability and the client main thread. They are available
+only after the client hook is installed; static-registration and dedicated
+server calls fail closed. One callback per active module may be subscribed.
+Runtime teardown removes the subscription.
+
+The direct callback export is
+`sjml_v1_client_music_selection(input_ptr: i32, input_len: i32) -> i64`,
+using the standard callback span and status frame. Its schema-v1 input, encoded
+in declaration order, is `u32 version=1`, a stable UTF-8 original sound ID,
+an optional stable UTF-8 current sound ID (`u8` tag `0=None`, `1=Some`),
+`i32 original_min_delay_ticks`, `i32 original_max_delay_ticks`, and a boolean
+byte (`0` or `1`) for `original_replace_current`. IDs must be canonical
+`namespace:path` sound IDs no longer than 256 UTF-8 bytes. The callback runs
+synchronously before NeoForge's situational music selection on the client
+main thread and receives no Minecraft objects.
+
+The schema-v1 result is `u32 version=1`, `u8 action` (`0=keep`, `1=stop`,
+`2=replace`), an optional stable UTF-8 replacement sound ID, `u32 minimum and
+maximum delay ticks`, and a boolean replace-current byte. Keep and stop require
+zero/empty replacement fields. Replace requires a sound successfully
+registered by the exact same package and module, an available client sound
+resource, and `0 <= minimum <= maximum <= 1200`. The module can request
+`unsubscribe()` at any time. This API changes only situational music; it does
+not manage tracked one-shot sounds or provide fades.
+
+All active SJML callbacks see the same snapshot and run in ascending runtime
+module ID order; the last non-keep result wins. SJML applies its selected
+result through `SelectMusicEvent.setMusic` without cancelling the NeoForge
+event, so other mods still receive it under NeoForge event-priority rules.
+`stop` sets the selected music to `null`. A callback trap, invalid result, or
+attempt to select another owner's sound disables only the failing SJML module.
+See [client music selection](CLIENT_MUSIC.md) for an example and a
+display-backed manual check.
+
+ABI 1.59.0 adds the physical-client `sjml_client_camera_v1` imports
+`set_fov_scale(scale: f32) -> i32` and `clear_fov_scale() -> i32`. They require
+the `client.camera.fov` grant, the client main thread, and an active client
+runtime. Each module's scale must be finite and within `0.25..=4.0`; `1.0` is
+neutral. The host multiplies active module scales in runtime activation order,
+clamps their product to `0.25..=4.0`, and applies it to NeoForge's already
+computed dynamic FOV modifier. The final modifier is clamped to `0.05..=4.0`.
+Each module's scale persists until cleared or its runtime closes. This API does
+not call guest code during frame-time FOV calculation. Live visual behavior
+still needs a display-backed client check. See [client camera controls](CLIENT_CAMERA.md).
+
 ## Global client input imports
 
 Global key and mouse-button subscriptions are a separate API, available only
@@ -1331,6 +1531,15 @@ runtime, `client.input`, the client main thread, a live window, and a pointer
 inside the viewport. Non-finite, negative, or excessively large coordinates
 fail closed. This synchronous call does not move the cursor; see
 [cursor position](CURSOR_POSITION.md).
+
+`sjml_client_input_v1.is_key_down(key_code, output_ptr) -> i32` and
+`is_mouse_button_down(button, output_ptr) -> i32` write one boolean byte at
+`output_ptr` (`0=false`, `1=true`). Key codes are bounded to `0..=348`; mouse
+button indices are bounded to `0..=7`. Both calls require a client module with
+`client.input.observe`, the client main thread, and the physical-client provider
+installed by the `Dist.CLIENT` adapter. They only poll current held state and
+do not intercept or mutate keyboard or mouse input. Static registration,
+server contexts, missing grants, and off-thread calls fail closed.
 
 ## Declarative client keybindings
 
@@ -1372,6 +1581,8 @@ registration binds the signatures but every call during `mod_register` returns
 | `dimension_id` | `handle_ptr, handle_len, out_ptr, out_capacity` | Stable `String`: little-endian u32 UTF-8 length, then bytes |
 | `game_time` | `handle_ptr, handle_len, out_ptr` | Little-endian signed i64 |
 | `day_time` | `handle_ptr, handle_len, out_ptr` | Little-endian signed i64 |
+| `light_at` | `handle_ptr, handle_len, x, y, z, out_ptr, out_capacity` | Stable `Option<LightSnapshot>` in a seven-byte output buffer: presence tag; `Some` appends schema-v1 u32 and sky/block u8 values in 0–15 |
+| `fluid_at` | `query_ptr, query_len, out_ptr, out_capacity` | Bounded schema-v1 `Option<FluidStateSnapshot>`; reads only an already-loaded position |
 | `daylight_cycle_enabled` | `handle_ptr, handle_len, out_ptr, out_capacity` | Stable bool record: schema-v1 u32, bool u8 |
 | `game_rule` | `query_ptr, query_len, out_ptr, out_capacity` | Read an allowlisted boolean gamerule using a 32-byte schema-v1 query and exact 5-byte response; requires `world.read` |
 | `set_game_rule` | `mutation_ptr, mutation_len` | Set an allowlisted boolean gamerule from a 33-byte schema-v1 mutation; requires `world.read` and `world.write` |
@@ -1397,7 +1608,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `set_border_damage` | `handle_ptr, handle_len, values_ptr, values_len` | Set safe buffer and damage rate; status only |
 
 The gamerule IDs are stable values 0–17 from
-[`WorldGameRule`](../sjml-sdk/src/world.rs), covering the boolean
+[`WorldGameRule`](../sjml-cli/sjml-sdk/src/world.rs), covering the boolean
 vanilla rules listed in [world gamerules](WORLD_GAME_RULES.md).
 Reads and writes apply only to the selected already-loaded dimension; integer
 rules are intentionally excluded. The exact request and response layouts are
@@ -1431,6 +1642,22 @@ response must fit in the guest-provided output span or no bytes are written.
 The host enumerates the selected world's biome registry only; it does not query
 or load chunks. It requires `world.read`, a valid loaded-world handle, and the
 logical-server thread. See [biome ID enumeration](WORLD_BIOME_IDS.md).
+`light_at` receives a loaded-world handle and signed block coordinates, and
+writes a stable optional schema-v1 `LightSnapshot` into a seven-byte output
+buffer: `None` is one zero presence byte; `Some` is presence byte `1`, schema
+`u32(1)`, then sky-light and block-light bytes, each in `0..=15`. `None` means
+outside build height or in an unloaded chunk. It
+requires `world.read`, runs on the owning server thread, validates x/z within
+±30,000,000, and never loads a chunk. See [world light levels](WORLD_HEIGHT_LIGHT.md).
+`fluid_at` accepts exactly 44 query bytes: `u32 schema=1`, 24-byte world
+handle, `u32 position schema=1`, and three signed little-endian `i32`
+coordinates. Its response is `u32 schema=1`, presence byte, and when present
+`u32 snapshot schema=1`, length-prefixed canonical fluid ID, amount byte,
+source byte, and finite `f32` intrinsic own-height. The response is capped at
+275 bytes. `None` means outside build height or unloaded chunk; a loaded dry
+block returns the `minecraft:empty` snapshot. The call requires `world.read`,
+runs on the logical-server thread, and never loads a chunk. See
+[world fluid state](FLUID_STATE.md).
 The complete declared capacity is bounds checked. Only the encoded value is
 written; the remaining capacity is padding, not part of its stable encoding.
 Insufficient capacity returns `PAYLOAD_TOO_LARGE` before handle allocation.
@@ -1908,6 +2135,51 @@ break the item. Both imports run on the owning server thread and broadcast the
 change through the player's active menu. Stale handles, empty or
 nondamageable stacks, client/static contexts, and invalid values are rejected.
 
+## Module-owned components on player inventory stacks
+
+Player component reads require `entity.read` and `inventory.read`; writes
+require `entity.read` and `inventory.write`. Both are available only to server
+and `both` modules, run on the owning server thread, and resolve the live player
+session for every call. The component path must identify a type registered by
+the calling module. Empty slots or absent values return `None`; writes require
+a non-empty stack and update only the registered component.
+
+| Import | WebAssembly signature | Capability and behavior |
+| --- | --- | --- |
+| `read_player_integer_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, out_ptr, out_capacity) -> i32` | Requires `entity.read` and `inventory.read`; writes `Option<i32>` as tag `0`, or tag `1` followed by a little-endian `i32`. |
+| `write_player_integer_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, value) -> i32` | Requires `entity.read` and `inventory.write`; the value must fit the registered inclusive bounds. |
+| `read_player_boolean_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, out_ptr, out_capacity) -> i32` | Requires `entity.read` and `inventory.read`; writes `Option<bool>` as tag `0`, or tag `1` followed by byte `0` or `1`. |
+| `write_player_boolean_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, value) -> i32` | Requires `entity.read` and `inventory.write`; value must be `0` or `1`. |
+
+All writes copy the existing stack, preserve unrelated data, and synchronize
+the active menu. See [player inventory components](PLAYER_INVENTORY_COMPONENTS.md)
+and [boolean item components](BOOLEAN_ITEM_COMPONENTS.md).
+
+## Enchantments on player inventory stacks
+
+Enchantment reads require `entity.read` and `inventory.read`; set and remove
+require `entity.read` and `inventory.write`. These synchronous imports are
+available only to server and `both` modules on the owning server thread. Every
+call resolves the enchantment ID through the active world's enchantment
+registry and operates on one non-empty player inventory stack. Unknown IDs,
+empty slots, and IDs over 256 UTF-8 bytes are rejected.
+
+| Import | WebAssembly signature | Capability and behavior |
+| --- | --- | --- |
+| `read_player_enchantment_level` | `(player_ptr, player_len, slot, enchantment_id_ptr, enchantment_id_len, out_ptr, out_capacity) -> i32` | Requires `entity.read` and `inventory.read`; writes `Option<u32>` as byte `0`, or tag `1` followed by a little-endian u32 level. |
+| `set_player_enchantment_level` | `(player_ptr, player_len, slot, enchantment_id_ptr, enchantment_id_len, level) -> i32` | Requires `entity.read` and `inventory.write`; the host checks the registry entry's minimum/maximum, whether the enchantment applies to the item, and conflicts with other enchantments. |
+| `remove_player_enchantment` | `(player_ptr, player_len, slot, enchantment_id_ptr, enchantment_id_len) -> i32` | Requires `entity.read` and `inventory.write`; removes only the named enchantment, and succeeds without mutation if it is already absent. |
+
+IDs must be canonical UTF-8 registry IDs. Set levels are `1..=255` at the
+ABI boundary and must also fit the selected enchantment's registered bounds.
+The host copies the existing stack, updates only its enchantment component,
+marks inventory changed, and synchronizes the active menu. Enchanted books use
+their stored-enchantment component; other items use their normal enchantment
+component. Item identity, count, damage, unrelated components, and all other
+enchantments are preserved. Client-side, static-registration, stale-handle,
+and off-thread calls fail closed. See
+[player inventory enchantments](PLAYER_INVENTORY_ENCHANTMENTS.md).
+
 ## Module-owned string components on inventory items
 
 The `sjml_inventory_v1` component imports operate on one slot and only on
@@ -1954,6 +2226,23 @@ existing item, count, and unrelated components. Both calls are server-thread
 only, reject unloaded chunks instead of loading them, and are unavailable to
 client-side modules. Minecraft's persistent and network codecs enforce the
 same component bounds. See [integer item components](INTEGER_ITEM_COMPONENTS.md).
+
+Boolean components use `register_boolean_component(path)` and
+`set_item_boolean_component(item_path, component_path, value)`. Registration,
+defaults, and runtime access are scoped to the declaring module. Their data
+codec is a strict boolean, and the static default takes an integer ABI value of
+exactly `0` or `1`.
+
+| Import | WebAssembly signature | Capability and behavior |
+| --- | --- | --- |
+| `read_boolean_component` | `(world_ptr, world_len, position_ptr, position_len, side_ptr, side_len, slot, component_path_ptr, component_path_len, out_ptr, out_capacity) -> i32` | Requires `world.read` and `inventory.read`. Writes `Option<bool>` as byte `0`, or tag `1` followed by boolean byte `0` or `1`. |
+| `write_boolean_component` | `(world_ptr, world_len, position_ptr, position_len, slot, component_path_ptr, component_path_len, value) -> i32` | Requires `world.read` and `inventory.write`; value must be `0` or `1`. |
+
+Block reads use an optional sided item handler and return `None` for an absent
+inventory, empty slot, or unset value. Writes require a non-empty slot in an
+already-loaded block `Container`, preserve unrelated stack data, and do not
+load chunks. The calls are server-side and run on the owning server thread.
+See [boolean item components](BOOLEAN_ITEM_COMPONENTS.md).
 
 The `transfer` import requires both `world.read` and `inventory.write` and moves
 items between two loaded block item-handler slots in one host call. Its 15
@@ -2082,3 +2371,88 @@ the full batch, record envelopes, and storage quotas before changing the
 scope. It applies all entries together or none of them, so an invalid record,
 quota failure, or other rejected batch leaves every original record intact.
 See [STORAGE.md](STORAGE.md) for the complete wire and migration contract.
+
+## Module-owned scoreboard teams (NeoForge adapter)
+
+The Rust guest SDK binds the following imports in `sjml_scoreboard_v1`.
+They operate only on the active logical-server scoreboard and require the
+module's `scoreboard.read` or `scoreboard.write` permission as shown:
+
+| Import | Parameters | Permission | Behavior |
+| --- | --- | --- | --- |
+| `team` | `id_ptr, id_len, output_ptr, output_capacity` | `scoreboard.read` | Read the current options of this module's team ID into a bounded snapshot. |
+| `create_team` | `id_ptr, id_len` | `scoreboard.write` | Create an empty team or succeed for the same persisted owner and local ID. |
+| `remove_team` | `id_ptr, id_len` | `scoreboard.write` | Remove only this module's team and its memberships. |
+| `set_team_options` | `id_ptr, id_len, display_ptr, display_len, prefix_ptr, prefix_len, suffix_ptr, suffix_len, color, name_visibility, death_visibility, collision, friendly_fire, see_invisibles` | `scoreboard.write` | Set bounded literal text and validated vanilla options. |
+| `add_player_to_team` | `id_ptr, id_len, uuid_ptr, uuid_len` | `scoreboard.write` | Add an online player that has no foreign team assignment. |
+| `remove_player_from_team` | `id_ptr, id_len, uuid_ptr, uuid_len` | `scoreboard.write` | Remove an online player only from this exact team. |
+
+All pointer/length pairs are strict UTF-8 byte spans. Local team IDs are
+1–64 lowercase ASCII letters, digits, `_`, or `-`, beginning with a letter.
+The host derives a 16-character vanilla-safe name from the exact
+package/module/local-ID tuple and persists the tuple in world SavedData. An
+existing vanilla team or team without an exact owner record is never adopted
+or changed. The saved ownership record contains strings only and is resolved
+again for each operation; teams are accessed and changed on the owner server
+thread. Corrupt ownership data disables team access until the save data is
+repaired rather than weakening the ownership check.
+
+Display name, prefix, and suffix are literal components, bounded individually
+to 128 UTF-8 bytes and 64 Unicode code points, with controls rejected. Display
+name is nonempty; prefix/suffix can be empty. Color is a u32 code in this order:
+`Reset`, `Black`, `DarkBlue`, `DarkGreen`, `DarkAqua`, `DarkRed`, `DarkPurple`,
+`Gold`, `Gray`, `DarkGray`, `Blue`, `Green`, `Aqua`, `Red`, `LightPurple`,
+`Yellow`, `White` (0–16). Name-tag and death-message visibility codes are
+`Always`, `Never`, `HideForOtherTeams`, `HideForOwnTeam` (0–3). Collision codes
+are `Always`, `Never`, `PushOtherTeams`, `PushOwnTeam` (0–3). Boolean options
+must be exactly 0 or 1. Player UUIDs use canonical lowercase 8-4-4-4-12
+hexadecimal spelling; the addressed player must be online. Moving someone
+from vanilla or another module's team is denied.
+
+The `team` response uses schema 1: little-endian u32 schema, then three
+length-prefixed UTF-8 strings (display name, prefix, suffix), then u32 color,
+name-tag visibility, death-message visibility, and collision codes, followed
+by one byte each for friendly fire and friendly-invisible visibility. The
+output buffer is limited to 1,024 bytes and callers initialize unused bytes to
+zero. Unknown schema/enum values, invalid booleans, invalid UTF-8, and trailing
+nonzero bytes are rejected by the SDK decoder. The API does not expose
+`PlayerTeam`, `Scoreboard`, or other Java references to guests.
+
+## Client localization lookup
+
+The `sjml_client_localization_v1.translate` import accepts
+`key_ptr, key_len, output_ptr, output_capacity, output_length_ptr` and returns
+an ABI status code. It requires the `client.localization.read` permission,
+`ExecutionContext.CLIENT`, and the physical client's main thread. Key spans are
+strict UTF-8 and limited to 256 bytes; the returned UTF-8 text is limited to
+4,096 bytes. On success the host writes the number of output bytes as one
+little-endian u32 to `output_length_ptr` and copies exactly those bytes to the
+output span. Static registration and dedicated-server contexts fail closed.
+The result is detached literal text; no language or resource-manager object
+crosses the ABI.
+
+## Loaded-only structure query
+
+`sjml_world_v1.structures_at(query_ptr, query_length, output_ptr,
+output_capacity)` requires `world.read` and the logical server owner thread.
+The schema-v1 query is little-endian `u32(1)`, a 24-byte `WorldHandle`, then a
+schema-v1 `BlockPos` (`u32(1)` and three little-endian `i32` coordinates).
+The response is `u32(1)`, a 0/1 availability byte, a little-endian `u32` count,
+then that many length-prefixed canonical UTF-8 structure registry IDs. IDs are
+lexically sorted, unique, limited to 256 bytes each and 128 total. The host
+examines at most 4,096 structure references. Unavailable position/reference
+chunks produce availability 0; a loaded position with no matching generated
+structure piece produces availability 1 with zero IDs. No chunk is loaded.
+
+## Bonemeal fertilization attempt
+
+The synchronous cancellable
+`sjml_v1_event_block.fertilize_attempt` callback requires both
+`events.subscribe` and `events.cancel`. Its schema-v1 `BlockFertilizeAttempt`
+contains an optional player UUID, dimension ID, `BlockPos`, target block ID,
+fertilizer item ID/count, and whether vanilla considered the target valid.
+Identifiers and payload bounds are documented in
+[block fertilization attempts](BLOCK_FERTILIZE_ATTEMPTS.md). Returning true
+sets the NeoForge `BonemealEvent` unsuccessful and cancels fertilizer use;
+false preserves the event's current result. Guest callbacks are synchronous
+and owner-scoped; canceled events are not dispatched.

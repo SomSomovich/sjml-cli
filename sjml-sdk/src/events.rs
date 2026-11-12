@@ -6,16 +6,22 @@ use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::BlockPos;
 #[cfg(target_arch = "wasm32")]
 use crate::{from_bytes, to_bytes};
-use crate::{ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
+use crate::{Decoder, Encoder, ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
 
-/// Default `server.tick` subscription cadence, in server ticks.
+/// Default server, player, entity, and client tick subscription cadence, in ticks.
 pub const DEFAULT_SERVER_TICK_INTERVAL: u32 = 20;
-/// Maximum supported `server.tick` subscription cadence, in server ticks.
+/// Maximum supported server and client tick subscription cadence, in ticks.
 pub const MAX_SERVER_TICK_INTERVAL: u32 = 1_200;
 /// Maximum item count represented by one `inventory.changed` notification.
 pub const MAX_INVENTORY_CHANGE_COUNT: i32 = 4_096;
 /// Maximum player inventory slot index represented by `inventory.changed`.
 pub const MAX_INVENTORY_CHANGE_SLOT: i32 = 255;
+/// Maximum output stack count represented by one `player.item_crafted` event.
+pub const MAX_CRAFTED_ITEM_COUNT: i32 = 1_000_000;
+/// Maximum detached item snapshots included in one `player.fished_attempt` callback.
+pub const MAX_FISHED_DROPS: usize = 16;
+/// Maximum count represented by one detached `player.fished_attempt` drop.
+pub const MAX_FISHED_ITEM_COUNT: u32 = 1_000_000;
 
 /// Synchronous, non-cancellable snapshot emitted after meaningful logical-server player movement.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -132,8 +138,8 @@ pub struct ClientScreenFormValue {
 /// Synchronous, non-cancellable submit notification for a module-owned client form screen.
 ///
 /// The host emits `client.screen.form_submit` directly only to the owner of the form that received
-/// the click. It includes the clicked button, current bounded text values, and any selected option
-/// IDs from schema-v3 selection lists.
+/// the click. It includes the clicked button, current bounded text values, any selected option ID
+/// from a schema-v3/v4 selection list, and schema-v4 checkbox states as `"true"` or `"false"`.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
 pub struct ClientScreenFormSubmit {
@@ -141,7 +147,7 @@ pub struct ClientScreenFormSubmit {
     pub screen_id: String,
     /// ID of the button clicked on that form.
     pub button_id: String,
-    /// Current values in definition order: text fields followed by selection-list fields.
+    /// Values in definition order: text fields, optional selection-list value, then checkboxes.
     pub fields: Vec<ClientScreenFormValue>,
 }
 
@@ -167,6 +173,85 @@ pub struct PlayerInteractionAttempt {
     pub face: Option<String>,
     /// Target block position for block interactions, when available.
     pub block_position: Option<BlockPos>,
+}
+
+/// Synchronous cancellable attempt to use the item held by a logical-server player.
+///
+/// Subscribe to `player.item_use_attempt` with `events::subscribe` and return `Ok(true)` to veto
+/// the item's use. NeoForge emits this snapshot before `Item::use`, after block and entity
+/// interactions have been ruled out and after any `player.interaction` veto. It contains only
+/// detached identifiers and a bounded count; no live item stack crosses the ABI. The callback
+/// runs on the server thread and requires both `events.subscribe` and `events.cancel`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerItemUseAttempt {
+    /// Canonical UUID string of the player who attempted to use an item.
+    pub player_id: String,
+    /// Resource location of the level where the item-use attempt occurred.
+    pub dimension_id: String,
+    /// `main_hand` or `off_hand`.
+    pub hand: String,
+    /// Registry ID of the item in that hand; an empty hand is `minecraft:air` with count zero.
+    pub item_id: String,
+    /// Stack count in `0..=1_000_000`.
+    pub count: u32,
+}
+
+/// Synchronous use callback for an item declared by the receiving module.
+///
+/// The host routes `item.use` only to the module that declared the item ID in the package's
+/// `package:module/path` namespace. The callback runs on the logical server before vanilla
+/// `Item::use`, after `player.item_use_attempt`; it receives detached identifiers and may return
+/// [`ItemUseAction`] to pass the use through, handle it, or consume exactly one held item. Guest
+/// side effects can use the normal server APIs, with their usual permissions and validation.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ModuleItemUse {
+    /// Canonical UUID string of the player who attempted the use.
+    pub player_id: String,
+    /// Resource location of the level where the use occurred.
+    pub dimension_id: String,
+    /// `main_hand` or `off_hand`.
+    pub hand: String,
+    /// Canonical registry ID of the module-owned item.
+    pub item_id: String,
+    /// Item count in `0..=1_000_000` at the start of the callback.
+    pub count: u32,
+}
+
+/// Server-authoritative outcome of a module-owned item use callback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ItemUseAction {
+    /// Continue with Minecraft's normal item use behavior.
+    Pass,
+    /// Handle the click and return success without changing the held stack.
+    Success,
+    /// Handle the click and consume one item if the original stack is unchanged.
+    ConsumeOne,
+}
+
+impl StableEncode for ItemUseAction {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_u8(match self {
+            Self::Pass => 0,
+            Self::Success => 1,
+            Self::ConsumeOne => 2,
+        })
+    }
+}
+
+impl StableDecode for ItemUseAction {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u8()? {
+            0 => Ok(Self::Pass),
+            1 => Ok(Self::Success),
+            2 => Ok(Self::ConsumeOne),
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("item.use action code {value} is not supported"),
+            )),
+        }
+    }
 }
 
 /// Synchronous cancellable attempt by a logical-server player to sleep at a bed.
@@ -279,6 +364,43 @@ pub struct PlayerDropAttempt {
     pub count: u32,
     /// Whether the whole stack can currently be restored to the player's inventory if vetoed.
     pub can_cancel: bool,
+}
+
+/// One detached item ID and count from a fishing catch, without components or NBT.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct FishedDropSnapshot {
+    /// Canonical registry ID of the caught item.
+    pub item_id: String,
+    /// Item count, bounded to `1..=1_000_000`.
+    pub count: u32,
+}
+
+/// Synchronous cancellable logical-server attempt to collect items from a fishing catch.
+///
+/// Return `Ok(true)` from a `player.fished_attempt` handler to cancel the catch. NeoForge then
+/// gives the player no drops but still applies the event's rod damage. This callback cannot
+/// change drops or rod damage. It receives at most 16 detached item ID/count pairs, no arbitrary
+/// item NBT, and requires both `events.subscribe` and `events.cancel`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerFishedAttempt {
+    /// Canonical UUID string of the player who made the catch.
+    pub player_id: String,
+    /// Resource location of the dimension containing the fishing hook.
+    pub dimension_id: String,
+    /// Fishing-hook X coordinate at the event.
+    pub hook_x: f64,
+    /// Fishing-hook Y coordinate at the event.
+    pub hook_y: f64,
+    /// Fishing-hook Z coordinate at the event.
+    pub hook_z: f64,
+    /// Bounded rod damage requested by NeoForge; the callback cannot change it.
+    pub rod_damage: u32,
+    /// Up to 16 detached item registry IDs and counts, without item components or NBT.
+    pub drops: Vec<FishedDropSnapshot>,
+    /// Whether the event's drop list had more entries than this bounded snapshot includes.
+    pub drops_truncated: bool,
 }
 
 /// Synchronous, non-cancellable snapshot emitted after damage has been applied to a living entity.
@@ -416,6 +538,31 @@ pub struct EntityTargetAttempt {
     pub target_change_type: String,
 }
 
+/// Synchronous, cancellable attempt to spawn an offspring on a logical server.
+///
+/// Subscribe to `entity.breed_attempt` and return `Ok(true)` to suppress the proposed baby. The
+/// event uses only detached parent and child UUIDs, entity type IDs, and the dimension ID; it never
+/// exposes a Minecraft object. It runs once on the server owner thread and requires both
+/// `events.subscribe` and `events.cancel`.
+#[derive(Clone, Debug, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityBreedAttempt {
+    /// Canonical UUID string of the initiating parent.
+    pub parent_a_id: String,
+    /// Registry ID of the initiating parent's entity type.
+    pub parent_a_type_id: String,
+    /// Canonical UUID string of the secondary parent.
+    pub parent_b_id: String,
+    /// Registry ID of the secondary parent's entity type.
+    pub parent_b_type_id: String,
+    /// Canonical UUID string of the proposed offspring.
+    pub child_id: String,
+    /// Registry ID of the proposed offspring's entity type.
+    pub child_type_id: String,
+    /// Resource location of the level where both parents and the child are located.
+    pub dimension_id: String,
+}
+
 /// Synchronous, cancellable server-side projectile impact attempt.
 ///
 /// Return `Ok(true)` from the `entity.projectile_impact_attempt` handler to cancel the impact; the
@@ -493,6 +640,26 @@ pub struct ServerTick {
     pub tick_count: i64,
 }
 
+/// Synchronous, non-cancellable snapshot of a logical-server player tick.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerTick {
+    /// Canonical UUID string of the player whose tick callback was delivered.
+    pub player_id: String,
+    /// Resource location of the level where the player is currently located.
+    pub dimension_id: String,
+    /// Logical server tick count when this callback was delivered.
+    pub tick_count: i64,
+}
+
+/// Synchronous, non-cancellable snapshot of a physical-client tick.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ClientTick {
+    /// Physical client tick count when this callback was delivered.
+    pub tick_count: i64,
+}
+
 /// Synchronous, non-cancellable snapshot of one successful player inventory change.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -506,6 +673,20 @@ pub struct InventoryChanged {
     /// Player inventory slot index when the hook exposes it; otherwise `None`.
     pub slot: Option<i32>,
     /// Number of items successfully added to or removed from the inventory.
+    pub count: i32,
+}
+
+/// Synchronous, non-cancellable snapshot emitted after the player takes a crafting result.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerItemCrafted {
+    /// Canonical UUID string of the player who crafted the result.
+    pub player_id: String,
+    /// Registry ID of the recipe whose inputs matched the crafting matrix.
+    pub recipe_id: String,
+    /// Registry ID of the output item.
+    pub item_id: String,
+    /// Number of output items taken from the crafting result slot.
     pub count: i32,
 }
 
@@ -558,6 +739,51 @@ pub struct BlockBreakAttempt {
     pub y: i32,
     /// Signed block Z coordinate.
     pub z: i32,
+}
+
+/// Synchronous cancellable attempt to grow a block on the logical server.
+///
+/// Return `Ok(true)` from a `block.grow_attempt` handler to set the NeoForge pre-event result to
+/// `DO_NOT_GROW`. Returning false leaves the existing result unchanged, so vanilla's `DEFAULT`
+/// behavior remains in effect and this callback never forces growth. The snapshot contains only
+/// a dimension ID, block position, and block registry ID; it does not expose the block state or a
+/// live Minecraft object. Both `events.subscribe` and `events.cancel` are required.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockGrowAttempt {
+    /// Resource location of the dimension where the block attempted to grow.
+    pub dimension_id: String,
+    /// Position of the block that is attempting to advance its growth state.
+    pub position: BlockPos,
+    /// Registry ID of the current block; state properties such as age are omitted.
+    pub block_id: String,
+}
+
+/// Synchronous cancellable attempt to apply bone meal on the logical server.
+///
+/// Return `Ok(true)` from a `block.fertilize_attempt` handler to cancel the original
+/// NeoForge `BonemealEvent` and report the attempt as unsuccessful. Vanilla then
+/// leaves the fertilizer stack untouched. Returning false preserves the existing
+/// event result. The payload contains detached IDs/counts and a block position;
+/// it does not expose the player, item stack, block state, or level object. Both
+/// `events.subscribe` and `events.cancel` are required.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockFertilizeAttempt {
+    /// UUID of the player who used fertilizer, or `None` for non-player sources.
+    pub player_id: Option<String>,
+    /// Resource location of the dimension where the fertilizer was used.
+    pub dimension_id: String,
+    /// Position of the block that received the fertilizer attempt.
+    pub position: BlockPos,
+    /// Registry ID of the current block; block-state properties are omitted.
+    pub block_id: String,
+    /// Registry ID of the fertilizer item used by the attempt.
+    pub fertilizer_item_id: String,
+    /// Number of items in the detached fertilizer stack, bounded to 0 through 99.
+    pub fertilizer_count: u32,
+    /// Whether Minecraft considered this block a valid bone-meal target.
+    pub valid_target: bool,
 }
 
 /// Synchronous, non-cancellable `block.place` snapshot from the logical server.
@@ -733,6 +959,26 @@ pub struct EffectTickEvent {
     pub tick_interval: u32,
 }
 
+/// Synchronous, non-cancellable snapshot of one loaded non-player entity tick.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityTick {
+    /// Canonical lowercase UUID of the entity.
+    pub entity_id: String,
+    /// Registry ID of the entity type.
+    pub entity_type_id: String,
+    /// Registry ID of the dimension containing the entity.
+    pub dimension_id: String,
+    /// Entity X coordinate after this entity tick.
+    pub x: f64,
+    /// Entity Y coordinate after this entity tick.
+    pub y: f64,
+    /// Entity Z coordinate after this entity tick.
+    pub z: f64,
+    /// Number of entity ticks since this entity instance was created or loaded.
+    pub tick_count: i64,
+}
+
 /// Callback order for handlers subscribed to the same synchronous event.
 /// Lower order values run first; equal priorities retain subscription order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -768,8 +1014,8 @@ extern "C" {
 }
 
 /// Registers this module's `#[event(name = "...")]` or `#[event_async(name = "...")]`
-/// callback and returns its scoped handle. A plain `server.tick` subscription
-/// runs every 20 server ticks; use [`subscribe_with_interval`] to choose a cadence.
+/// callback and returns its scoped handle. Plain server, player, entity, and client tick
+/// subscriptions run every 20 ticks; use [`subscribe_with_interval`] to choose a cadence.
 ///
 /// Cancellable event handlers run synchronously on the owning game thread so their result can
 /// affect the original NeoForge event. Use `#[event_async]` for non-cancellable notifications.
@@ -786,23 +1032,27 @@ pub fn subscribe(event_name: &str, priority: EventPriority) -> SjmlResult<EventS
     }
 }
 
-/// Registers a `server.tick` callback at the requested cadence (1–1,200 ticks).
+/// Registers a server, player, entity, or client tick callback at the requested cadence
+/// (1–1,200 ticks).
 pub fn subscribe_with_interval(
     event_name: &str,
     priority: EventPriority,
     interval_ticks: u32,
 ) -> SjmlResult<EventSubscriptionHandle> {
     validate_event_name(event_name)?;
-    if event_name != "server.tick" {
+    if !matches!(
+        event_name,
+        "server.tick" | "player.tick" | "entity.tick" | "client.tick"
+    ) {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "interval subscriptions are only supported for server.tick",
+            "interval subscriptions are only supported for server.tick, player.tick, entity.tick and client.tick",
         ));
     }
     if !(1..=MAX_SERVER_TICK_INTERVAL).contains(&interval_ticks) {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "server.tick interval must be between 1 and 1200 ticks",
+            "tick event interval must be between 1 and 1200 ticks",
         ));
     }
     #[cfg(target_arch = "wasm32")]
@@ -922,14 +1172,17 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
-        BlockPlaceAttempt, ClientChatSendAttempt, ClientItemTooltip, EffectTickEvent,
+        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
+        BlockFertilizeAttempt, BlockGrowAttempt, BlockPlace, BlockPlaceAttempt,
+        ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
         EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
         EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
-        EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged, ItemTooltipLines,
-        PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerMoved, PlayerRespawned, PlayerSleepAttempt, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleItemUse, PlayerAdvancementEarned,
+        PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt,
+        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -1099,6 +1352,82 @@ mod tests {
         let decoded: BlockBreakAttempt = from_bytes(&encoded).unwrap();
 
         assert_eq!(decoded, attempt);
+    }
+
+    #[test]
+    fn block_grow_attempt_matches_host_schema_v1_bytes() {
+        let event = BlockGrowAttempt {
+            dimension_id: "minecraft:overworld".to_owned(),
+            position: BlockPos {
+                x: -4,
+                y: 72,
+                z: 19,
+            },
+            block_id: "minecraft:wheat".to_owned(),
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&event.position.x.to_le_bytes());
+        expected.extend_from_slice(&event.position.y.to_le_bytes());
+        expected.extend_from_slice(&event.position.z.to_le_bytes());
+        append_test_string(&mut expected, &event.block_id);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<BlockGrowAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn block_fertilize_attempt_matches_host_schema_v1_bytes() {
+        let event = BlockFertilizeAttempt {
+            player_id: Some("00000000-0000-0000-0000-000000000001".to_owned()),
+            dimension_id: "minecraft:overworld".to_owned(),
+            position: BlockPos {
+                x: -4,
+                y: 72,
+                z: 19,
+            },
+            block_id: "minecraft:wheat".to_owned(),
+            fertilizer_item_id: "minecraft:bone_meal".to_owned(),
+            fertilizer_count: 3,
+            valid_target: true,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        expected.push(1);
+        append_test_string(&mut expected, event.player_id.as_deref().unwrap());
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&event.position.x.to_le_bytes());
+        expected.extend_from_slice(&event.position.y.to_le_bytes());
+        expected.extend_from_slice(&event.position.z.to_le_bytes());
+        append_test_string(&mut expected, &event.block_id);
+        append_test_string(&mut expected, &event.fertilizer_item_id);
+        expected.extend_from_slice(&event.fertilizer_count.to_le_bytes());
+        expected.push(1);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<BlockFertilizeAttempt>(&encoded).unwrap(),
+            event
+        );
+
+        let dispenser = BlockFertilizeAttempt {
+            player_id: None,
+            valid_target: false,
+            ..event
+        };
+        let encoded = to_bytes(&dispenser).unwrap();
+        assert_eq!(encoded[4], 0, "non-player attempts encode a missing actor");
+        assert_eq!(
+            from_bytes::<BlockFertilizeAttempt>(&encoded).unwrap(),
+            dispenser
+        );
     }
 
     #[test]
@@ -1397,6 +1726,33 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_entity_breed_attempt_matches_host_schema_v1_bytes() {
+        let event = EntityBreedAttempt {
+            parent_a_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            parent_a_type_id: "minecraft:cow".to_owned(),
+            parent_b_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            parent_b_type_id: "minecraft:cow".to_owned(),
+            child_id: "00000000-0000-0000-0000-000000000003".to_owned(),
+            child_type_id: "minecraft:cow".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.parent_a_id);
+        append_test_string(&mut expected, &event.parent_a_type_id);
+        append_test_string(&mut expected, &event.parent_b_id);
+        append_test_string(&mut expected, &event.parent_b_type_id);
+        append_test_string(&mut expected, &event.child_id);
+        append_test_string(&mut expected, &event.child_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<EntityBreedAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
     fn cancellable_projectile_impact_attempt_matches_host_schema_v1_for_both_hit_kinds() {
         let entity_impact = ProjectileImpactAttempt {
             projectile_id: "00000000-0000-0000-0000-000000000001".to_owned(),
@@ -1583,6 +1939,21 @@ mod tests {
     }
 
     #[test]
+    fn entity_tick_snapshot_round_trips_detached_identity_and_position() {
+        let event = EntityTick {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            tick_count: 1234,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(from_bytes::<EntityTick>(&encoded).unwrap(), event);
+    }
+
+    #[test]
     fn player_interaction_snapshot_round_trips_optional_target_details() {
         let event = PlayerInteracted {
             player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
@@ -1723,6 +2094,111 @@ mod tests {
     }
 
     #[test]
+    fn player_fished_attempt_matches_host_schema_v1_and_snapshots_only_bounded_drop_ids() {
+        let attempt = PlayerFishedAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            hook_x: 4.25,
+            hook_y: 65.0,
+            hook_z: -2.5,
+            rod_damage: 3,
+            drops: vec![
+                FishedDropSnapshot {
+                    item_id: "minecraft:cod".to_owned(),
+                    count: 2,
+                },
+                FishedDropSnapshot {
+                    item_id: "minecraft:bone".to_owned(),
+                    count: 1,
+                },
+            ],
+            drops_truncated: false,
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &attempt.player_id);
+        append_test_string(&mut expected, &attempt.dimension_id);
+        expected.extend_from_slice(&attempt.hook_x.to_le_bytes());
+        expected.extend_from_slice(&attempt.hook_y.to_le_bytes());
+        expected.extend_from_slice(&attempt.hook_z.to_le_bytes());
+        expected.extend_from_slice(&attempt.rod_damage.to_le_bytes());
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        for drop in &attempt.drops {
+            expected.extend_from_slice(&1_u32.to_le_bytes());
+            append_test_string(&mut expected, &drop.item_id);
+            expected.extend_from_slice(&drop.count.to_le_bytes());
+        }
+        expected.push(0);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<PlayerFishedAttempt>(&encoded).unwrap(),
+            attempt
+        );
+    }
+
+    #[test]
+    fn player_item_use_attempt_round_trips_detached_item_snapshot() {
+        let attempt = PlayerItemUseAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            hand: "off_hand".to_owned(),
+            item_id: "minecraft:ender_pearl".to_owned(),
+            count: 3,
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &attempt.player_id);
+        append_test_string(&mut expected, &attempt.dimension_id);
+        append_test_string(&mut expected, &attempt.hand);
+        append_test_string(&mut expected, &attempt.item_id);
+        expected.extend_from_slice(&3_i32.to_le_bytes());
+        assert_eq!(encoded, expected);
+        assert_eq!(
+            from_bytes::<PlayerItemUseAttempt>(&encoded).unwrap(),
+            attempt
+        );
+
+        let empty_hand = PlayerItemUseAttempt {
+            hand: "main_hand".to_owned(),
+            item_id: "minecraft:air".to_owned(),
+            count: 0,
+            ..attempt
+        };
+        let encoded = to_bytes(&empty_hand).unwrap();
+        assert_eq!(
+            from_bytes::<PlayerItemUseAttempt>(&encoded).unwrap(),
+            empty_hand
+        );
+    }
+
+    #[test]
+    fn module_item_use_round_trips_owned_item_action() {
+        let attempt = ModuleItemUse {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            hand: "main_hand".to_owned(),
+            item_id: "sjml_game_test:content/gametest_ruby".to_owned(),
+            count: 3,
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        assert_eq!(from_bytes::<ModuleItemUse>(&encoded).unwrap(), attempt);
+        for action in [
+            ItemUseAction::Pass,
+            ItemUseAction::Success,
+            ItemUseAction::ConsumeOne,
+        ] {
+            assert_eq!(
+                from_bytes::<ItemUseAction>(&to_bytes(&action).unwrap()).unwrap(),
+                action
+            );
+        }
+        assert!(from_bytes::<ItemUseAction>(&[3]).is_err());
+    }
+
+    #[test]
     fn entity_damaged_snapshot_round_trips_optional_source_and_applied_damage() {
         let event = EntityDamaged {
             entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
@@ -1758,6 +2234,24 @@ mod tests {
     }
 
     #[test]
+    fn player_tick_snapshot_round_trips_its_player_dimension_and_tick_count() {
+        let event = PlayerTick {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:the_nether".to_owned(),
+            tick_count: 1234,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(from_bytes::<PlayerTick>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn client_tick_snapshot_round_trips_its_tick_count() {
+        let event = ClientTick { tick_count: 1234 };
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(from_bytes::<ClientTick>(&encoded).unwrap(), event);
+    }
+
+    #[test]
     fn resource_reload_snapshot_round_trips_its_committed_server_tick() {
         let event = ResourcesReloaded { tick_count: 1234 };
         let encoded = to_bytes(&event).unwrap();
@@ -1788,6 +2282,18 @@ mod tests {
     }
 
     #[test]
+    fn player_item_crafted_snapshot_round_trips_recipe_and_bounded_result_data() {
+        let event = PlayerItemCrafted {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            recipe_id: "minecraft:oak_planks".to_owned(),
+            item_id: "minecraft:oak_planks".to_owned(),
+            count: 4,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(from_bytes::<PlayerItemCrafted>(&encoded).unwrap(), event);
+    }
+
+    #[test]
     fn event_priority_values_match_the_stable_host_order() {
         assert_eq!(EventPriority::Highest as i32, 0);
         assert_eq!(EventPriority::High as i32, 1);
@@ -1801,6 +2307,18 @@ mod tests {
     fn native_event_subscription_reports_unsupported_host_imports() {
         assert_eq!(
             subscribe("player.joined", EventPriority::Normal)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe("player.tick", EventPriority::Normal)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe("client.tick", EventPriority::Normal)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode
@@ -1839,6 +2357,92 @@ mod tests {
         );
         assert_eq!(
             subscribe_with_interval("server.tick", EventPriority::Normal, 20)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("player.tick", EventPriority::Normal, 20)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("player.tick", EventPriority::Normal, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("player.tick", EventPriority::Normal, 1_200)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("entity.tick", EventPriority::Normal, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("entity.tick", EventPriority::Normal, 1_200)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("entity.tick", EventPriority::Normal, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            subscribe_with_interval("player.tick", EventPriority::Normal, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            subscribe_with_interval(
+                "player.tick",
+                EventPriority::Normal,
+                MAX_SERVER_TICK_INTERVAL + 1
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            subscribe_with_interval("client.tick", EventPriority::Normal, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            subscribe_with_interval(
+                "client.tick",
+                EventPriority::Normal,
+                MAX_SERVER_TICK_INTERVAL + 1
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            subscribe_with_interval("client.tick", EventPriority::Normal, 20)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("client.tick", EventPriority::Normal, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("client.tick", EventPriority::Normal, 1_200)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

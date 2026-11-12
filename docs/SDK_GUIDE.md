@@ -25,7 +25,13 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes SDK 0.66.0 and core ABI 1.58.0.
+unverified. This guide describes SDK 0.73.0 and core ABI 1.65.0.
+SDK 0.73.0 adds loaded-only block and item tag membership queries alongside loaded-only structure queries,
+active-client localization lookup, cancellable bonemeal attempts, command/content APIs, sound and music controls,
+scoreboard teams, and cancellable breeding, crop-growth, and fishing attempts. Focused
+Java/Rust coverage and dedicated-server GameTests for the current additions are recorded
+in the coverage matrix. See [block tag membership](WORLD_BLOCK_TAGS.md) and
+[item tag membership](WORLD_ITEM_TAGS.md).
 Save-scoped storage uses the current server save. Physical-client modules also
 have a separate `ClientProfile` scope backed by per-mod local configuration
 files; they cannot access server save scopes.
@@ -47,9 +53,18 @@ fields, buttons, and outside the viewport is not consumed.
 For one-choice forms, `open_list_form` adds a scrollable local option list. It
 does not call the guest while the user scrolls or changes selection; submission
 returns the selected ID with the text values through the same owner-only form
-callback.
+callback. `open_settings_form` adds one to four checkboxes to zero to four text
+fields and an optional list; its owner-only form callback returns checkbox
+values as `"true"` or `"false"` after the text and optional list values. The
+schema-v4 settings form is additive and preserves earlier screen payloads.
 See [interactive client screens](CLIENT_SCREEN.md) for a complete command-driven
 example.
+
+Client modules can use `client_camera::set_fov_scale` and
+`client_camera::clear_fov_scale` under the `client.camera.fov` grant. Each
+module sets one persistent local multiplier in `0.25..=4.0`; the host combines
+module values with Minecraft's existing FOV calculation. See
+[client camera controls](CLIENT_CAMERA.md).
 
 SDK 0.43.0 includes `client_chat::{subscribe, layout, set_layout, theme, set_theme,
 unsubscribe}` with typed `ChatLayout`, `ChatLayoutHandle`, `ChatScreenEvent`,
@@ -97,7 +112,7 @@ require `world.read` and its setters also require `world.write`. See
 [client-local audio](CLIENT_AUDIO.md), and [world border](WORLD_BORDER.md).
 
 SDK 0.47.0 adds global mouse-wheel subscriptions, detached player-inventory
-snapshots, live read/write access to six allowlisted vanilla entity attributes,
+snapshots, live read/write access to 31 bounded built-in vanilla entity attributes,
 and loaded block-state property snapshots. These use `client.input`,
 `entity.read` with `inventory.read`, `entity.read` with
 `entity.attributes.write`, and `world.read`, respectively. See
@@ -135,6 +150,13 @@ See [scheduled block ticks](WORLD_SCHEDULED_TICKS.md),
 [effect removal](ENTITY_EFFECT_REMOVAL.md),
 [player interaction vetoes](PLAYER_INTERACTIONS.md), and
 [cursor position](CURSOR_POSITION.md).
+
+Physical-client held-state polling is available through
+`client_input::is_key_down(key_code)` for GLFW key codes `0..=348` and
+`client_input::is_mouse_button_down(button)` for mouse buttons `0..=7`. Both
+require `client.input.observe`, run on the client main thread, and only read
+current state without consuming or changing input. See
+[client key events](CLIENT_KEY_EVENTS.md).
 
 SDK 0.51.0 adds bounded durability updates to existing player inventory stacks,
 already-loaded chunk enumeration, nearest loaded-entity raycasts, synchronous
@@ -228,6 +250,23 @@ in the same owner-only `ClientScreenFormSubmit`; schema-v1 screens and schema-v2
 text forms keep their existing payloads. See
 [interactive client screens](CLIENT_SCREEN.md).
 
+SDK 0.67.0 adds schema-v4 checkbox settings forms, module-owned boolean item
+components, detached fluid-state snapshots, persistent local FOV scaling, and
+`PlayerTick` / `ClientTick` event payloads. The manifest also accepts optional
+per-channel `messages_per_second` and `burst` token-bucket limits. Existing
+screen schemas and network payload formats remain compatible. See
+[interactive client screens](CLIENT_SCREEN.md), [boolean item components](BOOLEAN_ITEM_COMPONENTS.md),
+[world fluid state](FLUID_STATE.md), [client camera controls](CLIENT_CAMERA.md),
+[player tick](PLAYER_TICK_EVENT.md), and [client tick](CLIENT_TICK_EVENT.md).
+
+Checkbox settings forms use `client_screen::open_settings_form` with schema v4:
+they allow zero to four text fields, an optional selection list, and one to four
+checkboxes. The `client.screen.form_submit` callback reports values in that
+order, with checkbox states encoded as `"true"` or `"false"`. Earlier screen
+schemas retain their existing payloads. See
+[interactive client screens](CLIENT_SCREEN.md) for the constructor, bounds, and
+command example.
+
 SDK 0.59.0 adds advancement control and vanilla custom-stat access, server difficulty and Overworld spawn-point control, cancellable entity heal/effect/join attempts, bounded block-inventory naming and transfers, registered food-consumption effects, independent model-axis animation, and client GUI-layer suppression. Each operation uses dedicated capabilities and validation; server mutations run on the owning server thread, while GUI-layer suppression is client-only. See the guides for [advancements](PLAYER_ADVANCEMENTS.md), [statistics](PLAYER_STATISTICS.md), [world difficulty](WORLD_DIFFICULTY.md), [spawn points](WORLD_SPAWN_POINT.md), [entity events](ENTITY_HEAL_ATTEMPTS.md), [inventory names](BLOCK_INVENTORY_ITEM_NAMES.md), [inventory transfers](BLOCK_INVENTORY_MOVE.md), [food effects](ITEM_FOOD_EFFECTS.md), [model animation](MODEL_ANIMATIONS.md), and [GUI-layer suppression](GUI_LAYER_SUPPRESSION.md).
 
 SDK 0.58.0 adds vanilla maximum durability for registered standalone items, player item-cooldown reads/writes, earned-advancement notifications, and synchronous cancellable explosion-start attempts. Durability declarations require `content.register` and a same-module item declared with stack size one. Cooldown reads require `entity.read`; setting and clearing a cooldown also require `player.cooldown.write` and are bounded to 1–72,000 ticks. Advancement notifications require `events.subscribe`; explosion vetoes require `events.subscribe` and `events.cancel` and run before explosion effects. See [item durability](ITEM_DURABILITY.md), [player item cooldowns](PLAYER_COOLDOWNS.md), and [gameplay events](GAMEPLAY_EVENTS.md).
@@ -305,8 +344,26 @@ does not bypass or replace the incoming display filter.
 resource through the local client's `SoundManager`; it requires
 `client.audio.play`. Sound categories match vanilla controls, volume is 0–4,
 pitch is 0.5–2, and each module is limited to five calls per two seconds. The
-API sends no network packet. Audio output has not been verified in a
-display-backed client. See [client-local audio](CLIENT_AUDIO.md).
+API sends no network packet. `client_audio::play_tracked` returns a
+`TrackedSoundHandle`, which `stop_tracked` can use to stop that exact playback;
+`fade_tracked` ramps that exact active instance to a bounded target volume over
+1–1,200 client ticks, enabling fade-in from zero or fade-out to zero. Runtime
+teardown and client disconnect stop remaining owned sounds. See
+[client-local audio](CLIENT_AUDIO.md).
+
+Modules can also use `client_music::subscribe_music_selection` to select or
+stop situational music from a synchronous `#[client_music_selection]`
+callback. It requires `client.audio.music`; replacements are restricted to
+sound events registered by that exact module. The detached callback input
+contains the original selector and current music IDs, original delay bounds,
+and the replacement flag. See [client music selection](CLIENT_MUSIC.md) for
+the callback contract and a display-backed manual check.
+
+`client_localization::translate(key)` resolves one key against Minecraft's
+currently active language, including package-owned `assets/<package-id>/lang`
+resources after reload. It requires `client.localization.read` and the client
+main thread; it returns a bounded detached string and falls back to the key
+when Minecraft has no translation. See [client localization](CLIENT_LOCALIZATION.md).
 
 ## Target and build
 
@@ -340,7 +397,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.66.0"
+sjml-sdk = "0.73.0"
 ```
 
 For development against this checkout, use
@@ -353,42 +410,47 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.66.0/sjml/). The exact
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.73.0/sjml/). The exact
 function signatures and public types there are the reference for Rust callers.
 
 | Module | Main API |
 | --- | --- |
-| [`abi`](https://docs.rs/sjml-sdk/0.66.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
-| [`batch`](https://docs.rs/sjml-sdk/0.66.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
-| [`block_entity`](https://docs.rs/sjml-sdk/0.66.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
-| [`client_chat`](https://docs.rs/sjml-sdk/0.66.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
-| [`client_input`](https://docs.rs/sjml-sdk/0.66.0/sjml/client_input/) | Observe-only global key notices, mouse-button and wheel events, bounded cursor position, and key subscription handles. |
-| [`client_keybindings`](https://docs.rs/sjml-sdk/0.66.0/sjml/client_keybindings/) | Named client key mappings with bounded callbacks and Controls-screen rebinding. |
-| [`chat_messages`](https://docs.rs/sjml-sdk/0.66.0/sjml/chat_messages/) | Local chat-message snapshots, separately capability-gated filtering, and rich local replacements. |
-| [`client_notifications`](https://docs.rs/sjml-sdk/0.66.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
-| [`client_screen`](CLIENT_SCREEN.md) | Client-only vanilla screens with literal text, up to four buttons, bounded text fields, and one scrollable choice list; callbacks go only to the owning module. |
-| [`client_audio`](https://docs.rs/sjml-sdk/0.66.0/sjml/client_audio/) | Bounded client-local one-shot playback and module-owned looping sounds through Minecraft's sound manager. |
-| [`entity`](https://docs.rs/sjml-sdk/0.66.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, spatial queries, bounded raycasts, custom names, active-effect snapshots, fire ticks, glowing/silent flags, and Mob AI toggles; effect apply/removal, discard, and generic damage. |
-| [`entity_attributes`](https://docs.rs/sjml-sdk/0.66.0/sjml/entity_attributes/) | Bounded reads and base-value writes for selected vanilla living-entity and server-player attributes. |
-| [`entity_data`](https://docs.rs/sjml-sdk/0.66.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.66.0/sjml/events/) | Typed lifecycle, world, player movement/interaction/drop/respawn/advancement/sleep, client outgoing-chat veto and item-tooltip callbacks, cancellable block break/place/projectile-impact/explosion and entity attempts, inventory, and resource events. This includes cancellable entity heal, effect-application, and join-attempt events. |
-| [`gl`](https://docs.rs/sjml-sdk/0.66.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
-| [`host`](https://docs.rs/sjml-sdk/0.66.0/sjml/host/) | ABI version query and host logging. |
-| [`inventory`](https://docs.rs/sjml-sdk/0.66.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, component updates, and slot-to-slot transfers. Block inventories also support literal item-stack custom names and preflighted moves of existing items. |
-| [`player_inventory`](https://docs.rs/sjml-sdk/0.66.0/sjml/player_inventory/) | Detached inventory snapshots, bounded slot set/clear, durability changes, custom names, and same-module integer-component reads/writes on existing stacks. |
-| [`menu`](https://docs.rs/sjml-sdk/0.66.0/sjml/menu/) | Bounded read-only menus with owner-scoped replacement and action callbacks, plus editable menus with allowlisted slots and bounded transfers of existing items. |
-| [`network`](https://docs.rs/sjml-sdk/0.66.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
-| [`scoreboard`](https://docs.rs/sjml-sdk/0.66.0/sjml/scoreboard/) | Bounded reads and writes to entries in existing vanilla objectives. |
-| [`player`](https://docs.rs/sjml-sdk/0.66.0/sjml/player/) | Online player handles, detached snapshots, selected-hotbar-slot control, respawn-point control, equipment, abilities, vitals, game mode, motion, effects, item cooldowns, same- and cross-dimension teleport, action-bar messages, and bounded titles/subtitles. Server-side advancement control and typed vanilla custom-stat access are also available. |
-| [`recipe`](https://docs.rs/sjml-sdk/0.66.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
-| [`registry`](https://docs.rs/sjml-sdk/0.66.0/sjml/registry/) | Static item food, rarity, enchantment, and maximum-durability properties plus item, block, entity, fluid, recipe, villager-trade, and related declarations. Registered food can apply bounded status effects when consumed. |
-| [`render`](https://docs.rs/sjml-sdk/0.66.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. The module also supports independent X/Y/Z model tracks and exact client GUI-layer suppression. |
-| [`screen_input`](https://docs.rs/sjml-sdk/0.66.0/sjml/screen_input/) | Bounded mouse, key, text, and opt-in scroll events delivered to the active screen, with synchronous active-screen key veto callbacks. |
-| [`storage`](https://docs.rs/sjml-sdk/0.66.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
-| [`task`](https://docs.rs/sjml-sdk/0.66.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
-| [`widgets`](https://docs.rs/sjml-sdk/0.66.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
-| [`world`](https://docs.rs/sjml-sdk/0.66.0/sjml/world/) | Loaded-world handles and chunk enumeration, block snapshots/properties, redstone neighbor-signal reads, bounded updates/ticks, weather, borders, day-time and shared game-time, and boolean/integer gamerules. This module also exposes server difficulty and saved Overworld spawn-point control. |
-| [`prelude`](https://docs.rs/sjml-sdk/0.66.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
+| [`abi`](https://docs.rs/sjml-sdk/0.73.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
+| [`batch`](https://docs.rs/sjml-sdk/0.73.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
+| [`block_entity`](https://docs.rs/sjml-sdk/0.73.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
+| [`client_chat`](https://docs.rs/sjml-sdk/0.73.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
+| [`client_camera`](https://docs.rs/sjml-sdk/0.73.0/sjml/client_camera/) | Module-owned local FOV multipliers applied to Minecraft's computed modifier. |
+| [`client_localization`](https://docs.rs/sjml-sdk/0.73.0/sjml/client_localization/) | Bounded physical-client lookup through the active Minecraft language resources. |
+| [`client_music`](https://docs.rs/sjml-sdk/0.73.0/sjml/client_music/) | Owner-scoped callbacks that keep, stop, or select same-module registered situational music. |
+| [`client_input`](https://docs.rs/sjml-sdk/0.73.0/sjml/client_input/) | Observe-only global key notices, mouse-button and wheel events, bounded cursor position, held key/mouse polling, and key subscription handles. |
+| [`client_keybindings`](https://docs.rs/sjml-sdk/0.73.0/sjml/client_keybindings/) | Named client key mappings with bounded callbacks and Controls-screen rebinding. |
+| [`chat_messages`](https://docs.rs/sjml-sdk/0.73.0/sjml/chat_messages/) | Local chat-message snapshots, separately capability-gated filtering, and rich local replacements. |
+| [`client_notifications`](https://docs.rs/sjml-sdk/0.73.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
+| [`command_suggestions`](https://docs.rs/sjml-sdk/0.73.0/sjml/command_suggestions/) | Typed bounded input/output for synchronous server Brigadier suggestions. |
+| [`client_screen`](CLIENT_SCREEN.md) | Client-only vanilla screens with literal text, up to four buttons, bounded text fields, one scrollable choice list, and checkbox settings forms; callbacks go only to the owning module. |
+| [`client_audio`](https://docs.rs/sjml-sdk/0.73.0/sjml/client_audio/) | Bounded client-local one-shot playback, stoppable one-shot handles, and module-owned looping sounds through Minecraft's sound manager, bounded exact-handle fades, and owner-checked situational music selection. |
+| [`client_music`](CLIENT_MUSIC.md) | Synchronous physical-client selection or stopping of situational music, with module-owned replacement sounds and bounded delays. |
+| [`entity`](https://docs.rs/sjml-sdk/0.73.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, spatial queries, bounded raycasts, custom names, active-effect snapshots, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |
+| [`entity_attributes`](https://docs.rs/sjml-sdk/0.73.0/sjml/entity_attributes/) | Bounded reads and base-value writes for 31 built-in vanilla living-entity and server-player attributes. |
+| [`entity_data`](https://docs.rs/sjml-sdk/0.73.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
+| [`events`](https://docs.rs/sjml-sdk/0.73.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/fishing/respawn/advancement/sleep, client outgoing-chat veto and item-tooltip callbacks, cancellable block break/place/grow/fertilization, entity breed/damage/death/target/projectile-impact, player fishing, outgoing-chat, drop/sleep/item-use, and world-explosion attempts, plus crafting, inventory, and resource events. |
+| [`gl`](https://docs.rs/sjml-sdk/0.73.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
+| [`host`](https://docs.rs/sjml-sdk/0.73.0/sjml/host/) | ABI version query and host logging. |
+| [`inventory`](https://docs.rs/sjml-sdk/0.73.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, integer and boolean component updates, and slot-to-slot transfers. Block inventories also support literal item-stack custom names and preflighted moves of existing items. |
+| [`player_inventory`](https://docs.rs/sjml-sdk/0.73.0/sjml/player_inventory/) | Detached inventory snapshots, bounded slot set/clear, durability changes, custom names, and same-module integer/boolean component reads and writes plus bounded enchantment reads/writes/removal on existing stacks. |
+| [`menu`](https://docs.rs/sjml-sdk/0.73.0/sjml/menu/) | Bounded read-only menus with owner-scoped replacement and action callbacks, plus editable menus with allowlisted slots and bounded transfers of existing items. |
+| [`network`](https://docs.rs/sjml-sdk/0.73.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
+| [`scoreboard`](https://docs.rs/sjml-sdk/0.73.0/sjml/scoreboard/) | Bounded reads and writes to existing vanilla objectives plus owner-scoped teams, display options, prefixes/suffixes, and online-player membership. |
+| [`player`](https://docs.rs/sjml-sdk/0.73.0/sjml/player/) | Online player handles, detached snapshots, selected-hotbar-slot control, respawn-point control, equipment, abilities, vitals, game mode, motion, effects, item cooldowns, same- and cross-dimension teleport, action-bar messages, and bounded titles/subtitles. Server-side advancement control and typed vanilla custom-stat access are also available. |
+| [`recipe`](https://docs.rs/sjml-sdk/0.73.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
+| [`registry`](https://docs.rs/sjml-sdk/0.73.0/sjml/registry/) | Static item food, rarity, enchantment, and maximum-durability properties plus item, block, entity, fluid, recipe, brewing, potion, villager-trade, and related declarations. Registered food can apply bounded status effects when consumed. |
+| [`render`](https://docs.rs/sjml-sdk/0.73.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, cropped package sprite regions, and model drawing. The module also supports independent X/Y/Z model tracks and exact client GUI-layer suppression. |
+| [`screen_input`](https://docs.rs/sjml-sdk/0.73.0/sjml/screen_input/) | Bounded mouse, key, text, and opt-in scroll events delivered to the active screen, with synchronous active-screen key veto callbacks. |
+| [`storage`](https://docs.rs/sjml-sdk/0.73.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
+| [`task`](https://docs.rs/sjml-sdk/0.73.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
+| [`widgets`](https://docs.rs/sjml-sdk/0.73.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
+| [`world`](https://docs.rs/sjml-sdk/0.73.0/sjml/world/) | Loaded-world handles and chunk enumeration, block snapshots/properties, light/fluid/biome reads, redstone neighbor-signal reads, loaded-only neighbor updates, structure queries, and block/item tag membership checks, bounded updates/ticks, weather, borders, day-time and shared game-time, and boolean/integer gamerules. This module also exposes server difficulty and saved Overworld spawn-point control. |
+| [`prelude`](https://docs.rs/sjml-sdk/0.73.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
 
 Stable codecs (`StableEncode`, `StableDecode`, `Encoder`, and `Decoder`) are
 re-exported at the crate root; the implementation module is intentionally
@@ -434,6 +496,8 @@ fn initialize() -> SjmlResult<()> {
     let _world_loaded = events::subscribe("world.loaded", EventPriority::Normal)?;
     let _world_unloaded = events::subscribe("world.unloaded", EventPriority::Normal)?;
     let _server_tick = events::subscribe_with_interval("server.tick", EventPriority::Normal, 20)?;
+    let _player_tick = events::subscribe_with_interval("player.tick", EventPriority::Normal, 20)?;
+    let _entity_tick = events::subscribe_with_interval("entity.tick", EventPriority::Normal, 20)?;
     let _inventory_changed = events::subscribe("inventory.changed", EventPriority::Normal)?;
     let _resources_reloaded = events::subscribe("resources.reloaded", EventPriority::Normal)?;
     Ok(())
@@ -623,8 +687,8 @@ record field order. Supported types are `word`, `string`, `greedy_string`,
 `max` bounds; absent bounds use the corresponding full `i32` limit.
 `greedy_string` must be the final argument. Each string is limited to 64 KiB
 of UTF-8 and the complete callback input to 1 MiB. A module can declare at
-most 64 commands with at most 16 arguments each; the host stages at most
-8,192 commands across all packages.
+most 128 combined server and client commands with at most 16 arguments each;
+the host stages at most 8,192 commands across all packages.
 
 The module must request `content.register`, and the administrator must grant
 it in `config/sjml-permissions.toml`. A command runs at
@@ -652,20 +716,75 @@ require the local `client.command` grant. They do not dispatch server commands
 or modify server state. See [client command declarations](CLIENT_COMMANDS.md)
 for the argument and callback contract.
 
+### Dynamic server-command suggestions
+
+Server arguments can opt into guest-provided tab completion by setting
+`suggestions = true` on an argument. The module must request and receive both
+`content.register` and `command.suggest`; the command's normal Brigadier
+`permission_level` is also checked before a suggestion callback runs. The
+callback is synchronous on the logical server thread, so keep it short. One
+callback is shared by every suggested argument in that command and receives
+the argument index/name, unfinished text, invoking player UUID when available,
+and the earlier parsed arguments:
+
+```toml
+[[modules.commands]]
+name = "players.teleport"
+schema_version = 1
+permission_level = 2
+
+[[modules.commands.arguments]]
+name = "dimension"
+type = "word"
+
+[[modules.commands.arguments]]
+name = "player"
+type = "word"
+suggestions = true
+```
+
+```rust
+use sjml::prelude::*;
+
+#[command_suggestions(name = "players.teleport")]
+fn suggest_player(request: CommandSuggestionRequest) -> SjmlResult<CommandSuggestions> {
+    let prefix = request.partial.to_lowercase();
+    let players = ["Alex", "Alexa", "Bob"]
+        .into_iter()
+        .filter(|name| name.to_lowercase().starts_with(&prefix));
+    CommandSuggestions::new(players)
+}
+```
+
+The SDK limits each response to 64 unique suggestions of up to 256 UTF-8 bytes
+with no control characters. The host also validates values against the
+argument parser and integer bounds, filters them by the current partial text,
+and fails closed if the callback returns a malformed payload. Client-command
+suggestions, command-tree mutation, and structured feedback remain unavailable.
+
 The `#[event]` attributes above export callbacks; they do not register them for
 delivery. From `mod_init` in a retained logical-server instance, explicitly
 subscribe with `events::subscribe(event_name, priority)`. The NeoForge adapter recognizes server lifecycle, player join/leave/movement,
-respawn, interactions and earned advancements; entity death/spawn/effect/damage,
-target and projectile-impact events; block break/place; world load/unload and
-explosion-attempt; server tick, inventory changes, resource reloads, and menu
-actions. Synchronous cancellable callbacks include `block.break`,
+respawn, interactions, item-use attempts, and earned advancements; entity
+death/spawn/effect/damage, target and projectile-impact events; block
+break/place; world load/unload and explosion-attempt; server tick, inventory
+changes, resource reloads, and menu actions. Synchronous cancellable callbacks include `block.break`,
 `block.break_attempt`, `block.place_attempt`, `player.interaction`,
-`player.drop_attempt`, `entity.death_attempt`, `entity.damage_attempt`,
+`player.drop_attempt`, `player.sleep_attempt`, `player.item_use_attempt`,
+`player.fished_attempt`,
+`entity.death_attempt`, `entity.damage_attempt`,
 `entity.target_attempt`, `entity.projectile_impact_attempt`, and
 `world.explosion_attempt`. Server event callbacks run on the owning
 logical-server thread. Notifications require `events.subscribe`; cancellable
 events also require `events.cancel`. Both capabilities appear in the combined
 module and administrator-grant declarations above.
+
+`player.fished_attempt` is a synchronous cancellable server callback for
+NeoForge's fishing-catch event. Its `PlayerFishedAttempt` and nested
+`FishedDropSnapshot` contain detached IDs and bounded values only; returning
+`Ok(true)` suppresses the drops, but the hook still takes its requested rod
+damage. It requires both `events.subscribe` and `events.cancel`; see
+[cancellable fishing catches](PLAYER_FISHED_ATTEMPTS.md).
 
 `events::subscribe` returns an `EventSubscriptionHandle`. Keep that handle if
 you need to call `events::unsubscribe(handle)` later; closing the module also
@@ -826,6 +945,22 @@ unload notification sent before world-scoped handles are revoked.
 `events::subscribe_with_interval("server.tick", priority, ticks)` selects a
 cadence from 1 through 1,200 ticks. This bounds default guest work to one
 callback per second; the guest can request a more frequent rate explicitly.
+`player.tick` accepts schema-v1 `PlayerTick` with canonical `player_id`,
+`dimension_id`, and non-negative `tick_count`. It runs after each logical-server
+player tick and is observation-only. A plain subscription also defaults to 20
+ticks; `subscribe_with_interval` selects 1 through 1,200 ticks per subscription.
+See [player tick](PLAYER_TICK_EVENT.md).
+`entity.tick` accepts schema-v1 `EntityTick` with canonical `entity_id`,
+`entity_type_id`, `dimension_id`, finite position coordinates, and a
+non-negative entity-local `tick_count`. It runs after a loaded non-player
+entity tick, is observation-only, and skips excess work after 4,096 guest
+callbacks per server tick. Its default cadence is 20 entity ticks;
+`subscribe_with_interval` selects 1 through 1,200. See
+[entity tick](ENTITY_TICK_EVENT.md).
+Physical-client modules can subscribe to `client.tick` for a detached
+schema-v1 `ClientTick` count on the client main thread. It defaults to every 20
+ticks and accepts `1..=1200` with `subscribe_with_interval`; it is
+observational. See [client tick](CLIENT_TICK_EVENT.md).
 `resources.reloaded` accepts schema-v1 `ResourcesReloaded` with a non-negative
 `i64` `tick_count`. It fires once after a successful server resource-manager
 replacement is active, on the next server tick; failed reloads do not emit it.
@@ -923,9 +1058,10 @@ unsubscription or module close. The `priority` argument is `0` for `Highest`,
 `1` for `High`, `2` for `Normal`, `3` for `Low`, and `4` for `Lowest`; lower
 values dispatch first, with ties preserving module activation and registration
 order. The host accepts at most 256 subscriptions per active module instance.
-`subscribe_with_interval` is valid only for `server.tick` and accepts intervals
-from 1 through 1,200 ticks. The ordinary `subscribe` call uses 20 ticks for
-`server.tick` and does not accept an interval for other event categories.
+`subscribe_with_interval` is valid for `server.tick`, `player.tick`,
+`entity.tick`, and `client.tick`, and accepts intervals from 1 through 1,200 ticks. The ordinary
+`subscribe` call uses 20 ticks for each and does not accept an interval for
+other event categories.
 
 The host validates an event name as strict UTF-8 of 1–128 bytes using only
 lowercase ASCII letters, digits, `.`, `_`, or `-`, with a letter or digit first;
@@ -1205,8 +1341,11 @@ registry::register_cooking_recipe(
 The kind selects vanilla smelting, blasting, smoking, or campfire cooking.
 Experience must be finite and between 0 and 1,000; cooking time is 1 to
 36,000 ticks. Cooking recipes use item or tag IDs and share the output count
-bound of 1 to 64. Brewing and arbitrary Java recipe serializers are not
-provided. Guest-defined matching logic can use a Rust callback serializer:
+bound of 1 to 64. Vanilla brewing mixes can be registered with
+`registry::register_brewing_recipe`, and one-effect package potions with
+`registry::register_potion`; see [brewing recipes](BREWING_RECIPES.md) for
+side, ID, duration, and registry-phase limits. Arbitrary Java recipe
+serializers are not provided. Guest-defined matching logic can use a Rust callback serializer:
 
 ```rust
 #[mod_register]
@@ -1376,6 +1515,17 @@ of UTF-8 per component; the declaration may lower the character limit. The
 component type and item must belong to the same package module. Modules can
 read their own registered string components from loaded inventory slots and
 update them with `inventory.write` on container-backed blocks.
+
+For boolean data, `registry::register_boolean_component("activated")` declares
+a persistent, network-synchronized component, and
+`registry::set_item_boolean_component("ruby", "activated", true)` supplies an
+item default. Runtime access uses `inventory::read_boolean_component` /
+`write_boolean_component` for loaded block inventories and
+`player_inventory::read_boolean_component` / `write_boolean_component` for
+live player stacks. Reads preserve the distinction between an unset component
+and a stored `false`; writes change only the caller's component on an existing
+stack. See [boolean item components](BOOLEAN_ITEM_COMPONENTS.md) for ABI,
+permission, and threading details.
 
 ## Server menus with bounded action slots
 
@@ -1602,6 +1752,13 @@ and does not load a dimension or chunk. Setting daylight time does not change
 for an already-loaded position, or `None` when the chunk is unloaded or the Y
 coordinate is outside build height. It requires only `world.read` and never
 loads a chunk. See [world biomes](WORLD_BIOMES.md).
+`world::light_at(handle, position)` returns a detached `LightSnapshot` with
+sky and block light values in `0..=15` for a position in an already-loaded
+chunk. `world::fluid_at(handle, position)` returns a detached
+`FluidStateSnapshot`; a loaded dry block reports `minecraft:empty`, while an
+unloaded chunk or out-of-height position returns `None`. Both require
+`world.read`, run on the logical-server thread, and never load chunks. See
+[world light levels](WORLD_HEIGHT_LIGHT.md) and [world fluid state](FLUID_STATE.md).
 
 `world::daylight_cycle_enabled(handle)` reads the vanilla `doDaylightCycle`
 rule. `world::set_daylight_cycle_enabled(handle, enabled)` changes it on the

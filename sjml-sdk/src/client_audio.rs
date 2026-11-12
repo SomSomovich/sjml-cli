@@ -3,7 +3,7 @@
 //! One-shot playback requires `client.audio.play`; looping playback requires `client.audio.loop`.
 //! Requests run on the physical client main thread, accept only a sound event available in the
 //! active resource set, and never send sound playback over the network. The host rate-limits
-//! starts per module and stops only looping instances owned by the calling module.
+//! starts per module and stops only exact instances owned by the calling module.
 
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
@@ -17,6 +17,10 @@ pub const MIN_SOUND_PITCH: f32 = 0.5;
 pub const MAX_SOUND_PITCH: f32 = 2.0;
 /// Maximum active looping sounds a module may own at one time.
 pub const MAX_ACTIVE_LOOPING_SOUNDS_PER_MODULE: usize = 8;
+/// Maximum module-owned one-shot sounds that can be stopped at one time.
+pub const MAX_ACTIVE_TRACKED_SOUNDS_PER_MODULE: usize = 16;
+/// Longest fade that may be scheduled for one tracked sound, in client ticks.
+pub const MAX_SOUND_FADE_DURATION_TICKS: u32 = 1_200;
 
 /// One of Minecraft's built-in sound categories.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,6 +50,21 @@ extern "C" {
         pitch_bits: i32,
     ) -> i32;
 
+    #[link_name = "play_tracked"]
+    fn imported_play_tracked(
+        sound_id_pointer: i32,
+        sound_id_length: i32,
+        category: i32,
+        volume_bits: i32,
+        pitch_bits: i32,
+    ) -> i64;
+
+    #[link_name = "stop_tracked"]
+    fn imported_stop_tracked(handle: i32) -> i32;
+
+    #[link_name = "fade_tracked"]
+    fn imported_fade_tracked(handle: i32, volume_bits: i32, duration_ticks: i32) -> i32;
+
     #[link_name = "start_loop"]
     fn imported_start_loop(
         sound_id_pointer: i32,
@@ -65,6 +84,18 @@ extern "C" {
 pub struct LoopingSoundHandle(u32);
 
 impl LoopingSoundHandle {
+    /// Returns the opaque numeric value for storage or comparison.
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// Opaque one-shot sound handle scoped to the SJML module runtime that created it.
+#[must_use = "stop the sound with this handle or let runtime cleanup stop it"]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct TrackedSoundHandle(u32);
+
+impl TrackedSoundHandle {
     /// Returns the opaque numeric value for storage or comparison.
     pub const fn raw(self) -> u32 {
         self.0
@@ -112,6 +143,145 @@ pub fn play(sound_id: &str, category: SoundCategory, volume: f32, pitch: f32) ->
             "client audio is available only to wasm32 guests",
         ))
     }
+}
+
+/// Plays a one-shot sound locally and returns a handle that can stop that exact playback.
+///
+/// The module must request and receive `client.audio.play`. The host permits at most sixteen
+/// retained tracked handles per module runtime and 512 across the physical client. A sound that
+/// completes naturally still owns its handle until `stop_tracked` releases it or the runtime
+/// closes. Tracked playback shares the existing five-starts-per-two-seconds rate limit with
+/// [`play`] and [`start_loop`]. Stopping cannot affect another module's playback.
+pub fn play_tracked(
+    sound_id: &str,
+    category: SoundCategory,
+    volume: f32,
+    pitch: f32,
+) -> SjmlResult<TrackedSoundHandle> {
+    validate_sound_id(sound_id)?;
+    validate_levels(volume, pitch)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the borrowed resource ID stays live during this synchronous import. The host
+        // copies and validates the bounded UTF-8 bytes before returning.
+        let packed = unsafe {
+            imported_play_tracked(
+                sound_id.as_ptr() as usize as u32 as i32,
+                sound_id.len() as i32,
+                category as u32 as i32,
+                volume.to_bits() as i32,
+                pitch.to_bits() as i32,
+            ) as u64
+        };
+        let status = (packed >> 32) as u32;
+        if status != 0 {
+            return Err(SjmlError::from_abi_code(
+                status,
+                "host rejected the tracked client sound request",
+            ));
+        }
+        let handle = packed as u32;
+        if handle == 0 || handle > i32::MAX as u32 {
+            return Err(invalid("host returned an invalid tracked sound handle"));
+        }
+        Ok(TrackedSoundHandle(handle))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = category;
+        Err(SjmlError::new(
+            ErrorCode::UnknownErrorCode,
+            "client audio is available only to wasm32 guests",
+        ))
+    }
+}
+
+/// Stops the exact one-shot sound instance owned by the current module runtime.
+pub fn stop_tracked(handle: TrackedSoundHandle) -> SjmlResult<()> {
+    if handle.0 == 0 || handle.0 > i32::MAX as u32 {
+        return Err(invalid("tracked sound handle is invalid"));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host resolves this opaque handle only in the calling module's own registry.
+        let status = unsafe { imported_stop_tracked(handle.0 as i32) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the tracked sound handle",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(SjmlError::new(
+            ErrorCode::UnknownErrorCode,
+            "client audio is available only to wasm32 guests",
+        ))
+    }
+}
+
+/// Fades an owned tracked sound from its current volume to `target_volume` over client ticks.
+///
+/// Use `play_tracked(..., 0.0, pitch)` followed by this function for a fade-in. A fade-out uses
+/// `target_volume = 0.0`. The target must be finite and in `0..=4`, and the duration must be in
+/// `1..=1200` ticks (up to one minute). A new call replaces any fade already in progress for this
+/// exact sound instance. The sound remains owned until `stop_tracked` or runtime cleanup.
+pub fn fade_tracked(
+    handle: TrackedSoundHandle,
+    target_volume: f32,
+    duration_ticks: u32,
+) -> SjmlResult<()> {
+    validate_tracked_handle(handle)?;
+    validate_fade(target_volume, duration_ticks)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host resolves this handle only in the calling runtime's tracked-sound
+        // registry, validates the target and duration, and schedules the fade on the client thread.
+        let status = unsafe {
+            imported_fade_tracked(
+                handle.0 as i32,
+                target_volume.to_bits() as i32,
+                duration_ticks as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the tracked sound fade",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(SjmlError::new(
+            ErrorCode::UnknownErrorCode,
+            "client audio is available only to wasm32 guests",
+        ))
+    }
+}
+
+fn validate_tracked_handle(handle: TrackedSoundHandle) -> SjmlResult<()> {
+    if handle.0 == 0 || handle.0 > i32::MAX as u32 {
+        return Err(invalid("tracked sound handle is invalid"));
+    }
+    Ok(())
+}
+
+fn validate_fade(target_volume: f32, duration_ticks: u32) -> SjmlResult<()> {
+    if !target_volume.is_finite()
+        || !(0.0..=MAX_SOUND_VOLUME).contains(&target_volume)
+        || !(1..=MAX_SOUND_FADE_DURATION_TICKS).contains(&duration_ticks)
+    {
+        return Err(invalid(
+            "fade target volume must be 0–4 and duration must be 1–1200 ticks",
+        ));
+    }
+    Ok(())
 }
 
 /// Starts a local looping sound and returns its module-owned handle.
@@ -330,6 +500,76 @@ mod tests {
         );
         assert_eq!(
             start_loop("bad ID", SoundCategory::Music, 1.0, 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn native_tracked_calls_fail_closed_after_validating_arguments() {
+        assert_eq!(
+            play_tracked(
+                "minecraft:entity.player.levelup",
+                SoundCategory::Players,
+                1.0,
+                1.0,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            play_tracked("bad ID", SoundCategory::Players, 1.0, 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            stop_tracked(TrackedSoundHandle(1)).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            stop_tracked(TrackedSoundHandle(0)).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn validates_bounded_tracked_sound_fades() {
+        assert!(validate_fade(0.0, 1).is_ok());
+        assert!(validate_fade(4.0, MAX_SOUND_FADE_DURATION_TICKS).is_ok());
+        for (volume, duration) in [
+            (f32::NAN, 10),
+            (f32::INFINITY, 10),
+            (-0.01, 10),
+            (4.01, 10),
+            (1.0, 0),
+            (1.0, MAX_SOUND_FADE_DURATION_TICKS + 1),
+        ] {
+            assert_eq!(
+                validate_fade(volume, duration).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            validate_tracked_handle(TrackedSoundHandle(0))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn native_tracked_fade_fails_closed_after_validating_arguments() {
+        assert_eq!(
+            fade_tracked(TrackedSoundHandle(1), 1.0, 20)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            fade_tracked(TrackedSoundHandle(1), f32::NAN, 20)
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument

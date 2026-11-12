@@ -24,6 +24,12 @@ fn public_attribute_ids_and_bounded_base_values_are_stable() {
         LivingAttribute::KnockbackResistance.id(),
         "minecraft:generic.knockback_resistance"
     );
+    assert_eq!(
+        LivingAttribute::BlockInteractionRange.id(),
+        "minecraft:player.block_interaction_range"
+    );
+    assert_eq!(LivingAttribute::Gravity.id(), "minecraft:generic.gravity");
+    assert_eq!(LivingAttribute::Scale.id(), "minecraft:generic.scale");
 
     let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
     assert_eq!(
@@ -40,6 +46,18 @@ fn public_attribute_ids_and_bounded_base_values_are_stable() {
     );
     assert_eq!(
         entity_attributes::set_base_value(handle, LivingAttribute::Armor, 30.01)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        entity_attributes::set_base_value(handle, LivingAttribute::BlockInteractionRange, 64.01)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        entity_attributes::set_base_value(handle, LivingAttribute::Scale, 0.01)
             .unwrap_err()
             .code(),
         ErrorCode::InvalidArgument

@@ -41,3 +41,39 @@ the original outgoing text and may veto it. It never rewrites the text, so
 allowed messages retain Minecraft's normal signed-chat path. It requires
 `client.chat.send.observe`, `events.subscribe`, and `events.cancel`; see
 [outgoing client chat veto](CLIENT_CHAT_SEND.md).
+
+Logical-server modules can veto a right-click item use through
+`player.item_use_attempt`. The callback runs before Minecraft calls the item's
+`use` method and after the general `player.interaction` veto has passed. Return
+`Ok(true)` to cancel that use. Its `PlayerItemUseAttempt` snapshot contains the
+player UUID, dimension, hand, item registry ID, and stack count; an empty hand
+is `minecraft:air` with count zero. It exposes no live stack, cannot change the
+stack, and requires `events.subscribe` plus `events.cancel`. See
+[item-use attempts](PLAYER_ITEM_USE_ATTEMPT.md).
+
+Server modules can inspect and veto fishing catches through
+`player.fished_attempt`. The bounded `PlayerFishedAttempt` snapshot includes
+player UUID, dimension, hook position, requested rod damage, and up to 16 item
+ID/count pairs without item components or NBT. Returning `Ok(true)` suppresses
+the catch drops while retaining the requested rod damage. It requires both
+`events.subscribe` and `events.cancel`; see
+[cancellable fishing catches](PLAYER_FISHED_ATTEMPTS.md).
+
+Server modules can also observe `player.tick` after each live player's logical
+server tick. Its `PlayerTick` snapshot contains the player UUID, dimension ID,
+and non-negative tick count. The default cadence is 20 ticks;
+`subscribe_with_interval` accepts 1 through 1,200 ticks. See
+[player tick](PLAYER_TICK_EVENT.md).
+
+Physical-client modules can observe `client.tick` after the local client tick.
+Its `ClientTick` snapshot contains the non-negative tick count and uses the
+same bounded subscription cadence. This callback cannot change gameplay. See
+[client tick](CLIENT_TICK_EVENT.md).
+
+Server modules can observe `entity.tick` after each loaded non-player entity
+tick. The detached `EntityTick` snapshot contains the entity UUID, registry
+type ID, dimension ID, position, and entity-local tick count. Its default
+cadence is every 20 entity ticks; `subscribe_with_interval` accepts 1–1,200.
+The host caps this event at 4,096 guest callbacks per logical-server tick.
+Only subscribed server modules receive it; it is observational and does not
+load chunks. See [entity tick](ENTITY_TICK_EVENT.md).

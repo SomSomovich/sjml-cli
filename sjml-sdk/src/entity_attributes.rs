@@ -1,8 +1,8 @@
-//! Bounded reads and base-value updates for selected vanilla living-entity attributes on loaded
+//! Bounded reads and base-value updates for vanilla living-entity attributes on loaded
 //! non-player entities and live server players.
 //!
-//! Dynamic attribute access is deliberately narrower than registry-time attribute declarations:
-//! only six vanilla IDs are exposed, reads require `entity.read`, and writes also require
+//! Dynamic attribute access is deliberately narrower than arbitrary registry access:
+//! vanilla IDs exposed by [`LivingAttribute`] require `entity.read`, and writes also require
 //! `entity.attributes.write`.
 
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +29,56 @@ pub enum LivingAttribute {
     FollowRange,
     /// `minecraft:generic.knockback_resistance`, in 0–1.
     KnockbackResistance,
+    /// `minecraft:generic.armor_toughness`, in 0–20.
+    ArmorToughness,
+    /// `minecraft:generic.attack_knockback`, in 0–5.
+    AttackKnockback,
+    /// `minecraft:generic.attack_speed`, in 0–1024.
+    AttackSpeed,
+    /// `minecraft:player.block_break_speed`, in 0–1024.
+    BlockBreakSpeed,
+    /// `minecraft:player.block_interaction_range`, in 0–64 blocks.
+    BlockInteractionRange,
+    /// `minecraft:generic.burning_time`, in 0–1024.
+    BurningTime,
+    /// `minecraft:generic.explosion_knockback_resistance`, in 0–1.
+    ExplosionKnockbackResistance,
+    /// `minecraft:player.entity_interaction_range`, in 0–64 blocks.
+    EntityInteractionRange,
+    /// `minecraft:generic.fall_damage_multiplier`, in 0–100.
+    FallDamageMultiplier,
+    /// `minecraft:generic.flying_speed`, in 0–1024.
+    FlyingSpeed,
+    /// `minecraft:generic.gravity`, in -1–1.
+    Gravity,
+    /// `minecraft:generic.jump_strength`, in 0–32.
+    JumpStrength,
+    /// `minecraft:generic.luck`, in -1024–1024.
+    Luck,
+    /// `minecraft:generic.max_absorption`, in 0–2048.
+    MaxAbsorption,
+    /// `minecraft:player.mining_efficiency`, in 0–1024.
+    MiningEfficiency,
+    /// `minecraft:generic.movement_efficiency`, in 0–1.
+    MovementEfficiency,
+    /// `minecraft:generic.oxygen_bonus`, in 0–1024.
+    OxygenBonus,
+    /// `minecraft:generic.safe_fall_distance`, in -1024–1024 blocks.
+    SafeFallDistance,
+    /// `minecraft:generic.scale`, in 0.0625–16.
+    Scale,
+    /// `minecraft:player.sneaking_speed`, in 0–1.
+    SneakingSpeed,
+    /// `minecraft:zombie.spawn_reinforcements`, in 0–1.
+    SpawnReinforcementsChance,
+    /// `minecraft:generic.step_height`, in 0–10 blocks.
+    StepHeight,
+    /// `minecraft:player.submerged_mining_speed`, in 0–20.
+    SubmergedMiningSpeed,
+    /// `minecraft:player.sweeping_damage_ratio`, in 0–1.
+    SweepingDamageRatio,
+    /// `minecraft:generic.water_movement_efficiency`, in 0–1.
+    WaterMovementEfficiency,
 }
 
 impl LivingAttribute {
@@ -41,6 +91,33 @@ impl LivingAttribute {
             Self::Armor => "minecraft:generic.armor",
             Self::FollowRange => "minecraft:generic.follow_range",
             Self::KnockbackResistance => "minecraft:generic.knockback_resistance",
+            Self::ArmorToughness => "minecraft:generic.armor_toughness",
+            Self::AttackKnockback => "minecraft:generic.attack_knockback",
+            Self::AttackSpeed => "minecraft:generic.attack_speed",
+            Self::BlockBreakSpeed => "minecraft:player.block_break_speed",
+            Self::BlockInteractionRange => "minecraft:player.block_interaction_range",
+            Self::BurningTime => "minecraft:generic.burning_time",
+            Self::ExplosionKnockbackResistance => {
+                "minecraft:generic.explosion_knockback_resistance"
+            }
+            Self::EntityInteractionRange => "minecraft:player.entity_interaction_range",
+            Self::FallDamageMultiplier => "minecraft:generic.fall_damage_multiplier",
+            Self::FlyingSpeed => "minecraft:generic.flying_speed",
+            Self::Gravity => "minecraft:generic.gravity",
+            Self::JumpStrength => "minecraft:generic.jump_strength",
+            Self::Luck => "minecraft:generic.luck",
+            Self::MaxAbsorption => "minecraft:generic.max_absorption",
+            Self::MiningEfficiency => "minecraft:player.mining_efficiency",
+            Self::MovementEfficiency => "minecraft:generic.movement_efficiency",
+            Self::OxygenBonus => "minecraft:generic.oxygen_bonus",
+            Self::SafeFallDistance => "minecraft:generic.safe_fall_distance",
+            Self::Scale => "minecraft:generic.scale",
+            Self::SneakingSpeed => "minecraft:player.sneaking_speed",
+            Self::SpawnReinforcementsChance => "minecraft:zombie.spawn_reinforcements",
+            Self::StepHeight => "minecraft:generic.step_height",
+            Self::SubmergedMiningSpeed => "minecraft:player.submerged_mining_speed",
+            Self::SweepingDamageRatio => "minecraft:player.sweeping_damage_ratio",
+            Self::WaterMovementEfficiency => "minecraft:generic.water_movement_efficiency",
         }
     }
 
@@ -51,6 +128,27 @@ impl LivingAttribute {
             Self::AttackDamage | Self::FollowRange => (0.0, 1024.0),
             Self::Armor => (0.0, 30.0),
             Self::KnockbackResistance => (0.0, 1.0),
+            Self::ArmorToughness => (0.0, 20.0),
+            Self::AttackKnockback => (0.0, 5.0),
+            Self::AttackSpeed | Self::BlockBreakSpeed | Self::MiningEfficiency => (0.0, 1024.0),
+            Self::BlockInteractionRange | Self::EntityInteractionRange => (0.0, 64.0),
+            Self::BurningTime => (0.0, 1024.0),
+            Self::ExplosionKnockbackResistance
+            | Self::MovementEfficiency
+            | Self::SneakingSpeed
+            | Self::SpawnReinforcementsChance
+            | Self::SweepingDamageRatio
+            | Self::WaterMovementEfficiency => (0.0, 1.0),
+            Self::FallDamageMultiplier => (0.0, 100.0),
+            Self::FlyingSpeed | Self::OxygenBonus => (0.0, 1024.0),
+            Self::Gravity => (-1.0, 1.0),
+            Self::JumpStrength => (0.0, 32.0),
+            Self::Luck => (-1024.0, 1024.0),
+            Self::MaxAbsorption => (0.0, 2048.0),
+            Self::SafeFallDistance => (-1024.0, 1024.0),
+            Self::Scale => (0.0625, 16.0),
+            Self::StepHeight => (0.0, 10.0),
+            Self::SubmergedMiningSpeed => (0.0, 20.0),
         }
     }
 

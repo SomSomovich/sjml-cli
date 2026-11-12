@@ -20,9 +20,9 @@ license = "MIT"
 distribution = "server_only"
 
 [runtime]
-abi = "^1.0"
+abi = "^1.65.0"
 minecraft = "~1.21.1"
-sjml = "^0.67.0"
+sjml = "^0.75.0"
 
 [[modules]]
 id = "core"
@@ -101,6 +101,16 @@ without SJML. Existing manifests that omit `distribution` retain the old
 optional peer behavior. Packages that register client-synchronized content
 should declare an appropriate distribution explicitly.
 
+### Network channel rate limits
+
+`[[modules.channels]]` accepts optional `messages_per_second` and `burst`
+integers. The defaults are `100` and `200`; accepted ranges are `1..=1000` and
+`1..=2000`. The host applies each channel's policy per module, channel, and
+direction. Outgoing calls over the limit fail with `TASK_LIMIT_REACHED`;
+incoming messages over the limit are dropped before guest callbacks. These
+values control local traffic handling and are not part of the network payload
+schema or compatibility handshake.
+
 ### Guest command declarations
 
 Commands are declared in the owning module's manifest. Each `[[modules.commands]]`
@@ -128,14 +138,23 @@ rest of the command line for it. `word`, `string`, and `greedy_string` values
 are limited to 65,536 UTF-8 bytes each; the encoded callback input is limited
 to 1 MiB total.
 
-Each module may declare at most 64 commands, and each command may declare at
-most 16 arguments; the host stages at most 8,192 commands across all packages.
+Each module may declare at most 128 combined server and client commands, and
+each command may declare at most 16 arguments; the host stages at most 8,192
+commands across all packages.
 Command names use the callback identifier grammar: 1–128
 lowercase ASCII letters, digits, `.`, `_`, or `-`, starting with a letter or
 digit. Argument names are unique within a command and use the manifest
 identifier grammar. Server command declarations in client-only modules are
 rejected. Server commands require `content.register` and its administrator
-grant.
+grant. Any argument may set `suggestions = true`; this enables one synchronous
+guest suggestion callback for that command and additionally requires the
+requested and administrator-granted `command.suggest` capability. The callback
+receives the argument index, unfinished text, source player UUID when the
+request came from a player, and earlier parsed arguments. It returns at most 64
+unique values of at most 256 UTF-8 bytes each. The host filters candidates by
+the unfinished text and validates them against the argument type and integer
+bounds. Callbacks run synchronously on the server thread and should return
+quickly. See the [SDK command guide](SDK_GUIDE.md#manifest-declared-commands).
 
 NeoForge exposes a guest command at
 `/sjml guest <package-id> <module-id> <command-name> ...`. For example, the

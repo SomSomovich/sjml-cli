@@ -22,6 +22,26 @@ fn register_keys() -> SjmlResult<()> {
 
 The event contains a GLFW key code (`-1` means unknown), scan code, press/release/repeat action, and the six supported modifier flags. NeoForge's `InputEvent.Key` is posted after Minecraft has processed keyboard mappings and input. It is not cancellable, so this subscription cannot stop a key, change a binding, or veto vanilla processing. It can observe the notification when a screen is open as well as when gameplay has focus. Use the named keybinding API when the mod needs a user-rebindable gameplay action.
 
+## Polling held input state
+
+Modules with `client.input.observe` can synchronously poll whether a raw GLFW key or mouse button is held:
+
+```rust
+use sjml::{client_input, SjmlResult};
+
+fn inspect_controls() -> SjmlResult<()> {
+    if client_input::is_key_down(32)? {
+        // The GLFW space-key code is currently held.
+    }
+    if client_input::is_mouse_button_down(0)? {
+        // The primary mouse button is currently held.
+    }
+    Ok(())
+}
+```
+
+`is_key_down` accepts GLFW key codes `0..=348`; `is_mouse_button_down` accepts button indices `0..=7`. Both require a client-capable module with `client.input.observe` declared and granted, and run on the physical client's main thread. These calls report the current held state without consuming, intercepting, or changing input. They are unavailable in dedicated-server and static-registration contexts.
+
 ## Vetoing a key delivered to an open screen
 
 Declare and receive `client.input.screen_cancel` to use `sjml::screen_input::subscribe_key_pressed`:

@@ -47,10 +47,22 @@ pub fn command(attribute: TokenStream, item: TokenStream) -> TokenStream {
     expand_command(attribute.into(), item.into()).into()
 }
 
+/// Defines a bounded synchronous Brigadier argument-suggestion callback.
+#[proc_macro_attribute]
+pub fn command_suggestions(attribute: TokenStream, item: TokenStream) -> TokenStream {
+    expand_command_suggestions(attribute.into(), item.into()).into()
+}
+
 /// Defines a callback for a manifest-declared, physical-client command.
 #[proc_macro_attribute]
 pub fn client_command(attribute: TokenStream, item: TokenStream) -> TokenStream {
     expand_callback(attribute.into(), item.into(), "client_command").into()
+}
+
+/// Defines the synchronous owner callback used by client situational music selection.
+#[proc_macro_attribute]
+pub fn client_music_selection(attribute: TokenStream, item: TokenStream) -> TokenStream {
+    expand_client_music_selection(attribute.into(), item.into()).into()
 }
 
 #[proc_macro_attribute]
@@ -132,8 +144,71 @@ fn expand_event(attribute: TokenStream2, item: TokenStream2) -> TokenStream2 {
     expand_callback(attribute, item, "event")
 }
 
+fn expand_client_music_selection(attribute: TokenStream2, item: TokenStream2) -> TokenStream2 {
+    if !attribute.is_empty() {
+        return error(
+            attribute.span(),
+            "#[client_music_selection] does not accept arguments",
+        );
+    }
+    let function = match parse2::<ItemFn>(item) {
+        Ok(function) => function,
+        Err(error) => return error.to_compile_error(),
+    };
+    if let Some(reason) = validate_function(&function, 1) {
+        return error(function.sig.ident.span(), reason);
+    }
+    let input_type = match function.sig.inputs.first() {
+        Some(FnArg::Typed(argument)) => argument.ty.as_ref(),
+        _ => unreachable!("validate_function checked the callback argument count"),
+    };
+    let output_type = match result_value_type(&function.sig.output) {
+        Some(output_type) => output_type,
+        None => {
+            return error(
+                function.sig.ident.span(),
+                "#[client_music_selection] function must return SjmlResult<MusicSelectionDecision>",
+            );
+        }
+    };
+    if !is_named_type(input_type, "ClientMusicSelectionEvent")
+        || !is_named_type(output_type, "MusicSelectionDecision")
+    {
+        return error(
+            function.sig.ident.span(),
+            "#[client_music_selection] must accept ClientMusicSelectionEvent and return SjmlResult<MusicSelectionDecision>",
+        );
+    }
+    let handler = &function.sig.ident;
+    let wrapper = format_ident!("__sjml_v1_client_music_selection");
+    quote! {
+        #function
+
+        #[doc(hidden)]
+        #[cfg(target_arch = "wasm32")]
+        #[export_name = "sjml_v1_client_music_selection"]
+        /// # Safety
+        ///
+        /// Non-empty input must be a live allocation from `sjml_v1_alloc` in this guest instance.
+        pub unsafe extern "C" fn #wrapper(input_ptr: u32, input_len: u32) -> u64 {
+            // SAFETY: the caller guarantees the callback input allocation.
+            unsafe {
+                ::sjml::__private::dispatch_payload::<#input_type, #output_type, _>(
+                    input_ptr,
+                    input_len,
+                    #handler,
+                )
+            }
+        }
+    }
+}
+
 fn expand_command(attribute: TokenStream2, item: TokenStream2) -> TokenStream2 {
     expand_callback(attribute, item, "command")
+}
+
+fn expand_command_suggestions(attribute: TokenStream2, item: TokenStream2) -> TokenStream2 {
+    expand_callback(attribute, item, "command_suggestions")
 }
 
 fn expand_service(attribute: TokenStream2, item: TokenStream2) -> TokenStream2 {
@@ -182,6 +257,15 @@ fn expand_callback(attribute: TokenStream2, item: TokenStream2, kind: &str) -> T
             "#[client_command] function must return SjmlResult<String>",
         );
     }
+    if kind == "command_suggestions"
+        && (!is_named_type(input_type, "CommandSuggestionRequest")
+            || !is_named_type(output_type, "CommandSuggestions"))
+    {
+        return error(
+            function.sig.ident.span(),
+            "#[command_suggestions] must accept CommandSuggestionRequest and return SjmlResult<CommandSuggestions>",
+        );
+    }
 
     let handler = &function.sig.ident;
     let wrapper = format_ident!("__sjml_v1_{kind}_{}", handler);
@@ -212,6 +296,10 @@ fn expand_callback(attribute: TokenStream2, item: TokenStream2, kind: &str) -> T
 
 fn is_string_type(ty: &Type) -> bool {
     matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "String"))
+}
+
+fn is_named_type(ty: &Type, expected: &str) -> bool {
+    matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == expected))
 }
 
 fn callback_name(attribute: TokenStream2) -> syn::Result<String> {
@@ -612,6 +700,35 @@ mod tests {
     }
 
     #[test]
+    fn client_music_selection_macro_generates_its_fixed_typed_export() {
+        let generated = expand_client_music_selection(
+            quote!(),
+            quote! {
+                fn choose(event: ClientMusicSelectionEvent) -> SjmlResult<MusicSelectionDecision> {
+                    let _ = event;
+                    Ok(MusicSelectionDecision::keep())
+                }
+            },
+        )
+        .to_string();
+        assert!(generated.contains("sjml_v1_client_music_selection"));
+        assert!(generated.contains("dispatch_payload"));
+
+        diagnostic(
+            expand_client_music_selection(
+                quote!(),
+                quote! {
+                    fn choose(event: u32) -> SjmlResult<bool> {
+                        let _ = event;
+                        Ok(false)
+                    }
+                },
+            ),
+            "must accept ClientMusicSelectionEvent",
+        );
+    }
+
+    #[test]
     fn client_screen_key_veto_uses_the_typed_screen_input_subscription() {
         diagnostic(
             expand_event(
@@ -723,6 +840,62 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_entity_breed_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "entity.breed_attempt"),
+            quote! {
+                fn prevent_breeding(event: EntityBreedAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_entity.breed_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
+    fn cancellable_block_grow_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "block.grow_attempt"),
+            quote! {
+                fn deny_crop_growth(event: BlockGrowAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_block.grow_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
+    fn cancellable_block_fertilize_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "block.fertilize_attempt"),
+            quote! {
+                fn deny_fertilizing(event: BlockFertilizeAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_block.fertilize_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
+    fn cancellable_player_fished_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "player.fished_attempt"),
+            quote! {
+                fn prevent_fishing_catch(event: PlayerFishedAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_player.fished_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
     fn cancellable_player_drop_attempt_exports_the_sync_boolean_callback() {
         let generated = expand_event(
             quote!(name = "player.drop_attempt"),
@@ -782,6 +955,31 @@ mod tests {
                 },
             ),
             "lowercase ASCII identifier",
+        );
+    }
+
+    #[test]
+    fn command_suggestions_macro_generates_a_typed_synchronous_export() {
+        let generated = expand_command_suggestions(
+            quote!(name = "players.teleport"),
+            quote! {
+                fn suggestions(request: CommandSuggestionRequest) -> SjmlResult<CommandSuggestions> {
+                    CommandSuggestions::new([request.partial])
+                }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_command_suggestions_players.teleport"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+        diagnostic(
+            expand_command_suggestions(
+                quote!(name = "players.teleport"),
+                quote! {
+                    fn invalid(request: String) -> SjmlResult<String> { Ok(request) }
+                },
+            ),
+            "must accept CommandSuggestionRequest",
         );
     }
 

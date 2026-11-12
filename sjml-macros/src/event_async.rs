@@ -26,6 +26,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "player.interaction"
             | "player.drop_attempt"
             | "player.sleep_attempt"
+            | "item.use"
             | "client.chat.send_attempt"
             | "entity.death_attempt"
             | "entity.damage_attempt"
@@ -33,6 +34,10 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.effect_application"
             | "entity.join_attempt"
             | "entity.target_attempt"
+            | "entity.breed_attempt"
+            | "block.grow_attempt"
+            | "block.fertilize_attempt"
+            | "player.fished_attempt"
             | "world.explosion_attempt"
             | "client.screen.key_pressed"
     ) {
@@ -323,6 +328,13 @@ mod tests {
         );
         diagnostic(
             expand_event_async(
+                quote!(name = "item.use"),
+                quote! { async fn item_use(_: ModuleItemUse) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "item.use is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
                 quote!(name = "entity.death_attempt"),
                 quote! { async fn death_attempt(_: EntityDeathAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
@@ -334,6 +346,34 @@ mod tests {
                 quote! { async fn target_attempt(_: EntityTargetAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.target_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.breed_attempt"),
+                quote! { async fn breed_attempt(_: EntityBreedAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.breed_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "block.grow_attempt"),
+                quote! { async fn grow_attempt(_: BlockGrowAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.grow_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "block.fertilize_attempt"),
+                quote! { async fn fertilize_attempt(_: BlockFertilizeAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.fertilize_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.fished_attempt"),
+                quote! { async fn fished_attempt(_: PlayerFishedAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.fished_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

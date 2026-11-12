@@ -133,6 +133,13 @@ fn integer(table: &Table, key: &str, min: i64, max: i64) -> Result<i64> {
     )?;
     Ok(n)
 }
+fn optional_integer(table: &Table, key: &str, min: i64, max: i64, default: i64) -> Result<i64> {
+    if table.contains_key(key) {
+        integer(table, key, min, max)
+    } else {
+        Ok(default)
+    }
+}
 fn numeric(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && (s.len() == 1 || !s.starts_with('0'))
 }
@@ -213,6 +220,76 @@ fn metadata(value: &Value, depth: usize, nodes: &mut usize) -> Result<()> {
     }
     Ok(())
 }
+
+fn validate_command_declarations(
+    declarations: &[Value],
+    key: &str,
+    names: &mut BTreeSet<String>,
+) -> Result<()> {
+    let context = format!("modules.{key}");
+    for value in declarations {
+        let command = table(value, &context)?;
+        keys(
+            command,
+            &["name", "schema_version", "permission_level", "arguments"],
+            &context,
+        )?;
+        let name = text(command, "name")?;
+        require(
+            name.len() <= 128
+                && (name.as_bytes()[0].is_ascii_lowercase() || name.as_bytes()[0].is_ascii_digit())
+                && name.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
+                })
+                && names.insert(name.to_owned()),
+            format!("{context}.name: invalid or duplicate callback name"),
+        )?;
+        integer(command, "schema_version", 1, u32::MAX as i64)?;
+        integer(command, "permission_level", 0, 4)?;
+        let arguments = array(command, "arguments", 16)?;
+        let mut argument_names = BTreeSet::new();
+        for (index, value) in arguments.iter().enumerate() {
+            let argument = table(value, "command argument")?;
+            keys(
+                argument,
+                &["name", "type", "min", "max"],
+                "command argument",
+            )?;
+            let name = text(argument, "name")?;
+            require(
+                identifier(name) && !name.contains('-') && argument_names.insert(name),
+                "argument.name: invalid or duplicate name",
+            )?;
+            let kind = text(argument, "type")?;
+            require(
+                ["word", "string", "greedy_string", "integer", "boolean"].contains(&kind),
+                "argument.type: unsupported type",
+            )?;
+            require(
+                kind != "greedy_string" || index + 1 == arguments.len(),
+                "greedy_string must be final argument",
+            )?;
+            require(
+                kind == "integer"
+                    || (!argument.contains_key("min") && !argument.contains_key("max")),
+                "only integer arguments accept min/max",
+            )?;
+            let low = if argument.contains_key("min") {
+                integer(argument, "min", i32::MIN as i64, i32::MAX as i64)?
+            } else {
+                i32::MIN as i64
+            };
+            let high = if argument.contains_key("max") {
+                integer(argument, "max", i32::MIN as i64, i32::MAX as i64)?
+            } else {
+                i32::MAX as i64
+            };
+            require(low <= high, "argument min exceeds max")?;
+        }
+    }
+    Ok(())
+}
+
 impl Manifest {
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         require(
@@ -302,6 +379,7 @@ impl Manifest {
                     "provides",
                     "exports",
                     "commands",
+                    "client_commands",
                     "channels",
                 ],
                 "modules",
@@ -328,7 +406,13 @@ impl Manifest {
                 let channel = table(value, "modules.channels")?;
                 keys(
                     channel,
-                    &["name", "schema_version", "directions"],
+                    &[
+                        "name",
+                        "schema_version",
+                        "directions",
+                        "messages_per_second",
+                        "burst",
+                    ],
                     "modules.channels",
                 )?;
                 let name = text(channel, "name")?;
@@ -337,6 +421,8 @@ impl Manifest {
                     "modules.channels.name: invalid or duplicate dot-separated lowercase identifier",
                 )?;
                 integer(channel, "schema_version", 1, u32::MAX as i64)?;
+                optional_integer(channel, "messages_per_second", 1, 1000, 100)?;
+                optional_integer(channel, "burst", 1, 2000, 200)?;
                 let directions = strings(channel, "directions")?;
                 require(
                     !directions.is_empty()
@@ -378,67 +464,23 @@ impl Manifest {
                     "modules.exports.visibility: invalid visibility",
                 )?;
             }
-            let commands = array(m, "commands", 64)?;
+            let commands = array(m, "commands", 128)?;
+            let client_commands = array(m, "client_commands", 128)?;
             require(
                 commands.is_empty() || side != "client",
-                "client-only modules cannot declare commands",
+                "client-only modules cannot declare server commands",
+            )?;
+            require(
+                client_commands.is_empty() || side != "server",
+                "server-only modules cannot declare client commands",
+            )?;
+            require(
+                commands.len() + client_commands.len() <= 128,
+                "modules.commands: server and client commands combined exceed 128 entries per module",
             )?;
             let mut names = BTreeSet::new();
-            for v in commands {
-                let c = table(v, "modules.commands")?;
-                keys(
-                    c,
-                    &["name", "schema_version", "permission_level", "arguments"],
-                    "modules.commands",
-                )?;
-                let n = text(c, "name")?;
-                require(
-                    n.len() <= 128
-                        && n.as_bytes()[0].is_ascii_alphanumeric()
-                        && n.bytes().all(|b| {
-                            b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b)
-                        })
-                        && names.insert(n),
-                    "commands.name: invalid or duplicate callback name",
-                )?;
-                integer(c, "schema_version", 1, u32::MAX as i64)?;
-                integer(c, "permission_level", 0, 4)?;
-                let args = array(c, "arguments", 16)?;
-                let mut arg_names = BTreeSet::new();
-                for (index, v) in args.iter().enumerate() {
-                    let a = table(v, "command argument")?;
-                    keys(a, &["name", "type", "min", "max"], "command argument")?;
-                    let n = text(a, "name")?;
-                    require(
-                        identifier(n) && !n.contains('-') && arg_names.insert(n),
-                        "argument.name: invalid or duplicate name",
-                    )?;
-                    let kind = text(a, "type")?;
-                    require(
-                        ["word", "string", "greedy_string", "integer", "boolean"].contains(&kind),
-                        "argument.type: unsupported type",
-                    )?;
-                    require(
-                        kind != "greedy_string" || index + 1 == args.len(),
-                        "greedy_string must be final argument",
-                    )?;
-                    require(
-                        kind == "integer" || (!a.contains_key("min") && !a.contains_key("max")),
-                        "only integer arguments accept min/max",
-                    )?;
-                    let low = if a.contains_key("min") {
-                        integer(a, "min", i32::MIN as i64, i32::MAX as i64)?
-                    } else {
-                        i32::MIN as i64
-                    };
-                    let high = if a.contains_key("max") {
-                        integer(a, "max", i32::MIN as i64, i32::MAX as i64)?
-                    } else {
-                        i32::MAX as i64
-                    };
-                    require(low <= high, "argument min exceeds max")?;
-                }
-            }
+            validate_command_declarations(commands, "commands", &mut names)?;
+            validate_command_declarations(client_commands, "client_commands", &mut names)?;
             modules.push(Module {
                 id: module_id.to_owned(),
                 path: path.to_owned(),

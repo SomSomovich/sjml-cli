@@ -95,11 +95,15 @@ pub mod batch;
 pub mod block_entity;
 pub mod chat_messages;
 pub mod client_audio;
+pub mod client_camera;
 pub mod client_chat;
 pub mod client_input;
 pub mod client_keybindings;
+pub mod client_localization;
+pub mod client_music;
 pub mod client_notifications;
 pub mod client_screen;
+pub mod command_suggestions;
 pub mod entity;
 pub mod entity_attributes;
 pub mod entity_data;
@@ -109,9 +113,12 @@ pub mod gl;
 pub mod host;
 pub mod inventory;
 pub mod menu;
+pub mod model_animation;
 pub mod network;
 pub mod player;
+pub mod player_advancement;
 pub mod player_inventory;
+pub mod player_statistics;
 pub mod recipe;
 pub mod registry;
 pub mod render;
@@ -138,23 +145,39 @@ pub use chat_messages::{
     MAX_CHAT_INTERACTION_VALUE_BYTES, MAX_CHAT_TEXT_SPANS,
 };
 pub use client_audio::SoundCategory;
+pub use client_camera::{
+    clear_fov_scale, set_fov_scale, CLIENT_CAMERA_FOV_CAPABILITY, MAX_FOV_SCALE, MIN_FOV_SCALE,
+};
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{
-    cursor_position, subscribe_global_keys, unsubscribe_global_keys, ClientInputAction,
-    ClientInputEvent, ClientInputSubscriptionHandle, CursorPosition, GlobalKeyObservation,
-    GlobalKeyObservationHandle, MouseScrollEvent, MouseScrollSubscriptionHandle,
-    MAX_CURSOR_COORDINATE,
+    cursor_position, is_key_down, is_mouse_button_down, subscribe_global_keys,
+    unsubscribe_global_keys, ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
+    CursorPosition, GlobalKeyObservation, GlobalKeyObservationHandle, MouseScrollEvent,
+    MouseScrollSubscriptionHandle, MAX_CURSOR_COORDINATE, MAX_GLFW_KEY_CODE, MAX_MOUSE_BUTTON,
 };
 pub use client_keybindings::{
     Context as KeybindingContext, Key as KeybindingKey, KeybindingDefinition,
     KeybindingSubscriptionHandle, Modifier as KeybindingModifier,
     MAX_CLIENT_KEYBINDING_SUBSCRIPTIONS,
 };
+pub use client_localization::{
+    translate as translate_client_text, CLIENT_LOCALIZATION_READ_CAPABILITY, MAX_TRANSLATION_BYTES,
+    MAX_TRANSLATION_KEY_BYTES,
+};
+pub use client_music::{
+    subscribe_music_selection, unsubscribe_music_selection, ClientMusicSelectionEvent,
+    MusicSelectionDecision, CLIENT_MUSIC_CAPABILITY, MAX_MUSIC_DELAY_TICKS,
+    MAX_MUSIC_SOUND_ID_BYTES,
+};
 pub use client_notifications::NotificationKind;
 pub use client_screen::{
-    ClientScreenButton, ClientScreenDefinition, ClientScreenFormDefinition,
+    ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition, ClientScreenFormDefinition,
     ClientScreenListFormDefinition, ClientScreenSelectionList, ClientScreenSelectionOption,
-    ClientScreenTextField,
+    ClientScreenSettingsFormDefinition, ClientScreenTextField,
+};
+pub use command_suggestions::{
+    CommandSuggestionArgument, CommandSuggestionRequest, CommandSuggestions,
+    MAX_COMMAND_SUGGESTIONS, MAX_COMMAND_SUGGESTION_BYTES, MAX_COMMAND_SUGGESTION_PARTIAL_BYTES,
 };
 pub use entity::{
     ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
@@ -163,9 +186,16 @@ pub use entity::{
 };
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
+pub use events::BlockFertilizeAttempt;
+pub use events::BlockGrowAttempt;
+pub use events::EntityBreedAttempt;
 pub use events::{
     ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit,
-    ClientScreenFormValue, ItemTooltipLines, PlayerSleepAttempt,
+    ClientScreenFormValue, ClientTick, EntityTick, ItemTooltipLines, ItemUseAction, ModuleItemUse,
+    PlayerItemCrafted, PlayerItemUseAttempt, PlayerSleepAttempt, PlayerTick,
+};
+pub use events::{
+    FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
 };
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
@@ -179,6 +209,11 @@ pub use inventory::{
 pub use menu::{
     EditableMenuDefinition, EditableMenuEndpoint, EditableMenuSlot, EditableMenuStack, MenuAction,
     MenuDefinition, MenuItem,
+};
+pub use model_animation::{
+    register_block_entity_model_keyframe_track, register_entity_model_keyframe_track,
+    ModelAnimationTarget, ModelKeyframe, ModelKeyframeTrack, MAX_MODEL_KEYFRAMES,
+    MAX_MODEL_KEYFRAME_DURATION_TICKS,
 };
 pub use network::{
     ChannelRef, LogicalSide, NetworkContext, NetworkContextSnapshot, NetworkDirection,
@@ -195,9 +230,20 @@ pub use player::{
     MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_PLAYER_TITLE_TEXT_CODE_POINTS,
     MAX_PLAYER_TITLE_TIMING_TICKS, MAX_PLAYER_VELOCITY_COMPONENT,
 };
+pub use player_advancement::{
+    grant_criterion as grant_advancement_criterion, progress as player_advancement_progress,
+    revoke_criterion as revoke_advancement_criterion, PlayerAdvancementCriterion,
+    PlayerAdvancementProgress, MAX_PLAYER_ADVANCEMENT_CRITERIA,
+    MAX_PLAYER_ADVANCEMENT_CRITERION_ID_BYTES, MAX_PLAYER_ADVANCEMENT_PROGRESS_BYTES,
+};
 pub use player_inventory::{
     PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
     MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+};
+pub use player_statistics::{
+    increment as increment_player_statistic, read as player_statistic, PlayerStatistic,
+    StatisticFamily, MAX_INCREMENT as MAX_PLAYER_REGISTRY_STATISTIC_INCREMENT,
+    MAX_STATISTIC_ID_BYTES,
 };
 pub use recipe::{
     CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
@@ -227,8 +273,8 @@ pub use serialization::{
     MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
 };
 pub use sjml_macros::{
-    client_command, command, compute, event, event_async, mod_init, mod_register, mod_shutdown,
-    recipe, service,
+    client_command, client_music_selection, command, command_suggestions, compute, event,
+    event_async, mod_init, mod_register, mod_shutdown, recipe, service,
 };
 pub use sjml_macros::{StableDecode, StableEncode};
 pub use storage::{
@@ -240,16 +286,16 @@ pub use widgets::{
     Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
 };
 pub use world::{
-    BlockProperty, BlockStateSnapshot, ChunkPos, HeightmapType, LightSnapshot, WorldBorderSnapshot,
-    WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint, MAX_WORLD_BIOME_IDS,
-    MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_COORDINATE,
-    MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
-    MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
-    MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
-    MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
+    BlockProperty, BlockStateSnapshot, ChunkPos, FluidStateSnapshot, HeightmapType, LightSnapshot,
+    WorldBorderSnapshot, WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
+    MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
+    MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
+    MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
+    MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+    MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
     MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_CHUNKS, MAX_WORLD_CHUNKS_RESPONSE_BYTES,
-    MAX_WORLD_CHUNK_RADIUS, MAX_WORLD_GAME_TIME_TICKS, MAX_WORLD_REDSTONE_SIGNAL,
-    MAX_WORLD_SPAWN_POINT_BYTES,
+    MAX_WORLD_CHUNK_RADIUS, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
+    MAX_WORLD_REDSTONE_SIGNAL, MAX_WORLD_SPAWN_POINT_BYTES,
 };
 
 /// Common imports for an SJML guest module.
@@ -267,13 +313,18 @@ pub mod prelude {
     };
     pub use crate::client_audio;
     pub use crate::client_audio::SoundCategory;
+    pub use crate::client_camera;
+    pub use crate::client_camera::{
+        clear_fov_scale, set_fov_scale, CLIENT_CAMERA_FOV_CAPABILITY, MAX_FOV_SCALE, MIN_FOV_SCALE,
+    };
     pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
     pub use crate::client_input;
     pub use crate::client_input::{
-        cursor_position, subscribe_global_keys, subscribe_scroll, unsubscribe_global_keys,
-        unsubscribe_scroll, ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
-        CursorPosition, GlobalKeyObservation, GlobalKeyObservationHandle, MouseScrollEvent,
-        MouseScrollSubscriptionHandle, MAX_CLIENT_INPUT_SUBSCRIPTIONS, MAX_CURSOR_COORDINATE,
+        cursor_position, is_key_down, is_mouse_button_down, subscribe_global_keys,
+        subscribe_scroll, unsubscribe_global_keys, unsubscribe_scroll, ClientInputAction,
+        ClientInputEvent, ClientInputSubscriptionHandle, CursorPosition, GlobalKeyObservation,
+        GlobalKeyObservationHandle, MouseScrollEvent, MouseScrollSubscriptionHandle,
+        MAX_CLIENT_INPUT_SUBSCRIPTIONS, MAX_CURSOR_COORDINATE, MAX_GLFW_KEY_CODE, MAX_MOUSE_BUTTON,
     };
     pub use crate::client_keybindings;
     pub use crate::client_keybindings::{
@@ -281,13 +332,29 @@ pub mod prelude {
         KeybindingSubscriptionHandle, Modifier as KeybindingModifier,
         MAX_CLIENT_KEYBINDING_SUBSCRIPTIONS,
     };
+    pub use crate::client_localization;
+    pub use crate::client_localization::{
+        translate as translate_client_text, CLIENT_LOCALIZATION_READ_CAPABILITY,
+        MAX_TRANSLATION_BYTES, MAX_TRANSLATION_KEY_BYTES,
+    };
+    pub use crate::client_music;
+    pub use crate::client_music::{
+        subscribe_music_selection, unsubscribe_music_selection, ClientMusicSelectionEvent,
+        MusicSelectionDecision, CLIENT_MUSIC_CAPABILITY, MAX_MUSIC_DELAY_TICKS,
+        MAX_MUSIC_SOUND_ID_BYTES,
+    };
     pub use crate::client_notifications;
     pub use crate::client_notifications::NotificationKind;
     pub use crate::client_screen;
     pub use crate::client_screen::{
-        ClientScreenButton, ClientScreenDefinition, ClientScreenFormDefinition,
-        ClientScreenListFormDefinition, ClientScreenSelectionList, ClientScreenSelectionOption,
-        ClientScreenTextField,
+        ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition,
+        ClientScreenFormDefinition, ClientScreenListFormDefinition, ClientScreenSelectionList,
+        ClientScreenSelectionOption, ClientScreenSettingsFormDefinition, ClientScreenTextField,
+    };
+    pub use crate::command_suggestions::{
+        CommandSuggestionArgument, CommandSuggestionRequest, CommandSuggestions,
+        MAX_COMMAND_SUGGESTIONS, MAX_COMMAND_SUGGESTION_BYTES,
+        MAX_COMMAND_SUGGESTION_PARTIAL_BYTES,
     };
     pub use crate::entity;
     pub use crate::entity::{
@@ -304,17 +371,24 @@ pub mod prelude {
     };
     pub use crate::error::{ErrorCode, SjmlError, SjmlResult};
     pub use crate::events;
+    pub use crate::events::BlockGrowAttempt;
+    pub use crate::events::EntityBreedAttempt;
     pub use crate::events::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
-        BlockPlaceAttempt, ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction,
-        ClientScreenFormSubmit, ClientScreenFormValue, EffectTickEvent, EntityDamageAttempt,
-        EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
-        EntityHealAttempt, EntityJoinAttempt, EntitySpawned, EntityTargetAttempt, EventPriority,
-        ExplosionAttempt, InventoryChanged, ItemTooltipLines, PlayerAdvancementEarned,
-        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft,
-        PlayerMoved, PlayerSleepAttempt, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
+        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
+        BlockFertilizeAttempt, BlockPlace, BlockPlaceAttempt, ClientChatSendAttempt,
+        ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
+        ClientTick, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
+        EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleItemUse, PlayerAdvancementEarned,
+        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
+        PlayerItemUseAttempt, PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt,
+        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        DEFAULT_SERVER_TICK_INTERVAL, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
         MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+    };
+    pub use crate::events::{
+        FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -332,6 +406,12 @@ pub mod prelude {
     pub use crate::menu::{
         EditableMenuDefinition, EditableMenuEndpoint, EditableMenuSlot, EditableMenuStack,
         MenuAction, MenuDefinition, MenuItem,
+    };
+    pub use crate::model_animation;
+    pub use crate::model_animation::{
+        register_block_entity_model_keyframe_track, register_entity_model_keyframe_track,
+        ModelAnimationTarget, ModelKeyframe, ModelKeyframeTrack, MAX_MODEL_KEYFRAMES,
+        MAX_MODEL_KEYFRAME_DURATION_TICKS,
     };
     pub use crate::network;
     pub use crate::network::{
@@ -351,30 +431,45 @@ pub mod prelude {
         MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES, MAX_PLAYER_RESPAWN_POINT_BYTES,
         MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES, MAX_PLAYER_VELOCITY_COMPONENT,
     };
+    pub use crate::player_advancement;
+    pub use crate::player_advancement::{
+        grant_criterion as grant_advancement_criterion, progress as player_advancement_progress,
+        revoke_criterion as revoke_advancement_criterion, PlayerAdvancementCriterion,
+        PlayerAdvancementProgress, MAX_PLAYER_ADVANCEMENT_CRITERIA,
+        MAX_PLAYER_ADVANCEMENT_CRITERION_ID_BYTES, MAX_PLAYER_ADVANCEMENT_PROGRESS_BYTES,
+    };
     pub use crate::player_inventory;
     pub use crate::player_inventory::{
         PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES,
         MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
         MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
+    pub use crate::player_statistics;
+    pub use crate::player_statistics::{
+        increment as increment_player_statistic, read as player_statistic, PlayerStatistic,
+        StatisticFamily, MAX_INCREMENT as MAX_PLAYER_REGISTRY_STATISTIC_INCREMENT,
+        MAX_STATISTIC_ID_BYTES,
+    };
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
     pub use crate::registry::{
         add_to_creative_tab, custom_registry_value, register_attribute_effect, register_block,
-        register_block_entity, register_block_entity_model, register_cooking_recipe,
-        register_creative_tab, register_custom_registry, register_custom_value,
-        register_effect_tick, register_entity, register_entity_ai_goal, register_entity_model,
-        register_fluid, register_fluid_with_visuals, register_integer_component, register_item,
-        register_particle, register_recipe_serializer, register_shaped_recipe,
+        register_block_entity, register_block_entity_model, register_boolean_component,
+        register_brewing_recipe, register_cooking_recipe, register_creative_tab,
+        register_custom_registry, register_custom_value, register_effect_tick, register_entity,
+        register_entity_ai_goal, register_entity_model, register_fluid,
+        register_fluid_with_visuals, register_integer_component, register_item, register_particle,
+        register_potion, register_recipe_serializer, register_shaped_recipe,
         register_shapeless_recipe, register_smithing_transform_recipe, register_sound,
-        register_string_component, register_villager_trade, set_entity_attribute, set_item_food,
-        set_item_food_with_effects, set_item_integer_component, set_item_rarity,
-        set_item_string_component, AttributeModifierOperation, BlockDefinition,
-        BlockEntityModelDefinition, CookingRecipeDefinition, CookingRecipeKind,
-        CreativeTabDefinition, EffectCategory, EntityAiGoal, EntityAttribute, EntityDefinition,
-        EntityModelDefinition, FluidDefinition, FluidVisualDefinition, IntegerComponentDefinition,
-        ItemDefinition, ItemFood, ItemFoodEffect, ItemFoodEffects, ItemRarity, ModelAnimation,
-        ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey,
+        register_string_component, register_villager_trade, set_entity_attribute,
+        set_item_boolean_component, set_item_food, set_item_food_with_effects,
+        set_item_integer_component, set_item_rarity, set_item_string_component,
+        AttributeModifierOperation, BlockDefinition, BlockEntityModelDefinition,
+        CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
+        EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
+        FluidVisualDefinition, IntegerComponentDefinition, ItemDefinition, ItemFood,
+        ItemFoodEffect, ItemFoodEffects, ItemRarity, ModelAnimation, ModelAnimationAxis,
+        ModelCuboid, RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey,
         ShapelessRecipeDefinition, SmithingTransformRecipeDefinition, StringComponentDefinition,
         VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS, MAX_ITEM_FOOD_EFFECTS,
         MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
@@ -410,20 +505,20 @@ pub mod prelude {
     };
     pub use crate::world;
     pub use crate::world::{
-        BlockProperty, BlockStateSnapshot, ChunkPos, HeightmapType, LightSnapshot,
-        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, WorldBorderSnapshot,
-        WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
+        BlockProperty, BlockStateSnapshot, ChunkPos, FluidStateSnapshot, HeightmapType,
+        LightSnapshot, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
+        WorldBorderSnapshot, WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
         MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
         MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
         MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
         MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
-        MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_RAYCAST_RESPONSE_BYTES,
-        MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE, MAX_WORLD_REDSTONE_SIGNAL,
-        MAX_WORLD_SPAWN_POINT_BYTES,
+        MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES,
+        MAX_WORLD_RAYCAST_RESPONSE_BYTES, MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
+        MAX_WORLD_REDSTONE_SIGNAL, MAX_WORLD_SPAWN_POINT_BYTES,
     };
     pub use crate::{
-        client_command, command, compute, event, event_async, mod_init, mod_register, mod_shutdown,
-        recipe, service,
+        client_command, client_music_selection, command, command_suggestions, compute, event,
+        event_async, mod_init, mod_register, mod_shutdown, recipe, service,
     };
     pub use crate::{StableDecode, StableEncode};
 }

@@ -238,6 +238,120 @@ opening the list form; otherwise the host returns `INVALID_ARGUMENT`.
 Schema v3 is additive: schema-v1 button-only screens and schema-v2 text-only forms keep their
 existing payloads and callbacks.
 
+## Checkbox settings forms
+
+Use `client_screen::open_settings_form` when a screen combines checkboxes with optional text
+inputs or a single-choice list. `ClientScreenSettingsFormDefinition::new` takes the base screen,
+zero to four `ClientScreenTextField` values, an optional `ClientScreenSelectionList`, and one to
+eight `ClientScreenCheckbox` values. `ClientScreenCheckbox::new(id, label, initial_checked)`
+validates a checkbox's stable ID and literal label. The constructor validates the complete form
+before it is encoded:
+
+- Element IDs must use 1–64 lowercase ASCII ID bytes (`a-z`, `0-9`, `_.:/-`) and be unique across
+  buttons, text fields, the list, and checkboxes. Selection option IDs must also be unique within
+  their list.
+- Checkbox labels and list labels/options must be 1–96 UTF-8 bytes and contain no control
+  characters. Text fields keep their existing 1–96 byte labels and have a configured value limit
+  from 1–128 UTF-8 bytes.
+- A selection list, when present, must contain 1–32 options; its initial selection must name an
+  option. The complete encoded screen must fit in 4,096 bytes.
+
+This is schema v4. It keeps the schema-v1 screen prefix, followed by text fields, an optional list,
+and checkboxes. Schemas v1, v2, and v3 retain their existing byte layouts. The callback remains the
+owner-only `client.screen.form_submit` callback; it must be exported before the screen is opened.
+It needs the existing `client.ui.screen` capability and does not use `events::subscribe`. On any
+form-button click, including Cancel, `ClientScreenFormSubmit.fields` contains values in declaration
+order: text fields first, the selection value if present next, then checkboxes. Text values are the
+current input strings, a list value is its selected option ID (or an empty string when unselected),
+and checkbox values are the strings `"true"` or `"false"`. The clicked button ID is available in
+`submit.button_id`. A maximum-size settings form returns 13 values: four text fields, one list
+selection, and eight checkboxes. Escape closes the screen without submitting.
+
+```rust
+use sjml::client_screen::{
+    self, ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition,
+    ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+    ClientScreenTextField,
+};
+use sjml::events::ClientScreenFormSubmit;
+use sjml::{client_command, event, SjmlResult};
+
+#[client_command(name = "settings.open")]
+fn open_settings() -> SjmlResult<String> {
+    let screen = ClientScreenDefinition::new(
+        "preferences",
+        "Preferences",
+        vec!["Choose how this client behaves.".to_owned()],
+        vec![
+            ClientScreenButton::new("save", "Save")?,
+            ClientScreenButton::new("cancel", "Cancel")?,
+        ],
+    )?;
+    let settings = ClientScreenSettingsFormDefinition::new(
+        screen,
+        vec![ClientScreenTextField::new("nickname", "Nickname", "", 32)?],
+        Some(ClientScreenSelectionList::new(
+            "quality",
+            "Quality",
+            vec![
+                ClientScreenSelectionOption::new("low", "Low")?,
+                ClientScreenSelectionOption::new("high", "High")?,
+            ],
+            Some("high".to_owned()),
+        )?),
+        vec![
+            ClientScreenCheckbox::new("sound", "Enable sound", true)?,
+            ClientScreenCheckbox::new("notifications", "Show notifications", false)?,
+        ],
+    )?;
+    client_screen::open_settings_form(&settings)?;
+    Ok("Opened settings".to_owned())
+}
+
+#[event(name = "client.screen.form_submit")]
+fn handle_settings(submit: ClientScreenFormSubmit) -> SjmlResult<()> {
+    if submit.screen_id != "preferences" {
+        return Ok(());
+    }
+    let value = |id: &str| {
+        submit.fields.iter()
+            .find(|field| field.id == id)
+            .map(|field| field.value.as_str())
+            .unwrap_or_default()
+    };
+    let nickname = value("nickname");
+    let quality = value("quality");
+    let sound_enabled = value("sound") == "true";
+    let notifications_enabled = value("notifications") == "true";
+    let _ = (nickname, quality, sound_enabled, notifications_enabled, &submit.button_id);
+    Ok(())
+}
+```
+
+The command takes no arguments. Declare it with `client.command`, then run
+`/sjmlclient client_screen_demo screen settings.open` in Minecraft:
+
+```toml
+[[modules]]
+id = "screen"
+path = "modules/screen.wasm"
+side = "client"
+permissions = ["client.ui.screen", "client.command"]
+
+[[modules.client_commands]]
+name = "settings.open"
+schema_version = 1
+permission_level = 0
+```
+
+Grant the capabilities in `config/sjml-permissions.toml`:
+
+```toml
+[[grant]]
+module = "client_screen_demo/screen"
+capabilities = ["client.ui.screen", "client.command"]
+```
+
 ## Body scrolling
 
 If the body text is taller than its visible area, the mouse wheel scrolls only that body viewport.

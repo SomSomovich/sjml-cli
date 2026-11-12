@@ -6,9 +6,10 @@ use sjml::player::PlayerTeleport;
 use sjml::prelude::PlayerMoved;
 use sjml::registry::{register_villager_trade, VillagerTradeItem, VillagerTradeOffer};
 use sjml::{
-    client_command, command, event, from_bytes, mod_init, mod_register, mod_shutdown, service,
-    to_bytes, EntityHandle, ErrorCode, PlayerHandle, PlayerSnapshot, SjmlError, SjmlResult,
-    StableDecode, StableEncode, WorldHandle,
+    client_command, command, command_suggestions, event, from_bytes, mod_init, mod_register,
+    mod_shutdown, service, to_bytes, CommandSuggestionArgument, CommandSuggestionRequest,
+    CommandSuggestions, EntityHandle, ErrorCode, PlayerHandle, PlayerSnapshot, SjmlError,
+    SjmlResult, StableDecode, StableEncode, WorldHandle,
 };
 
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -82,6 +83,11 @@ fn echo(message: String) -> SjmlResult<String> {
     Ok(message)
 }
 
+#[command_suggestions(name = "players.teleport")]
+fn player_suggestions(_: CommandSuggestionRequest) -> SjmlResult<CommandSuggestions> {
+    CommandSuggestions::new(["Alex", "Alexa"])
+}
+
 #[client_command(name = "demo.local_echo")]
 fn local_echo(message: String) -> SjmlResult<String> {
     Ok(message)
@@ -148,6 +154,24 @@ fn client_command_callback_uses_the_typed_sdk_contract() {
         local_echo("hello locally".to_owned()),
         Ok("hello locally".to_owned())
     );
+}
+
+#[test]
+fn command_suggestion_callback_uses_the_typed_bounded_sdk_contract() {
+    let request = CommandSuggestionRequest {
+        command_name: "players.teleport".into(),
+        source_player_id: Some("00000000-0000-0000-0000-000000000001".into()),
+        argument_index: 1,
+        argument_name: "player".into(),
+        partial: "Al".into(),
+        previous_arguments: vec![CommandSuggestionArgument {
+            name: "dimension".into(),
+            kind: "word".into(),
+            value: "minecraft:overworld".into(),
+        }],
+    };
+    let suggestions = player_suggestions(request).unwrap();
+    assert_eq!(suggestions.values(), &["Alex", "Alexa"]);
 }
 
 #[test]

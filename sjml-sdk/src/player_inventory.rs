@@ -33,6 +33,10 @@ pub const MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES: usize = 1_024;
 pub const MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS: usize = 256;
 /// Maximum UTF-8 path length for a module-owned integer data component.
 pub const MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES: usize = 256;
+/// Maximum UTF-8 registry ID length for a vanilla player-stack enchantment operation.
+pub const MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES: usize = 256;
+/// Maximum broad ABI enchantment level; the host applies each registry entry's narrower bounds.
+pub const MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL: u32 = 255;
 
 /// The only two updates accepted by [`set_slot`]. New stacks use registered items' default components.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -74,6 +78,36 @@ extern "C" {
     #[link_name = "clear_player_item_custom_name"]
     fn imported_clear_player_item_custom_name(player: i32, player_length: i32, slot: i32) -> i32;
 
+    #[link_name = "read_player_enchantment_level"]
+    fn imported_read_player_enchantment_level(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        enchantment_id: i32,
+        enchantment_id_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "set_player_enchantment_level"]
+    fn imported_set_player_enchantment_level(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        enchantment_id: i32,
+        enchantment_id_length: i32,
+        level: i32,
+    ) -> i32;
+
+    #[link_name = "remove_player_enchantment"]
+    fn imported_remove_player_enchantment(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        enchantment_id: i32,
+        enchantment_id_length: i32,
+    ) -> i32;
+
     #[link_name = "read_player_integer_component"]
     fn imported_read_player_integer_component(
         player: i32,
@@ -87,6 +121,27 @@ extern "C" {
 
     #[link_name = "write_player_integer_component"]
     fn imported_write_player_integer_component(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        value: i32,
+    ) -> i32;
+
+    #[link_name = "read_player_boolean_component"]
+    fn imported_read_player_boolean_component(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "write_player_boolean_component"]
+    fn imported_write_player_boolean_component(
         player: i32,
         player_length: i32,
         slot: i32,
@@ -207,6 +262,81 @@ pub fn write_integer_component(
         status_result(
             status,
             "host rejected the player inventory integer component write",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, component_path, value);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads one module-owned boolean component from a non-empty live player-inventory stack.
+///
+/// The path must name a component registered by this module through
+/// [`crate::registry::register_boolean_component`]. An empty slot or unset component returns
+/// `Ok(None)`. This requires `entity.read` plus `inventory.read` and is available only to
+/// logical-server modules.
+pub fn read_boolean_component(
+    player: PlayerHandle,
+    slot: u32,
+    component_path: &str,
+) -> SjmlResult<Option<bool>> {
+    validate_integer_component_access(slot, component_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        read_output(|output, capacity| {
+            // SAFETY: stable handle/path buffers and output memory live through the synchronous call.
+            unsafe {
+                imported_read_player_boolean_component(
+                    player.as_ptr() as usize as u32 as i32,
+                    player.len() as i32,
+                    slot as i32,
+                    component_path.as_ptr() as usize as u32 as i32,
+                    component_path.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, component_path);
+        Err(unsupported_target())
+    }
+}
+
+/// Writes a module-owned boolean component on an existing live player-inventory stack.
+///
+/// The host verifies ownership and copies the existing stack before changing only this component,
+/// preserving its item, count, and all other components. This requires `entity.read` plus
+/// `inventory.write` and is available only to logical-server modules.
+pub fn write_boolean_component(
+    player: PlayerHandle,
+    slot: u32,
+    component_path: &str,
+    value: bool,
+) -> SjmlResult<()> {
+    validate_integer_component_access(slot, component_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle/path buffers and the scalar value stay live through the synchronous call.
+        let status = unsafe {
+            imported_write_player_boolean_component(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as i32,
+                i32::from(value),
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory boolean component write",
         )
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -383,6 +513,169 @@ pub fn clear_item_custom_name(player: PlayerHandle, slot: u32) -> SjmlResult<()>
     }
 }
 
+/// Reads the level of one registered enchantment on an existing player inventory stack.
+///
+/// Returns `None` when the item does not currently have that enchantment. The ID must be a
+/// canonical registry ID such as `minecraft:sharpness`; the host resolves it from the active
+/// world's enchantment registry. Enchanted books read their stored enchantments. The stack must
+/// be nonempty. Slot indices use the same layout as [`read`].
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.read`; this runs only
+/// on the logical-server thread and requires a live player session handle.
+pub fn read_enchantment_level(
+    player: PlayerHandle,
+    slot: u32,
+    enchantment_id: &str,
+) -> SjmlResult<Option<u32>> {
+    validate_enchantment_access(slot, enchantment_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        let level: Option<u32> = read_output(|output, capacity| {
+            // SAFETY: handle/ID and allocated output remain valid for this synchronous host call.
+            unsafe {
+                imported_read_player_enchantment_level(
+                    player.as_ptr() as usize as u32 as i32,
+                    player.len() as i32,
+                    slot as i32,
+                    enchantment_id.as_ptr() as usize as u32 as i32,
+                    enchantment_id.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if level.is_some_and(|value| value == 0 || value > MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid player inventory enchantment level",
+            ));
+        }
+        Ok(level)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, enchantment_id);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets one registered vanilla enchantment on an applicable existing player inventory stack.
+///
+/// The level must be in `1..=255`; the host additionally enforces the enchantment registry's
+/// exact minimum and maximum, item applicability, and conflicts with other enchantments. It
+/// changes only the requested enchantment, preserving item, count, durability, and all unrelated
+/// components/enchantments. Enchanted books update their stored-enchantment component.
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`; this runs only
+/// on the logical-server thread and rejects empty slots and stale player handles.
+pub fn set_enchantment_level(
+    player: PlayerHandle,
+    slot: u32,
+    enchantment_id: &str,
+    level: u32,
+) -> SjmlResult<()> {
+    validate_enchantment_access(slot, enchantment_id)?;
+    if !(1..=MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL).contains(&level) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory enchantment level must be between 1 and 255",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle and borrowed UTF-8 ID remain live for the synchronous host call.
+        let status = unsafe {
+            imported_set_player_enchantment_level(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                enchantment_id.as_ptr() as usize as u32 as i32,
+                enchantment_id.len() as i32,
+                level as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory enchantment update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, enchantment_id, level);
+        Err(unsupported_target())
+    }
+}
+
+/// Removes only one registered enchantment from an existing player inventory stack.
+///
+/// The item, count, durability, other enchantments, and unrelated components remain unchanged.
+/// Removing an enchantment that is already absent succeeds without changing the stack. Enchanted
+/// books update their stored-enchantment component. Slot indices use the same layout as [`read`].
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`; this runs only
+/// on the logical-server thread and rejects empty slots and stale player handles.
+pub fn remove_enchantment(player: PlayerHandle, slot: u32, enchantment_id: &str) -> SjmlResult<()> {
+    validate_enchantment_access(slot, enchantment_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle and borrowed UTF-8 ID remain live for the synchronous host call.
+        let status = unsafe {
+            imported_remove_player_enchantment(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                enchantment_id.as_ptr() as usize as u32 as i32,
+                enchantment_id.len() as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory enchantment removal",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, enchantment_id);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_enchantment_access(slot: u32, enchantment_id: &str) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory slot must be between 0 and 40",
+        ));
+    }
+    if !valid_enchantment_id(enchantment_id) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player enchantment ID must be a canonical registry ID of at most 256 bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn valid_enchantment_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES {
+        return false;
+    }
+    let Some((namespace, path)) = id.split_once(':') else {
+        return false;
+    };
+    !namespace.is_empty()
+        && !path.is_empty()
+        && namespace.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+        })
+        && path.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
+        })
+}
+
 fn validate_custom_name(slot: u32, name: &str) -> SjmlResult<()> {
     validate_custom_name_slot(slot)?;
     if name.is_empty() {
@@ -541,15 +834,20 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_item_custom_name, set_damage, set_item_custom_name, set_slot, validate_custom_name,
-        validate_damage, validate_inventory, PlayerInventorySlotUpdate,
-        MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES,
-        MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS, MAX_PLAYER_INVENTORY_DAMAGE,
-        MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
-        MAX_PLAYER_INVENTORY_SLOT_INDEX,
+        clear_item_custom_name, read_enchantment_level, remove_enchantment, set_damage,
+        set_enchantment_level, set_item_custom_name, set_slot, validate_custom_name,
+        validate_damage, validate_enchantment_access, validate_inventory,
+        PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES,
+        MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS,
+        MAX_PLAYER_INVENTORY_DAMAGE, MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES,
+        MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL, MAX_PLAYER_INVENTORY_SLOTS,
+        MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     #[cfg(not(target_arch = "wasm32"))]
-    use super::{read, read_integer_component, write_integer_component};
+    use super::{
+        read, read_boolean_component, read_integer_component, write_boolean_component,
+        write_integer_component,
+    };
     use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
     use crate::ErrorCode;
     #[cfg(not(target_arch = "wasm32"))]
@@ -749,6 +1047,94 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn player_inventory_enchantments_validate_registry_ids_slots_and_levels() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        for slot in [0, 8, 9, 35, 36, 39, MAX_PLAYER_INVENTORY_SLOT_INDEX] {
+            assert!(validate_enchantment_access(slot, "minecraft:sharpness").is_ok());
+            assert_eq!(
+                read_enchantment_level(player, slot, "minecraft:sharpness")
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::UnknownErrorCode,
+                "valid slot {slot} reaches the wasm-only host"
+            );
+        }
+        assert_eq!(
+            remove_enchantment(player, 40, "minecraft:sharpness")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid removal reaches the wasm-only host"
+        );
+        assert_eq!(
+            set_enchantment_level(player, 0, "minecraft:sharpness", 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid level reaches the wasm-only host"
+        );
+        for slot in [41, u32::MAX] {
+            assert_eq!(
+                read_enchantment_level(player, slot, "minecraft:sharpness")
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for id in [
+            "sharpness",
+            "Minecraft:sharpness",
+            "minecraft:",
+            "minecraft:sharpness\n",
+        ] {
+            assert_eq!(
+                read_enchantment_level(player, 0, id).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+                "noncanonical registry ID {id:?} must be rejected before host access"
+            );
+        }
+        assert!(validate_enchantment_access(
+            0,
+            &format!(
+                "x:{}",
+                "a".repeat(MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES - 2)
+            )
+        )
+        .is_ok());
+        assert_eq!(
+            validate_enchantment_access(
+                0,
+                &format!(
+                    "x:{}",
+                    "a".repeat(MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES - 1)
+                )
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_enchantment_level(player, 0, "minecraft:sharpness", 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument,
+            "use remove_enchantment instead of a zero level"
+        );
+        assert_eq!(
+            set_enchantment_level(
+                player,
+                0,
+                "minecraft:sharpness",
+                MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL + 1
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
     #[test]
     fn player_integer_component_paths_and_slots_are_validated_before_host_access() {
         let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
@@ -796,5 +1182,50 @@ mod tests {
                 .code(),
             ErrorCode::InvalidArgument
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn player_boolean_component_paths_and_slots_are_validated_before_host_access() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            read_boolean_component(player, 0, "enabled")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            write_boolean_component(player, 40, "enabled", true)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        for slot in [41, u32::MAX] {
+            assert_eq!(
+                read_boolean_component(player, slot, "enabled")
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                write_boolean_component(player, slot, "enabled", true)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        let oversized = "x".repeat(257);
+        for path in ["", "Enabled", "../enabled", oversized.as_str()] {
+            assert_eq!(
+                read_boolean_component(player, 0, path).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                write_boolean_component(player, 0, path, false)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
     }
 }

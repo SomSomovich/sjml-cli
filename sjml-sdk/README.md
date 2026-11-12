@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.66.0"
+sjml-sdk = "0.73.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -171,7 +171,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.66.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.73.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)
@@ -186,3 +186,15 @@ SDK 0.64.0 adds bounded `client_screen::open` screens with literal text and up t
 
 
 SDK 0.66.0 adds schema-v3 client form screens with up to four UTF-8-limited text fields and one scrollable selection list of up to 32 options. Submit values are delivered directly to the owner through `client.screen.form_submit`; schema-v1 button screens and schema-v2 text forms remain compatible. See `docs/CLIENT_SCREEN.md` in the workspace documentation.
+
+SDK 0.67.0 adds schema-v4 checkbox settings forms, same-module boolean item
+components, detached world-fluid snapshots, local physical-client FOV scaling,
+and server/client tick notifications. Network channel declarations now support
+optional local token-bucket limits without changing their wire format. See the
+focused guides in the workspace `docs/` directory.
+
+SDK 0.73.0 adds loaded-only block tag checks and current-registry item tag
+membership queries through the world API. Both require `world.read`; block
+queries preserve `None` for unavailable chunks and item queries do not load
+chunks or inspect inventories. See `docs/WORLD_BLOCK_TAGS.md` and
+`docs/WORLD_ITEM_TAGS.md` in the workspace.

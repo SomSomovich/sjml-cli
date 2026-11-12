@@ -255,6 +255,33 @@ extern "C" {
         value: i32,
     ) -> i32;
 
+    #[link_name = "read_boolean_component"]
+    fn imported_read_boolean_component(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        side: i32,
+        side_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "write_boolean_component"]
+    fn imported_write_boolean_component(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        value: i32,
+    ) -> i32;
+
     #[link_name = "transfer"]
     fn imported_transfer(
         world: i32,
@@ -754,6 +781,93 @@ pub fn write_integer_component(
     }
 }
 
+/// Reads one module-owned boolean component from a loaded block-inventory slot.
+///
+/// The path must name a component registered by this module through
+/// [`crate::registry::register_boolean_component`]. `None` is returned for an absent inventory,
+/// empty slot, or unset component. The optional side selects the block's item-handler capability;
+/// the call requires `world.read` and `inventory.read` and runs on the owning server thread.
+pub fn read_boolean_component(
+    world: WorldHandle,
+    position: BlockPos,
+    side: Option<Direction>,
+    slot: u32,
+    component_path: &str,
+) -> SjmlResult<Option<bool>> {
+    validate_component_path(component_path)?;
+    validate_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        let side = to_bytes(&side)?;
+        read_output(|output, capacity| {
+            // SAFETY: stable input buffers and output memory live through the synchronous call.
+            unsafe {
+                imported_read_boolean_component(
+                    world.as_ptr() as usize as u32 as i32,
+                    world.len() as i32,
+                    position.as_ptr() as usize as u32 as i32,
+                    position.len() as i32,
+                    side.as_ptr() as usize as u32 as i32,
+                    side.len() as i32,
+                    slot as i32,
+                    component_path.as_ptr() as usize as u32 as i32,
+                    component_path.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, side, component_path);
+        Err(unsupported_target())
+    }
+}
+
+/// Writes a module-owned boolean component on an existing, non-empty container slot.
+///
+/// The host checks that the component belongs to this module, copies the stack before changing
+/// the value, and preserves the item, count, and unrelated components. The operation is unsided
+/// because it updates a block `Container`; it requires `world.read` and `inventory.write` and runs
+/// on the owning server thread.
+pub fn write_boolean_component(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    component_path: &str,
+    value: bool,
+) -> SjmlResult<()> {
+    validate_component_path(component_path)?;
+    validate_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: input buffers and the scalar value remain live during the synchronous call.
+        let status = unsafe {
+            imported_write_boolean_component(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as i32,
+                i32::from(value),
+            )
+        };
+        status_result(status, "host rejected the boolean component write")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, component_path, value);
+        Err(unsupported_target())
+    }
+}
+
 fn validate_component_path(path: &str) -> SjmlResult<()> {
     if path.is_empty()
         || path.len() > MAX_STRING_COMPONENT_PATH_BYTES
@@ -894,11 +1008,11 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_custom_name, move_stack, read_integer_component, set_custom_name, transfer,
-        validate_custom_name, validate_slot, validate_transfer_count, write_integer_component,
-        BlockPos, Direction, InventoryEndpoint, ItemStackSnapshot, MAX_CUSTOM_ITEM_NAME_BYTES,
-        MAX_CUSTOM_ITEM_NAME_CHARS, MAX_INVENTORY_COORDINATE, MAX_INVENTORY_SLOTS,
-        MAX_ITEM_TRANSFER_COUNT,
+        clear_custom_name, move_stack, read_boolean_component, read_integer_component,
+        set_custom_name, transfer, validate_custom_name, validate_slot, validate_transfer_count,
+        write_boolean_component, write_integer_component, BlockPos, Direction, InventoryEndpoint,
+        ItemStackSnapshot, MAX_CUSTOM_ITEM_NAME_BYTES, MAX_CUSTOM_ITEM_NAME_CHARS,
+        MAX_INVENTORY_COORDINATE, MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
     };
     use crate::{ErrorCode, WorldHandle};
 
@@ -1098,6 +1212,55 @@ mod tests {
         );
         assert_eq!(
             write_integer_component(world, position, 0, "charge", -10)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn boolean_component_reads_and_writes_validate_local_inputs_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+
+        assert_eq!(
+            read_boolean_component(world, position, None, MAX_INVENTORY_SLOTS as u32, "enabled")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            read_boolean_component(world, position, None, 0, "Enabled")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            read_boolean_component(world, position, None, 0, "enabled")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            write_boolean_component(world, position, 0, "../enabled", true)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            write_boolean_component(
+                world,
+                position,
+                MAX_INVENTORY_SLOTS as u32,
+                "enabled",
+                false
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            write_boolean_component(world, position, 0, "enabled", true)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

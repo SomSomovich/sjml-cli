@@ -38,6 +38,20 @@ pub const MAX_ENTITY_CUSTOM_NAME_BYTES: usize = 1024;
 pub const MAX_ENTITY_CUSTOM_NAME_CODE_POINTS: usize = 256;
 /// Maximum encoded response size for an optional entity custom name.
 pub const MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES: usize = 4 + 1 + 4 + MAX_ENTITY_CUSTOM_NAME_BYTES;
+/// Maximum number of loaded entities reported in one vehicle passenger snapshot.
+pub const MAX_ENTITY_PASSENGERS: usize = 16;
+/// Maximum UTF-8 byte length of an entity relationship type ID.
+pub const MAX_ENTITY_RIDING_TYPE_ID_BYTES: usize = 256;
+const MAX_ENTITY_RIDING_RELATIONSHIP_BYTES: usize =
+    4 + 4 + 36 + 4 + MAX_ENTITY_RIDING_TYPE_ID_BYTES + 1;
+/// Maximum response bytes for one bounded entity riding snapshot.
+pub const MAX_ENTITY_RIDING_SNAPSHOT_RESPONSE_BYTES: usize = 4
+    + 1
+    + MAX_ENTITY_RIDING_RELATIONSHIP_BYTES
+    + 4
+    + MAX_ENTITY_PASSENGERS * MAX_ENTITY_RIDING_RELATIONSHIP_BYTES;
+/// Capability required with `entity.read` to start or stop a non-player entity riding.
+pub const MOUNT_WRITE_CAPABILITY: &str = "entity.mount.write";
 
 /// Current identity, type, dimension, and coordinates of one loaded non-player entity.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -79,6 +93,107 @@ pub struct ActiveEffect {
     pub amplifier: u32,
     /// Remaining ticks, or `-1` for an infinite-duration effect.
     pub remaining_duration_ticks: i32,
+}
+
+/// Detached identity for one vehicle or passenger relationship.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityRidingRelationship {
+    /// Canonical lowercase UUID string.
+    pub uuid: String,
+    /// Canonical namespace:path entity type ID.
+    pub entity_type_id: String,
+    /// True when the related entity is a player. Player state and handles are not exposed here.
+    pub is_player: bool,
+}
+
+/// Detached mount relationships for one loaded non-player entity.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityRidingSnapshot {
+    /// Current vehicle, including its identity when it is a player.
+    pub vehicle: Option<EntityRidingRelationship>,
+    /// Current passenger identities, sorted by UUID and bounded to 16 entries.
+    pub passengers: Vec<EntityRidingRelationship>,
+}
+
+impl EntityRidingSnapshot {
+    /// Checks the passenger count, relationship identifiers, and stable passenger ordering.
+    pub fn validate(&self) -> SjmlResult<()> {
+        if self.passengers.len() > MAX_ENTITY_PASSENGERS {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "entity passenger snapshot exceeds the 16-passenger limit",
+            ));
+        }
+        let mut previous_uuid: Option<&str> = None;
+        for relationship in self.vehicle.iter().chain(self.passengers.iter()) {
+            validate_riding_relationship(relationship)?;
+        }
+        for passenger in &self.passengers {
+            if let Some(previous) = previous_uuid {
+                if previous >= passenger.uuid.as_str() {
+                    return Err(SjmlError::new(
+                        ErrorCode::InvalidArgument,
+                        "entity passengers must have unique UUIDs sorted in ascending order",
+                    ));
+                }
+            }
+            previous_uuid = Some(&passenger.uuid);
+        }
+        Ok(())
+    }
+}
+
+fn validate_riding_relationship(relationship: &EntityRidingRelationship) -> SjmlResult<()> {
+    if relationship.uuid.len() != 36
+        || !relationship
+            .uuid
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| match index {
+                8 | 13 | 18 | 23 => byte == b'-',
+                _ => byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte),
+            })
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity relationship UUID is not canonical lowercase UUID text",
+        ));
+    }
+    let id = relationship.entity_type_id.as_bytes();
+    if id.is_empty()
+        || id.len() > MAX_ENTITY_RIDING_TYPE_ID_BYTES
+        || !id.iter().filter(|byte| **byte == b':').count().eq(&1)
+        || !id.iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-/:".contains(byte)
+        })
+    {
+        return Err(SjmlError::new(
+            if id.len() > MAX_ENTITY_RIDING_TYPE_ID_BYTES {
+                ErrorCode::PayloadTooLarge
+            } else {
+                ErrorCode::InvalidArgument
+            },
+            "entity relationship type ID must be a canonical namespace:path value of at most 256 bytes",
+        ));
+    }
+    let mut split = relationship.entity_type_id.split(':');
+    let namespace = split.next().unwrap_or_default();
+    let path = split.next().unwrap_or_default();
+    if namespace.is_empty()
+        || path.is_empty()
+        || path.starts_with('/')
+        || path.ends_with('/')
+        || path.contains("//")
+        || path.split('/').any(|part| part == "." || part == "..")
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity relationship type ID must be a canonical namespace:path value",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -150,6 +265,19 @@ extern "C" {
     fn imported_raycast(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "snapshot"]
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "riding_snapshot"]
+    fn imported_riding_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "start_riding"]
+    fn imported_start_riding(
+        passenger: i32,
+        passenger_length: i32,
+        vehicle: i32,
+        vehicle_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "stop_riding"]
+    fn imported_stop_riding(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "active_effects"]
     fn imported_active_effects(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "apply_effect"]
@@ -511,6 +639,111 @@ pub fn snapshot(handle: EntityHandle) -> SjmlResult<EntitySnapshot> {
     {
         let _ = handle;
         Err(unsupported_target())
+    }
+}
+
+/// Reads the current vehicle and up to 16 passenger identities for a loaded non-player entity.
+///
+/// The module must request and receive `entity.read`. The host runs on the owning logical server
+/// thread and does not load chunks. Related player entities are identified by UUID and type only;
+/// this API does not create player handles or expose player state.
+pub fn riding_snapshot(handle: EntityHandle) -> SjmlResult<EntityRidingSnapshot> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let snapshot = read_output::<EntityRidingSnapshot>(
+            MAX_ENTITY_RIDING_SNAPSHOT_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: handle and bounded output allocation live for this synchronous server import.
+                unsafe {
+                    imported_riding_snapshot(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Attempts ordinary Minecraft mounting of one existing loaded non-player entity onto another.
+///
+/// Both entities must have live handles in the same loaded world and the passenger must not
+/// already be riding. The operation never forces a mount and does not load chunks. It requires
+/// both `entity.read` and `entity.mount.write`. Returns `false` when vanilla rejects the mount.
+pub fn start_riding(passenger: EntityHandle, vehicle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let passenger = to_bytes(&passenger)?;
+        let vehicle = to_bytes(&vehicle)?;
+        let result = read_output::<u32>(4, |output, capacity| {
+            // SAFETY: handle bytes and output allocation remain live for this synchronous call.
+            unsafe {
+                imported_start_riding(
+                    passenger.as_ptr() as usize as u32 as i32,
+                    passenger.len() as i32,
+                    vehicle.as_ptr() as usize as u32 as i32,
+                    vehicle.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        decode_mount_result(result)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (passenger, vehicle);
+        Err(unsupported_target())
+    }
+}
+
+/// Stops an existing mount for one loaded non-player entity; returns whether it dismounted.
+///
+/// It requires `entity.read` and `entity.mount.write`, runs on the owning logical server thread,
+/// and changes no other entity's mount. Returns `false` if the entity had no vehicle.
+pub fn stop_riding(passenger: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&passenger)?;
+        let result = read_output::<u32>(4, |output, capacity| {
+            // SAFETY: handle bytes and output allocation remain live for this synchronous call.
+            unsafe {
+                imported_stop_riding(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        decode_mount_result(result)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = passenger;
+        Err(unsupported_target())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn decode_mount_result(value: u32) -> SjmlResult<bool> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "host returned an invalid entity mount result",
+        )),
     }
 }
 

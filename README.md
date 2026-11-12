@@ -52,22 +52,26 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.60.0"`; that crate must be available from a configured Cargo registry.
+"0.73.0"`; that crate must be available from a configured Cargo registry.
 Until the SDK crates are published, use `--sdk-path` when you need to compile
 the generated project.
 
 ## Documentation
 
-- [Rust SDK guide](docs/SDK_GUIDE.md) and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.66.0/sjml/)
+- [Rust SDK guide](docs/SDK_GUIDE.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.73.0/sjml/)
 - [WebAssembly ABI v1](docs/ABI.md)
 - [Project configuration and capability grants](docs/PROJECT_CONFIGURATION.md)
 - [Complete manifest schema](docs/MANIFEST_SCHEMA.md) and [`.sjml` archive format](docs/FORMAT.md)
 - [Compatibility and host support](docs/COMPATIBILITY.md)
+- [Minecraft API coverage matrix](docs/minecraft-api-coverage.md)
+- [Registered item behavior](docs/CUSTOM_ITEM_BEHAVIOR.md), [player inventory enchantments](docs/PLAYER_INVENTORY_ENCHANTMENTS.md), and [scoreboard teams](docs/SCOREBOARD.md)
+- [Client music selection](docs/CLIENT_MUSIC.md), [breeding](docs/ENTITY_BREED_ATTEMPTS.md), and [crop growth](docs/BLOCK_GROW_ATTEMPTS.md)
+- [Client localization lookups](docs/CLIENT_LOCALIZATION.md)
 - [Networking](docs/NETWORKING.md), [storage](docs/STORAGE.md), [async services](docs/ASYNC_MODEL.md), and [client rendering/OpenGL](docs/RENDERING.md)
-- [Security boundaries](docs/SECURITY.md), [module lifecycle](docs/MODULE_LIFECYCLE.md), [block entities](docs/BLOCK_ENTITIES.md), [player movement](docs/PLAYER_MOVED_EVENT.md), [player respawn events](docs/PLAYER_RESPAWNED_EVENT.md), [player vitals](docs/PLAYER_VITALS.md), [player game mode](docs/PLAYER_GAME_MODE.md), [player motion](docs/PLAYER_MOTION.md), [player teleport](docs/PLAYER_TELEPORT.md), [entity removal](docs/ENTITY_REMOVAL.md), [world biomes](docs/WORLD_BIOMES.md), [world time](docs/WORLD_TIME.md), [world weather](docs/WORLD_WEATHER.md), [stonecutting recipes](docs/STONECUTTING.md), [smithing transform recipes](docs/SMITHING_TRANSFORM.md), [inventory transfers](docs/INVENTORY_MUTATIONS.md), [particles](docs/PARTICLES.md), and [worker compute](docs/WORKER_COMPUTE.md)
+- [Security boundaries](docs/SECURITY.md), [module lifecycle](docs/MODULE_LIFECYCLE.md), [block entities](docs/BLOCK_ENTITIES.md), [player movement](docs/PLAYER_MOVED_EVENT.md), [player respawn events](docs/PLAYER_RESPAWNED_EVENT.md), [player vitals](docs/PLAYER_VITALS.md), [player game mode](docs/PLAYER_GAME_MODE.md), [player motion](docs/PLAYER_MOTION.md), [player teleport](docs/PLAYER_TELEPORT.md), [entity removal](docs/ENTITY_REMOVAL.md), [world biomes](docs/WORLD_BIOMES.md), [world time](docs/WORLD_TIME.md), [world weather](docs/WORLD_WEATHER.md), [stonecutting recipes](docs/STONECUTTING.md), [smithing transform recipes](docs/SMITHING_TRANSFORM.md), [brewing recipes](docs/BREWING_RECIPES.md), [inventory transfers](docs/INVENTORY_MUTATIONS.md), [particles](docs/PARTICLES.md), and [worker compute](docs/WORKER_COMPUTE.md)
 - [Player equipment](docs/PLAYER_EQUIPMENT.md), [player abilities](docs/PLAYER_ABILITIES.md), [daylight-cycle gamerule](docs/WORLD_DAYLIGHT_CYCLE.md), [world border](docs/WORLD_BORDER.md), [client chat messages](docs/CLIENT_CHAT_MESSAGES.md), [client audio](docs/CLIENT_AUDIO.md), [client key events](docs/CLIENT_KEY_EVENTS.md), [player titles](docs/PLAYER_TITLES.md), [player inventory components](docs/PLAYER_INVENTORY_COMPONENTS.md), [item rarity and enchantability](docs/ITEM_RARITY.md), [entity fire ticks](docs/ENTITY_FIRE_TICKS.md), [entity state flags](docs/ENTITY_STATE_FLAGS.md), [menu updates](docs/MENU_UPDATES.md), [player drop attempts](docs/PLAYER_DROP_ATTEMPTS.md), [block break attempts](docs/BLOCK_BREAK_ATTEMPTS.md), and [client toast notifications](docs/CLIENT_NOTIFICATIONS.md)
 - [Loaded chunks](docs/WORLD_LOADED_CHUNKS.md), [entity raycasts](docs/ENTITY_RAYCAST.md), [cancellable entity death attempts](docs/ENTITY_DEATH_ATTEMPTS.md), [local client commands](docs/CLIENT_COMMANDS.md), [integer game rules](docs/WORLD_INTEGER_GAME_RULES.md), [block-property writes](docs/WORLD_BLOCK_PROPERTIES_WRITE.md), [item-stack snapshots](docs/ITEM_STACK_SNAPSHOT.md), [player inventory and durability writes](docs/PLAYER_INVENTORY_WRITES.md), [block-placement vetoes](docs/BLOCK_PLACE_ATTEMPTS.md), and [living entity and player attributes](docs/ENTITY_ATTRIBUTES.md), [villager trades](docs/VILLAGER_TRADES.md), [damage-attempt vetoes](docs/ENTITY_DAMAGE_ATTEMPTS.md), [cross-dimension teleport](docs/PLAYER_DIMENSION_TELEPORT.md), and [shared game time](docs/WORLD_GAME_TIME.md)
-- [Editable menus](docs/EDITABLE_MENUS.md), [item food properties](docs/ITEM_FOOD.md), [non-player entity custom names](docs/ENTITY_CUSTOM_NAMES.md), and [projectile-impact vetoes](docs/PROJECTILE_IMPACT_ATTEMPT.md)
+- [Editable menus](docs/EDITABLE_MENUS.md), [item food properties](docs/ITEM_FOOD.md), [non-player entity custom names](docs/ENTITY_CUSTOM_NAMES.md), [projectile-impact vetoes](docs/PROJECTILE_IMPACT_ATTEMPT.md), [fishing-catch vetoes](docs/PLAYER_FISHED_ATTEMPTS.md), and [boolean item components](docs/BOOLEAN_ITEM_COMPONENTS.md)
 
 ## Commands
 

@@ -16,13 +16,11 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.68.0`, the Rust SDK/macros are `0.66.0`, and the ABI is
-`1.58.0`. ABI compatibility is major-version based:
-the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.58.0` therefore accepts
-`1.0.x` through `1.58.0` (including earlier ABI 1.32–1.57 guests), but rejects
-a later contract it does not know. ABI `1.58.0` accepts ABI `1.0.x` through
-`1.58.0`, including packages targeting host 0.67.1 / ABI 1.57.0.
+The current host is `0.75.0`, the Rust SDK/macros are `0.73.0`, and the ABI is
+`1.65.0`. ABI compatibility remains major-version based: host 0.75.0 accepts ABI
+`1.0.x` through `1.65.0`; it rejects later contracts it does not know. Packages
+using newer APIs declare ABI `^1.65.0` and host range `^0.75.0`.
+
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
 
@@ -236,3 +234,38 @@ Host 0.67.0 / ABI 1.57.0 / SDK 0.65.0 adds bounded text-entry forms to client sc
 Host 0.67.1 keeps ABI 1.57.0 and adds local, clamped mouse-wheel scrolling for long body text in client screens. It preserves paragraph breaks, renders only visible wrapped lines, and does not consume wheel input over fields, buttons, or outside the body viewport. It emits no callback or network traffic. Headless viewport tests pass; live visual and wheel behavior still need a display-backed client. See [interactive client screens](CLIENT_SCREEN.md).
 
 Host 0.68.0 / ABI 1.58.0 / SDK 0.66.0 adds schema-v3 client list forms with one bounded selection list of up to 32 options, alongside up to four text fields. List browsing and selection stay local; the selected ID is returned only to the owning module when a form button is clicked. Schema-v1 button-only screens and schema-v2 text-only forms remain compatible. Headless contract tests pass, but visible list layout, selection, and wheel interaction still need verification on a display-backed client. See [interactive client screens](CLIENT_SCREEN.md).
+
+Host 0.69.0 / ABI 1.59.0 / SDK 0.67.0 adds schema-v4 checkbox settings
+forms, module-owned boolean item components on existing block/player inventory
+stacks, detached `world::fluid_at` snapshots, and persistent physical-client
+FOV scaling. It also adds non-cancellable `player.tick` and `client.tick`
+notifications with bounded per-subscription intervals. Declared network
+channels accept optional `messages_per_second` and `burst` limits; these are
+local per-module/channel/direction token buckets and do not change the wire
+handshake. It adds the cancellable logical-server `player.item_use_attempt`
+callback before `Item.use`, with a detached hand/item/count snapshot and no stack
+mutation. Source-water, dry-block, light-level, unloaded-chunk, and build-height
+GameTests are included. Headless tests do not verify visible FOV or screen
+layout; those still need a display-backed client. See the relevant focused API
+guides for contracts and bounds.
+
+Host 0.70.0 / ABI 1.60.0 / SDK/macros 0.68.0 adds bounded input-state reads,
+tracked client one-shot sounds, loaded-entity riding snapshots and guarded
+non-forced mount/dismount operations, observational `entity.tick`, and loaded-only
+world neighbor notifications.
+
+Host 0.71.0 / ABI 1.61.0 / SDK/macros 0.69.0 adds criterion-level advancement
+progress and mutation, six typed vanilla statistic families, periodic keyframe
+rotations, and schema-v4 client forms with up to eight checkboxes.
+
+Host 0.72.0 / ABI 1.62.0 / SDK/macros 0.70.0 adds the successful-crafting
+`player.item_crafted` event and bounded live reads/base-value updates for all 31
+built-in vanilla living-entity attributes. All writes retain per-attribute
+ranges and require `entity.attributes.write`. Client visuals, actual crafting
+interaction, and remote multiplayer remain for live assembly testing.
+
+Host 0.73.0 / ABI 1.63.0 / SDK/macros 0.71.0 adds bounded dynamic server-command suggestions, same-module registered item-use callbacks, cropped package sprite rendering, vanilla brewing mixes and one-effect potions, player-inventory enchantment read/set/remove, exact tracked-sound fades and owner-checked client music selection, and module-owned scoreboard teams. It also adds synchronous cancellable `entity.breed_attempt`, `block.grow_attempt`, and `player.fished_attempt` events. Server GameTests cover the new event, brewing, inventory, and team contracts; client music, audio, and rendering still need display-backed verification. The CLI crate is 0.1.3 locally; no crates.io release or public-repository sync was made.
+
+Host 0.74.0 / ABI 1.64.0 / SDK/macros 0.72.0 adds `client_localization::translate` for the active client language, bounded loaded-only `world::structures_at` queries, and the cancellable `block.fertilize_attempt` bonemeal callback. Focused Java/Rust tests and dedicated-server GameTests cover these contracts; client-language display behavior still needs a live client check. The CLI crate is 0.1.4 locally; no crates.io release or public-repository sync was made.
+
+Host 0.75.0 / ABI 1.65.0 / SDK/macros 0.73.0 adds loaded-only `world::block_has_tag` queries and current-registry `world::item_has_tag` membership checks for canonical tag IDs. Block queries distinguish a loaded non-member from an unavailable position without loading chunks; item queries do not inspect inventory or load chunks. Codec, host import, Rust contract, and dedicated-server GameTests cover both contracts. The CLI crate is 0.1.5 locally; no crates.io release or public-repository sync was made.

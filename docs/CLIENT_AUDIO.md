@@ -2,7 +2,8 @@
 
 Client-side Rust modules can play a sound resource at the local listener through
 `sjml::client_audio::play`. Playback uses Minecraft's `SoundManager`; the host validates that the
-sound is present in the currently loaded sound resources before queuing it.
+sound is present in the currently loaded sound resources before queuing it. Use `play_tracked`
+when that particular one-shot must be stopped early.
 
 ```rust
 use sjml::client_audio::{play, SoundCategory};
@@ -50,6 +51,64 @@ copies and validates the ID before calling Minecraft.
 Unit/ABI tests cover the permission and side guards, client thread, grant revocation, malformed
 IDs and UTF-8, category codes, finite level bounds, and the per-module rate limit. Acoustic output
 still needs verification in a display-backed client with audio enabled.
+
+## Tracked one-shot playback
+
+`play_tracked` returns an opaque `TrackedSoundHandle`; `stop_tracked(handle)` stops only that exact
+playback instance:
+
+```rust
+use sjml::client_audio::{play_tracked, stop_tracked, SoundCategory};
+
+let sound = play_tracked(
+    "minecraft:entity.player.levelup",
+    SoundCategory::Players,
+    0.8,
+    1.0,
+)?;
+// Stop this instance before its natural end if needed.
+stop_tracked(sound)?;
+```
+
+Tracked one-shots can also fade linearly from their current volume to a new level. Start at zero
+for a fade-in and target zero for a fade-out:
+
+```rust
+use sjml::client_audio::{fade_tracked, play_tracked, SoundCategory};
+
+let sound = play_tracked("example:music.intro", SoundCategory::Music, 0.0, 1.0)?;
+fade_tracked(sound, 0.8, 40)?; // Fade in over two seconds.
+// Later, while the same one-shot is still active:
+fade_tracked(sound, 0.0, 20)?; // Fade out over one second.
+```
+
+`fade_tracked(handle, target_volume, duration_ticks)` changes only the active sound instance held
+by that exact runtime-owned handle. The target is finite `0..=4`, and duration is `1..=1200`
+client ticks. A later fade request starts from the instance's current volume and replaces its
+previous ramp. Fades advance on Minecraft's client sound tick; calls require the physical client
+main thread and use `client.audio.play`. The instance remains owned until explicitly stopped or
+runtime cleanup. Disconnect and runtime teardown stop all owned instances, including a fade in
+progress. If a short one-shot ends naturally before its requested duration, it cannot be faded
+after it has ended. Keep the handle until the ramp has finished before calling `stop_tracked`, or
+let runtime cleanup release it.
+
+Tracked playback uses the existing `client.audio.play` capability and shared five-starts-per-two-
+seconds limit. A module runtime can hold at most sixteen tracked handles, while the physical-client
+host allows up to 512 across all runtimes. A naturally completed sound retains its handle until the
+module calls `stop_tracked` or its runtime closes. Runtime cleanup stops every remaining tracked
+instance automatically.
+
+The host records the exact `SoundInstance` object passed to `SoundManager.play`, then stops that
+object by identity. If NeoForge's `PlaySoundEvent` cancels or replaces the instance, no handle is
+returned and the replacement is left untouched. Unit tests cover per-runtime ownership, handle
+bounds, rejected starts, and automatic cleanup. Actual playback and interruption still need a
+display-backed client with audio enabled.
+
+The ABI imports are `sjml_client_audio_v1.play_tracked(i32, i32, i32, i32, i32) -> i64`,
+`sjml_client_audio_v1.stop_tracked(i32) -> i32`, and
+`sjml_client_audio_v1.fade_tracked(handle, target_volume_bits, duration_ticks) -> i32`. As with
+looping audio, the upper half of the packed start result contains the status code and the lower half
+contains a nonzero module-scoped handle.
 
 ## Module-owned looping sounds
 

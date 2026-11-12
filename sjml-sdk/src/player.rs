@@ -541,6 +541,20 @@ pub struct PlayerMotion {
     pub pitch: f32,
 }
 
+impl PlayerMotion {
+    /// Returns the normalized Minecraft look direction as `[x, y, z]`.
+    ///
+    /// Yaw and pitch are interpreted in degrees using Minecraft's convention:
+    /// yaw 0 and pitch 0 point toward positive Z, positive yaw turns toward
+    /// negative X, and positive pitch points downward.
+    pub fn look_direction(&self) -> [f64; 3] {
+        let yaw = f64::from(self.yaw).to_radians();
+        let pitch = f64::from(self.pitch).to_radians();
+        let cos_pitch = pitch.cos();
+        [-yaw.sin() * cos_pitch, -pitch.sin(), yaw.cos() * cos_pitch]
+    }
+}
+
 /// Bounded velocity to apply to an online player, in blocks per tick.
 #[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -1982,10 +1996,72 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         apply_effect, teleport, teleport_to_world, validate_player_title_text, vitals,
-        PlayerTeleport, PlayerTitleTimings, PlayerVitals, MAX_PLAYER_TITLE_TEXT_BYTES,
-        MAX_TELEPORT_COORDINATE,
+        PlayerMotion, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
+        MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
     };
     use crate::{ErrorCode, PlayerHandle, WorldHandle};
+
+    fn motion_with_rotation(yaw: f32, pitch: f32) -> PlayerMotion {
+        PlayerMotion {
+            velocity_x: 0.0,
+            velocity_y: 0.0,
+            velocity_z: 0.0,
+            yaw,
+            pitch,
+        }
+    }
+
+    fn assert_direction_close(actual: [f64; 3], expected: [f64; 3]) {
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "direction component {actual} did not match expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn player_motion_look_direction_uses_minecraft_cardinal_yaw() {
+        for (yaw, expected) in [
+            (0.0, [0.0, 0.0, 1.0]),
+            (90.0, [-1.0, 0.0, 0.0]),
+            (180.0, [0.0, 0.0, -1.0]),
+            (-90.0, [1.0, 0.0, 0.0]),
+        ] {
+            assert_direction_close(motion_with_rotation(yaw, 0.0).look_direction(), expected);
+        }
+    }
+
+    #[test]
+    fn player_motion_look_direction_handles_vertical_pitch_and_is_normalized() {
+        assert_direction_close(
+            motion_with_rotation(37.0, 90.0).look_direction(),
+            [0.0, -1.0, 0.0],
+        );
+        assert_direction_close(
+            motion_with_rotation(-121.0, -90.0).look_direction(),
+            [0.0, 1.0, 0.0],
+        );
+
+        let diagonal = motion_with_rotation(45.0, 30.0).look_direction();
+        assert_direction_close(
+            diagonal,
+            [
+                -3.0_f64.sqrt() / 2.0_f64.sqrt() / 2.0,
+                -0.5,
+                3.0_f64.sqrt() / 2.0_f64.sqrt() / 2.0,
+            ],
+        );
+        let length = diagonal
+            .iter()
+            .map(|component| component * component)
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            (length - 1.0).abs() < 1e-12,
+            "look direction length was {length}"
+        );
+    }
 
     #[test]
     fn player_title_timings_and_literal_text_are_bounded() {

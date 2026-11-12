@@ -228,6 +228,17 @@ resource strings count toward the existing per-frame render string budget.
 These commands require `client.render`; package assets are read through the
 generated package resource pack and do not require `client.render.opengl`.
 
+For sprite sheets, `draw_sprite_region` takes the full PNG dimensions and a
+source rectangle `(x, y, width, height)` in pixels. The rectangle must have a
+positive size and remain inside the PNG; the host draws only that region into
+the requested logical GUI size. For example, draw the 16×16 icon at pixel
+`(32, 16)` from `assets/example/textures/gui/icons.png` with:
+
+```rust,ignore
+ctx.draw_sprite_region("icons.png", 8.0, 8.0, 32.0, 32.0,
+    (128, 64), (32, 16, 16, 16))?;
+```
+
 Active-screen click, key, and typed-character callbacks use the independent `screen_input` API.
 Declare and grant `client.input` to receive them; `client.render` is not needed
 unless the module also draws. They run on the client main thread from NeoForge's
