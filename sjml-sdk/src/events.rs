@@ -269,6 +269,29 @@ pub struct EntityDeath {
     pub z: f64,
 }
 
+/// Synchronous cancellable death attempt for a loaded living entity on the logical server.
+///
+/// Return `Ok(true)` from the `entity.death_attempt` handler to cancel this death. For player
+/// victims, `player_display_name` contains their detached profile name; the UUID is `entity_id`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityDeathAttempt {
+    /// Canonical lowercase UUID of the living entity whose death is being processed.
+    pub entity_id: String,
+    /// Canonical registry ID of the entity type.
+    pub entity_type_id: String,
+    /// Canonical dimension ID where the death attempt fired.
+    pub dimension_id: String,
+    /// Player profile name for a player victim; `None` for all other entity types.
+    pub player_display_name: Option<String>,
+    /// Entity X coordinate when the attempt was dispatched.
+    pub x: f64,
+    /// Entity Y coordinate when the attempt was dispatched.
+    pub y: f64,
+    /// Entity Z coordinate when the attempt was dispatched.
+    pub z: f64,
+}
+
 /// Synchronous, non-cancellable entity join notification from the logical server.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -505,9 +528,9 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
-        EffectTickEvent, EntityDamaged, EntityDeath, EntitySpawned, EventPriority,
-        InventoryChanged, PlayerInteracted, PlayerInteractionAttempt, PlayerMoved, PlayerRespawned,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        EffectTickEvent, EntityDamaged, EntityDeath, EntityDeathAttempt, EntitySpawned,
+        EventPriority, InventoryChanged, PlayerInteracted, PlayerInteractionAttempt, PlayerMoved,
+        PlayerRespawned, ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -620,6 +643,65 @@ mod tests {
         };
         let encoded = to_bytes(&event).unwrap();
         assert_eq!(from_bytes::<EntityDeath>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn cancellable_entity_death_attempt_round_trips_player_identity_and_coordinates() {
+        let event = EntityDeathAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:player".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            player_display_name: Some("Alice".to_owned()),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.entity_id);
+        append_test_string(&mut expected, &event.entity_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.push(1);
+        append_test_string(&mut expected, "Alice");
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<EntityDeathAttempt>(&encoded).unwrap(), event);
+
+        let non_player = EntityDeathAttempt {
+            player_display_name: None,
+            entity_type_id: "minecraft:pig".to_owned(),
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+            ..event
+        };
+        let encoded = to_bytes(&non_player).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &non_player.entity_id);
+        append_test_string(&mut expected, &non_player.entity_type_id);
+        append_test_string(&mut expected, &non_player.dimension_id);
+        expected.push(0);
+        expected.extend_from_slice(&(1.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(3.0_f64).to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "optional player data must use the stable None tag"
+        );
+        assert_eq!(
+            from_bytes::<EntityDeathAttempt>(&encoded).unwrap(),
+            non_player
+        );
+    }
+
+    fn append_test_string(output: &mut Vec<u8>, value: &str) {
+        output.extend_from_slice(&(value.len() as i32).to_le_bytes());
+        output.extend_from_slice(value.as_bytes());
     }
 
     #[test]

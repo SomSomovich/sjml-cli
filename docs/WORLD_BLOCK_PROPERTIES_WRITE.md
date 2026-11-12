@@ -1,9 +1,8 @@
 # Writing block-state properties
 
-Use `world::set_block_properties` to change selected properties on the block already present at a
-position. `world::block_properties` provides detached property names and values to inspect first.
-The existing `world::set_block` behavior is unchanged: it replaces the target with a block's
-default state.
+`world::set_block_properties` changes selected properties on the block already present at a
+position. It complements `world::block_properties`, which returns detached property name/value
+pairs, and the existing `world::set_block`, which still replaces a block with its default state.
 
 ```rust
 use sjml::{inventory::BlockPos, world::{self, BlockProperty}};
@@ -16,15 +15,20 @@ world::set_block_properties(
 )?;
 ```
 
-The module must request and receive both `world.read` and `world.write`. The call is synchronous
-and runs on the owning server thread. It accepts 1–32 unique property updates, requires the exact
-current block ID, and preserves every property omitted from the update list. The host validates
-names and values against registered Minecraft properties, including enum choices and numeric
-ranges. Unknown properties, duplicates, invalid values, or an expected-block mismatch return
-`INVALID_ARGUMENT` without changing the block.
+The module must declare and receive both `world.read` and `world.write`. The call is synchronous,
+server-thread-only, and accepts 1–32 unique updates. Pass the exact current block ID as
+`expected_block_id`; if another action changed that block before the call, the host rejects the
+request. The host validates every property name and value against that block's registered
+Minecraft properties, including enum members and integer ranges. Omitted properties retain their
+current values. A block is never replaced by this API.
 
-The operation rejects positions outside build height and chunks that are not already loaded; it
-does not load chunks. The host always uses the fixed `Block.UPDATE_ALL` update flag. The stable-v1
-request contains a versioned world handle and position, expected block ID, and a bounded vector of
-versioned `{ name, value }` records. The maximum request size is 10,932 bytes. Minecraft objects
-never cross the guest ABI.
+The host rejects unknown properties, duplicate names, invalid values, mismatched block IDs,
+out-of-height positions, and unloaded chunks. It checks chunk residency without loading a chunk.
+Minecraft receives a fixed `Block.UPDATE_ALL` update flag; guests cannot choose neighbor or client
+notification behavior. `INVALID_ARGUMENT` indicates rejected input or a stale expected block and
+leaves the block unchanged.
+
+The stable-v1 request is a versioned record containing the world handle, versioned block position,
+expected block ID, and a vector of versioned `{ name, value }` properties. The maximum encoded
+request is 10,932 bytes. The ABI deliberately transfers strings and never exposes Minecraft state
+objects.

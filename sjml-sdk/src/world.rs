@@ -8,7 +8,7 @@ use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::{BlockPos, Direction};
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use crate::Decoder;
 use crate::{
     ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle, MAX_STRING_BYTES,
@@ -58,6 +58,12 @@ pub const MAX_WORLD_BORDER_DAMAGE_PER_BLOCK: f64 = 100.0;
 pub const MAX_WORLD_DAY_TIME_TICKS: i64 = 1_000_000_000_000;
 /// Maximum delay accepted for a guest-scheduled vanilla block tick, in ticks.
 pub const MAX_WORLD_BLOCK_TICK_DELAY_TICKS: u32 = 72_000;
+/// Maximum chunk-radius requested by [`loaded_chunks`], in chunks.
+pub const MAX_WORLD_CHUNK_RADIUS: u32 = 16;
+/// Maximum number of already-loaded chunks returned by one [`loaded_chunks`] call.
+pub const MAX_WORLD_CHUNKS: usize = 512;
+/// Maximum stable response size for [`loaded_chunks`].
+pub const MAX_WORLD_CHUNKS_RESPONSE_BYTES: usize = 8 + MAX_WORLD_CHUNKS * 12;
 
 /// Runtime heightmap used by [`heightmap`]. ABI values are stable for world-v1.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -335,6 +341,57 @@ struct BlockStateBatch {
     states: Vec<Option<BlockStateSnapshot>>,
 }
 
+/// Chunk coordinates in a detached loaded-chunk query result.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ChunkPos {
+    /// X coordinate of the chunk.
+    pub x: i32,
+    /// Z coordinate of the chunk.
+    pub z: i32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct LoadedChunksQuery {
+    world: WorldHandle,
+    center: BlockPos,
+    radius: u32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, StableEncode)]
+#[sjml(version = 1)]
+struct LoadedChunksResponse {
+    chunks: Vec<ChunkPos>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for LoadedChunksResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported loaded-chunk response schema",
+            ));
+        }
+        let count = decoder.read_length(MAX_WORLD_CHUNKS)?;
+        let mut chunks = Vec::new();
+        chunks.try_reserve_exact(count).map_err(|_| {
+            SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not reserve memory for loaded chunk results",
+            )
+        })?;
+        for _ in 0..count {
+            chunks.push(ChunkPos::decode(decoder)?);
+        }
+        Ok(Self { chunks })
+    }
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
@@ -461,6 +518,8 @@ extern "C" {
     fn imported_get(id: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "loaded"]
     fn imported_loaded(output: i32, capacity: i32) -> i32;
+    #[link_name = "loaded_chunks"]
+    fn imported_loaded_chunks(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "dimension_id"]
     fn imported_dimension_id(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "game_time"]
@@ -630,6 +689,108 @@ pub fn loaded() -> SjmlResult<Vec<WorldHandle>> {
     {
         Err(unsupported_target())
     }
+}
+
+/// Lists chunks that are already loaded in a square around `center` on this module's server world.
+/// The center chunk is included when loaded; `center.y` is ignored. `chunk_radius` is measured in
+/// chunks and must be at most 16. Results are sorted by chunk X then Z and are either complete or
+/// an error when more than 512 chunks match. The host checks loaded-chunk residency without
+/// requesting absent chunks, so this query never loads a chunk or dimension. Requires `world.read`
+/// and a live server-side [`WorldHandle`].
+pub fn loaded_chunks(
+    world: WorldHandle,
+    center: BlockPos,
+    chunk_radius: u32,
+) -> SjmlResult<Vec<ChunkPos>> {
+    validate_loaded_chunk_query(center, chunk_radius)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&LoadedChunksQuery {
+            world,
+            center,
+            radius: chunk_radius,
+        })?;
+        let response: LoadedChunksResponse = read_output(
+            MAX_WORLD_CHUNKS_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the encoded query and output buffer remain live for the synchronous import.
+                unsafe {
+                    imported_loaded_chunks(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as u32 as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        validate_loaded_chunk_results(center, chunk_radius, &response.chunks)?;
+        Ok(response.chunks)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_loaded_chunk_query(center: BlockPos, radius: u32) -> SjmlResult<()> {
+    if center.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || center.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "loaded-chunk center x/z must be within +/-30000000",
+        ));
+    }
+    if radius > MAX_WORLD_CHUNK_RADIUS {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "loaded-chunk radius must be within 0..=16 chunks",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_loaded_chunk_results(
+    center: BlockPos,
+    radius: u32,
+    chunks: &[ChunkPos],
+) -> SjmlResult<()> {
+    if chunks.len() > MAX_WORLD_CHUNKS {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "host returned more than 512 loaded chunks",
+        ));
+    }
+    let center_x = center.x >> 4;
+    let center_z = center.z >> 4;
+    let mut previous: Option<ChunkPos> = None;
+    for chunk in chunks {
+        let in_range = (i64::from(chunk.x) - i64::from(center_x)).unsigned_abs()
+            <= u64::from(radius)
+            && (i64::from(chunk.z) - i64::from(center_z)).unsigned_abs() <= u64::from(radius);
+        if !in_range
+            || chunk.x.unsigned_abs() > (MAX_WORLD_BLOCK_COORDINATE as u32 >> 4)
+            || chunk.z.unsigned_abs() > (MAX_WORLD_BLOCK_COORDINATE as u32 >> 4)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "host returned a loaded chunk outside the requested world bounds",
+            ));
+        }
+        if let Some(previous) = previous {
+            if previous.x > chunk.x || (previous.x == chunk.x && previous.z >= chunk.z) {
+                return Err(SjmlError::new(
+                    ErrorCode::UnknownErrorCode,
+                    "host returned duplicate or unsorted loaded chunks",
+                ));
+            }
+        }
+        previous = Some(*chunk);
+    }
+    Ok(())
 }
 
 /// Reads the canonical dimension ID after validating the handle's owner, context and capability.
@@ -2093,18 +2254,20 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         block_properties, collides, day_time, daylight_cycle_enabled, integer_game_rule,
-        play_sound, raycast, schedule_block_tick, set_block, set_block_properties,
+        loaded_chunks, play_sound, raycast, schedule_block_tick, set_block, set_block_properties,
         set_daylight_cycle_enabled, set_integer_game_rule, set_time, spawn_entity, spawn_particle,
-        validate_block_property_updates, Aabb, BlockPropertiesMutation, BlockPropertiesQuery,
+        validate_block_property_updates, validate_loaded_chunk_query,
+        validate_loaded_chunk_results, Aabb, BlockPropertiesMutation, BlockPropertiesQuery,
         BlockPropertiesResponse, BlockProperty, BlockStateBatch, BlockStateQuery,
-        BlockStateSnapshot, DaylightCycleSnapshot, RaycastBlockMode, RaycastFluidMode, RaycastHit,
-        RaycastPoint, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
-        WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery,
-        WorldGameRuleSnapshot, WorldIntegerGameRule, WorldIntegerGameRuleMutation,
-        WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot, WorldRaycastQuery,
-        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BLOCK_PROPERTIES,
-        MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
-        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
+        BlockStateSnapshot, ChunkPos, DaylightCycleSnapshot, LoadedChunksQuery,
+        LoadedChunksResponse, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
+        WeatherCondition, WeatherSnapshot, WorldCollisionQuery, WorldEntitySpawnRequest,
+        WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery, WorldGameRuleSnapshot,
+        WorldIntegerGameRule, WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery,
+        WorldIntegerGameRuleSnapshot, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
+        MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
+        MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
+        MAX_WORLD_DAY_TIME_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -2131,6 +2294,101 @@ mod tests {
         assert_eq!(
             WeatherSnapshot::decode(&mut crate::Decoder::new(&encoded).unwrap()).unwrap(),
             snapshot
+        );
+    }
+
+    #[test]
+    fn loaded_chunk_query_and_response_match_the_host_codec() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let center = BlockPos {
+            x: -17,
+            y: 72,
+            z: 31,
+        };
+        let query = crate::to_bytes(&LoadedChunksQuery {
+            world,
+            center,
+            radius: 4,
+        })
+        .unwrap();
+        assert_eq!(48, query.len());
+        assert_eq!(1_u32.to_le_bytes(), query[0..4]);
+        assert_eq!(1_u32.to_le_bytes(), query[28..32]);
+        assert_eq!((-17_i32).to_le_bytes(), query[32..36]);
+        assert_eq!(4_u32.to_le_bytes(), query[44..48]);
+
+        let chunks = vec![
+            ChunkPos { x: -2, z: 7 },
+            ChunkPos { x: -1, z: -4 },
+            ChunkPos { x: 3, z: 1 },
+        ];
+        let encoded = crate::to_bytes(&LoadedChunksResponse {
+            chunks: chunks.clone(),
+        })
+        .unwrap();
+        assert_eq!(8 + 3 * 12, encoded.len());
+        assert_eq!(
+            chunks,
+            crate::from_bytes::<LoadedChunksResponse>(&encoded)
+                .unwrap()
+                .chunks
+        );
+    }
+
+    #[test]
+    fn loaded_chunk_query_and_results_are_bounded_and_canonical() {
+        let center = BlockPos { x: -1, y: 0, z: 15 };
+        assert!(validate_loaded_chunk_query(center, 16).is_ok());
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            validate_loaded_chunk_query(center, 17).unwrap_err().code()
+        );
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            validate_loaded_chunk_query(
+                BlockPos {
+                    x: i32::MAX,
+                    y: 0,
+                    z: 0,
+                },
+                0,
+            )
+            .unwrap_err()
+            .code()
+        );
+
+        let valid = [ChunkPos { x: -1, z: -1 }, ChunkPos { x: 0, z: 0 }];
+        assert!(validate_loaded_chunk_results(center, 1, &valid).is_ok());
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            validate_loaded_chunk_results(center, 1, &[ChunkPos { x: 10, z: 0 }])
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            validate_loaded_chunk_results(
+                center,
+                1,
+                &[ChunkPos { x: 0, z: 0 }, ChunkPos { x: 0, z: 0 }]
+            )
+            .unwrap_err()
+            .code()
+        );
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            loaded_chunks(WorldHandle::new(1, 2, 3, 4).unwrap(), center, 17)
+                .unwrap_err()
+                .code()
+        );
+
+        let oversized_response = [1_u32.to_le_bytes(), 513_u32.to_le_bytes()].concat();
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            crate::from_bytes::<LoadedChunksResponse>(&oversized_response)
+                .unwrap_err()
+                .code(),
+            "response count is capped before allocating or reading entries"
         );
     }
 

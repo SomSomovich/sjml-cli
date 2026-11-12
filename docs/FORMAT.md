@@ -22,7 +22,7 @@ distribution = "server_only"
 [runtime]
 abi = "^1.0"
 minecraft = "~1.21.1"
-sjml = "^0.52.0"
+sjml = "^0.53.0"
 
 [[modules]]
 id = "core"
@@ -133,9 +133,9 @@ most 16 arguments; the host stages at most 8,192 commands across all packages.
 Command names use the callback identifier grammar: 1–128
 lowercase ASCII letters, digits, `.`, `_`, or `-`, starting with a letter or
 digit. Argument names are unique within a command and use the manifest
-identifier grammar. Command declarations in client-only modules are rejected.
-The module must request `content.register` and receive the administrator's
-grant for that capability before its commands are made available.
+identifier grammar. Server command declarations in client-only modules are
+rejected. Server commands require `content.register` and its administrator
+grant.
 
 NeoForge exposes a guest command at
 `/sjml guest <package-id> <module-id> <command-name> ...`. For example, the
@@ -146,6 +146,14 @@ it does not grant the module any additional host capability.
 If command execution returns a guest error, traps, or produces an invalid
 callback response, the host disables only that module and reports a generic
 command failure to the caller.
+
+Physical-client commands use `[[modules.client_commands]]` with the same
+schema and size limits. They are allowed for `client` and `both` modules,
+require the locally granted `client.command` capability, and register beneath
+`/sjmlclient <package-id> <module-id> <command-name> ...`. Their Rust callbacks
+use `#[client_command]` and return a bounded string to the local command
+source; they never send requests to a server. See
+[client commands](CLIENT_COMMANDS.md).
 
 Optional publisher metadata has this shape:
 

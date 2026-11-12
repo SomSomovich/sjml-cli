@@ -7,6 +7,7 @@ use sjml::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static SAW_PIG_DEATH: AtomicBool = AtomicBool::new(false);
+static SAW_PIG_DEATH_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_EFFECT_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_BLOCK_PLACE: AtomicBool = AtomicBool::new(false);
 static SAW_BLOCK_PLACE_VETO: AtomicBool = AtomicBool::new(false);
@@ -160,6 +161,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     let _ = player::online()?;
     events::subscribe("block.break", EventPriority::High)?;
     events::subscribe("entity.death", EventPriority::Normal)?;
+    events::subscribe("entity.death_attempt", EventPriority::Normal)?;
     events::subscribe("entity.spawned", EventPriority::Normal)?;
     events::subscribe("entity.effect.tick", EventPriority::Normal)?;
     events::subscribe("block.place", EventPriority::Normal)?;
@@ -187,6 +189,17 @@ fn observe_pig_death(event: EntityDeath) -> SjmlResult<()> {
         SAW_PIG_DEATH.store(true, Ordering::Relaxed);
     }
     Ok(())
+}
+
+#[event(name = "entity.death_attempt")]
+fn veto_cow_death_attempt(event: EntityDeathAttempt) -> SjmlResult<bool> {
+    // Keep this test entity separate from the pig used by the notification test:
+    // a successful veto correctly suppresses the later entity.death notification.
+    let veto = event.entity_type_id == "minecraft:cow";
+    if veto {
+        SAW_PIG_DEATH_ATTEMPT.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
 }
 
 #[event(name = "block.place")]
@@ -333,6 +346,18 @@ fn check_pig_death(_: EntityDeathCheckArguments) -> SjmlResult<String> {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "entity.death callback did not observe a pig",
+        ))
+    }
+}
+
+#[command(name = "entity.death_attempt.check")]
+fn check_cow_death_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    if SAW_PIG_DEATH_ATTEMPT.swap(false, Ordering::Relaxed) {
+        Ok("guest vetoed the cow death attempt".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity.death_attempt callback did not veto the cow",
         ))
     }
 }
@@ -504,6 +529,43 @@ fn echo(arguments: EchoArguments) -> SjmlResult<String> {
 #[derive(StableDecode)]
 #[sjml(version = 1)]
 struct WorldArguments {}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct LoadedChunksArguments {
+    x: i32,
+    z: i32,
+}
+
+#[command(name = "world.loaded_chunks.check")]
+fn check_loaded_chunks(arguments: LoadedChunksArguments) -> SjmlResult<String> {
+    let world = world::get("minecraft:overworld")?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the test overworld must be loaded",
+        )
+    })?;
+    let chunks = world::loaded_chunks(
+        world,
+        BlockPos {
+            x: arguments.x,
+            y: 0,
+            z: arguments.z,
+        },
+        0,
+    )?;
+    let expected = ChunkPos {
+        x: arguments.x.div_euclid(16),
+        z: arguments.z.div_euclid(16),
+    };
+    if chunks.len() != 1 || chunks[0] != expected {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "radius-zero loaded-chunk query did not return exactly the loaded center chunk",
+        ));
+    }
+    Ok("loaded chunk query returned the loaded center chunk without loading neighbors".to_owned())
+}
 
 #[command(name = "world.inspect")]
 fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
@@ -1266,10 +1328,12 @@ fn write_player_inventory(arguments: PlayerArguments) -> SjmlResult<String> {
             )
         })?;
     let before = sjml::player_inventory::read(target_player)?;
-    if before.slots.get(1).is_none_or(Option::is_some) {
+    if before.slots.first().is_none_or(Option::is_some)
+        || before.slots.get(1).is_none_or(Option::is_some)
+    {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "player inventory write fixture expects an empty hotbar slot",
+            "player inventory write fixture expects two empty hotbar slots",
         ));
     }
     let write_and_read = (|| {
@@ -1293,20 +1357,101 @@ fn write_player_inventory(arguments: PlayerArguments) -> SjmlResult<String> {
     let clear_result =
         sjml::player_inventory::set_slot(target_player, 1, PlayerInventorySlotUpdate::Clear);
     let cleared = clear_result.and_then(|()| sjml::player_inventory::read(target_player));
+    let damage_and_read =
+        (|| {
+            sjml::player_inventory::set_slot(
+                target_player,
+                0,
+                PlayerInventorySlotUpdate::Set {
+                    item_id: "minecraft:diamond_sword",
+                    count: 1,
+                },
+            )?;
+            sjml::player_inventory::set_damage(target_player, 0, 7)?;
+            let equipment = player::equipment(target_player)?;
+            Ok::<_, SjmlError>(equipment.main_hand.as_ref().is_some_and(|stack| {
+                stack.item_id == "minecraft:diamond_sword" && stack.damage == 7
+            }))
+        })();
+    let clear_damaged_result =
+        sjml::player_inventory::set_slot(target_player, 0, PlayerInventorySlotUpdate::Clear);
+    let damage_slot_cleared =
+        clear_damaged_result.and_then(|()| sjml::player_inventory::read(target_player));
     let wrote_expected = write_and_read?;
     let cleared = cleared?;
-    if !wrote_expected || cleared.slots.get(1).is_none_or(Option::is_some) {
+    let damage_checked = damage_and_read?;
+    let damage_slot_cleared = damage_slot_cleared?;
+    if !wrote_expected
+        || cleared.slots.get(1).is_none_or(Option::is_some)
+        || !damage_checked
+        || damage_slot_cleared
+            .slots
+            .first()
+            .is_none_or(Option::is_some)
+    {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "player inventory slot write/clear did not match the requested values",
+            "player inventory slot or durability write did not match or restore the requested values",
         ));
     }
-    Ok("player inventory slot write and clear succeeded".to_owned())
+    Ok("player inventory slot write/clear and item durability update succeeded".to_owned())
 }
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
 struct EntityArguments {}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct EntityRaycastArguments {
+    entity_id: String,
+}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct ClientEchoArguments {
+    message: String,
+}
+
+#[client_command(name = "fixture.echo")]
+fn client_echo(arguments: ClientEchoArguments) -> SjmlResult<String> {
+    Ok(format!("local echo: {}", arguments.message))
+}
+
+#[command(name = "entity.raycast.check")]
+fn check_entity_raycast(arguments: EntityRaycastArguments) -> SjmlResult<String> {
+    let target = entity::loaded()?
+        .into_iter()
+        .find(|handle| {
+            entity::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.entity_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(ErrorCode::InvalidArgument, "raycast test pig is not loaded")
+        })?;
+    let snapshot = entity::snapshot(target)?;
+    let world = world::get(&snapshot.dimension_id)?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "raycast test world is not loaded",
+        )
+    })?;
+    let start = RaycastPoint::new(snapshot.x - 2.0, snapshot.y + 0.5, snapshot.z);
+    let end = RaycastPoint::new(snapshot.x + 2.0, snapshot.y + 0.5, snapshot.z);
+    let hit =
+        entity::raycast(world, start, end, Some(&snapshot.entity_type_id))?.ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity raycast missed the test pig",
+            )
+        })?;
+    if hit != target {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity raycast returned a different pig handle",
+        ));
+    }
+    Ok("entity raycast returned the nearest loaded pig".to_owned())
+}
 
 #[command(name = "entity.inspect")]
 fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {

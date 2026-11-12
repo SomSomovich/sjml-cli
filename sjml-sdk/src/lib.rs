@@ -191,7 +191,8 @@ pub use serialization::{
     MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
 };
 pub use sjml_macros::{
-    command, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe, service,
+    client_command, command, compute, event, event_async, mod_init, mod_register, mod_shutdown,
+    recipe, service,
 };
 pub use sjml_macros::{StableDecode, StableEncode};
 pub use storage::{
@@ -203,13 +204,14 @@ pub use widgets::{
     Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
 };
 pub use world::{
-    BlockProperty, BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot,
+    BlockProperty, BlockStateSnapshot, ChunkPos, HeightmapType, LightSnapshot, WorldBorderSnapshot,
     WorldGameRule, WorldIntegerGameRule, MAX_WORLD_BLOCK_COORDINATE,
     MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
     MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
     MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
     MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
-    MAX_WORLD_BORDER_WARNING_SECONDS,
+    MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_CHUNKS, MAX_WORLD_CHUNKS_RESPONSE_BYTES,
+    MAX_WORLD_CHUNK_RADIUS,
 };
 
 /// Common imports for an SJML guest module.
@@ -244,8 +246,8 @@ pub mod prelude {
     pub use crate::client_notifications::NotificationKind;
     pub use crate::entity;
     pub use crate::entity::{
-        EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
-        MAX_SPATIAL_QUERY_RESULTS,
+        EntitySnapshot, EntityVelocity, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT,
+        MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
     };
     pub use crate::entity_attributes;
     pub use crate::entity_attributes::{AttributeValues, LivingAttribute};
@@ -257,10 +259,11 @@ pub mod prelude {
     pub use crate::events;
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
-        EffectTickEvent, EntityDamaged, EntityDeath, EntitySpawned, EventPriority,
-        InventoryChanged, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft,
-        PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
-        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        EffectTickEvent, EntityDamaged, EntityDeath, EntityDeathAttempt, EntitySpawned,
+        EventPriority, InventoryChanged, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined,
+        PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle,
+        DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT,
+        MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -337,17 +340,19 @@ pub mod prelude {
     };
     pub use crate::world;
     pub use crate::world::{
-        BlockProperty, BlockStateSnapshot, HeightmapType, LightSnapshot, RaycastBlockMode,
-        RaycastFluidMode, RaycastHit, RaycastPoint, WorldBorderSnapshot, WorldGameRule,
-        WorldIntegerGameRule, MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
-        MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
-        MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+        BlockProperty, BlockStateSnapshot, ChunkPos, HeightmapType, LightSnapshot,
+        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, WorldBorderSnapshot,
+        WorldGameRule, WorldIntegerGameRule, MAX_WORLD_BLOCK_COORDINATE,
+        MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
+        MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
+        MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
         MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
         MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_RAYCAST_RESPONSE_BYTES,
         MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
     };
     pub use crate::{
-        command, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe, service,
+        client_command, command, compute, event, event_async, mod_init, mod_register, mod_shutdown,
+        recipe, service,
     };
     pub use crate::{StableDecode, StableEncode};
 }

@@ -6,12 +6,21 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.42.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.43.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.42.0 adds
-bounded player attribute reads and base-value writes, detached item-stack
-snapshots, player inventory slot writes, allowlisted integer game-rule access,
+incompatible. Build metadata does not affect version ordering. ABI 1.43.0 adds
+bounded player-inventory durability writes, already-loaded chunk enumeration,
+nearest loaded-entity raycasts, the synchronous cancellable
+`entity.death_attempt` event, and manifest-declared physical-client commands.
+Durability updates require `entity.read` and `inventory.write`; loaded-chunk
+queries require `world.read`; entity raycasts require `entity.read` and
+`world.read`; death vetoes require `events.subscribe` and `events.cancel`;
+client commands require `client.command` and run on the physical-client main
+thread. These additions never load chunks, expose live Minecraft objects, or
+grant client commands authority over server state. ABI 1.42.0 adds bounded
+player attribute reads and base-value writes, detached item-stack snapshots,
+player inventory slot writes, allowlisted integer game-rule access,
 property-based block-state updates, loaded-entity spatial queries, and the
 synchronous cancellable `block.place_attempt` event. Player attributes require
 `entity.read`, with `entity.attributes.write` for writes; item snapshots require
@@ -1493,6 +1502,23 @@ main storage, armor, offhand). The response is limited to 128 slots and 1 MiB;
 it contains no components, NBT, or mutable stack references. It never mutates
 or synchronizes inventory. Static-registration and client calls fail closed.
 See [player inventory reads](PLAYER_INVENTORY.md).
+
+## Player inventory slot and durability writes
+
+These server-only imports require `entity.read` and `inventory.write`. They
+accept a module-owned live player handle and a slot from `0` through `40`.
+`set_player_slot` accepts a canonical registered non-air item ID plus count, or
+an empty ID and zero count to clear a slot. New stacks use the item's default
+components; arbitrary components and NBT are not accepted. Armor slots accept
+one item.
+
+`set_player_damage(player_ptr, player_len, slot, damage) -> i32` changes the
+durability of a nonempty damageable stack already in that slot. It preserves
+the stack's other components, accepts values from `0` through `65,535`, and
+rejects a value at or above the item's maximum damage so this operation cannot
+break the item. Both imports run on the owning server thread and broadcast the
+change through the player's active menu. Stale handles, empty or
+nondamageable stacks, client/static contexts, and invalid values are rejected.
 
 ## Module-owned string components on inventory items
 

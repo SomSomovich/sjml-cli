@@ -1,11 +1,13 @@
 use sjml::events::{
-    EffectTickEvent, EntityDeath, PlayerJoined, PlayerLeft, PlayerRespawned, ResourcesReloaded,
+    EffectTickEvent, EntityDeath, EntityDeathAttempt, PlayerJoined, PlayerLeft, PlayerRespawned,
+    ResourcesReloaded,
 };
 use sjml::player::PlayerTeleport;
 use sjml::prelude::PlayerMoved;
 use sjml::{
-    command, event, from_bytes, mod_init, mod_shutdown, service, to_bytes, EntityHandle, ErrorCode,
-    PlayerHandle, PlayerSnapshot, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
+    client_command, command, event, from_bytes, mod_init, mod_shutdown, service, to_bytes,
+    EntityHandle, ErrorCode, PlayerHandle, PlayerSnapshot, SjmlError, SjmlResult, StableDecode,
+    StableEncode, WorldHandle,
 };
 
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -48,8 +50,18 @@ fn on_player_respawned(_: PlayerRespawned) -> SjmlResult<()> {
     Ok(())
 }
 
+#[event(name = "entity.death_attempt")]
+fn on_entity_death_attempt(_: EntityDeathAttempt) -> SjmlResult<bool> {
+    Ok(false)
+}
+
 #[command(name = "demo.echo")]
 fn echo(message: String) -> SjmlResult<String> {
+    Ok(message)
+}
+
+#[client_command(name = "demo.local_echo")]
+fn local_echo(message: String) -> SjmlResult<String> {
     Ok(message)
 }
 
@@ -106,6 +118,14 @@ fn resources_reloaded_record_has_the_documented_v1_field_order() {
     assert_eq!(bytes, expected);
     assert_eq!(from_bytes::<ResourcesReloaded>(&bytes).unwrap(), value);
     assert_eq!(on_resources_reloaded(value), Ok(()));
+}
+
+#[test]
+fn client_command_callback_uses_the_typed_sdk_contract() {
+    assert_eq!(
+        local_echo("hello locally".to_owned()),
+        Ok("hello locally".to_owned())
+    );
 }
 
 #[test]
@@ -239,6 +259,65 @@ fn entity_death_event_record_has_the_documented_v1_field_order() {
     expected.extend_from_slice(&(2.25_f64).to_le_bytes());
     assert_eq!(bytes, expected);
     assert_eq!(from_bytes::<EntityDeath>(&bytes).unwrap(), value);
+}
+
+#[test]
+fn entity_death_attempt_record_has_detached_player_data_and_cancellable_bool_contract() {
+    let event = EntityDeathAttempt {
+        entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+        entity_type_id: "minecraft:player".to_owned(),
+        dimension_id: "minecraft:overworld".to_owned(),
+        player_display_name: Some("Alice".to_owned()),
+        x: -1.5,
+        y: 64.0,
+        z: 2.25,
+    };
+    let bytes = to_bytes(&event).expect("encode entity.death_attempt record");
+    let mut expected = vec![1, 0, 0, 0];
+    for field in [
+        "00000000-0000-0000-0000-000000000001",
+        "minecraft:player",
+        "minecraft:overworld",
+    ] {
+        expected.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        expected.extend_from_slice(field.as_bytes());
+    }
+    expected.push(1);
+    expected.extend_from_slice(&[5, 0, 0, 0]);
+    expected.extend_from_slice(b"Alice");
+    expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+    expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+    expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+    assert_eq!(bytes, expected);
+    assert_eq!(from_bytes::<EntityDeathAttempt>(&bytes).unwrap(), event);
+    assert_eq!(on_entity_death_attempt(event), Ok(false));
+
+    let non_player = EntityDeathAttempt {
+        entity_type_id: "minecraft:pig".to_owned(),
+        player_display_name: None,
+        x: 1.0,
+        y: 2.0,
+        z: 3.0,
+        ..from_bytes::<EntityDeathAttempt>(&bytes).unwrap()
+    };
+    let mut expected_none = vec![1, 0, 0, 0];
+    for field in [
+        "00000000-0000-0000-0000-000000000001",
+        "minecraft:pig",
+        "minecraft:overworld",
+    ] {
+        expected_none.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        expected_none.extend_from_slice(field.as_bytes());
+    }
+    expected_none.push(0);
+    expected_none.extend_from_slice(&(1.0_f64).to_le_bytes());
+    expected_none.extend_from_slice(&(2.0_f64).to_le_bytes());
+    expected_none.extend_from_slice(&(3.0_f64).to_le_bytes());
+    assert_eq!(to_bytes(&non_player).unwrap(), expected_none);
+    assert_eq!(
+        from_bytes::<EntityDeathAttempt>(&expected_none).unwrap(),
+        non_player
+    );
 }
 
 #[test]

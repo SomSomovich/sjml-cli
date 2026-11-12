@@ -47,6 +47,12 @@ pub fn command(attribute: TokenStream, item: TokenStream) -> TokenStream {
     expand_command(attribute.into(), item.into()).into()
 }
 
+/// Defines a callback for a manifest-declared, physical-client command.
+#[proc_macro_attribute]
+pub fn client_command(attribute: TokenStream, item: TokenStream) -> TokenStream {
+    expand_callback(attribute.into(), item.into(), "client_command").into()
+}
+
 #[proc_macro_attribute]
 pub fn service(attribute: TokenStream, item: TokenStream) -> TokenStream {
     expand_service(attribute.into(), item.into()).into()
@@ -164,6 +170,12 @@ fn expand_callback(attribute: TokenStream2, item: TokenStream2, kind: &str) -> T
             );
         }
     };
+    if kind == "client_command" && !is_string_type(output_type) {
+        return error(
+            function.sig.ident.span(),
+            "#[client_command] function must return SjmlResult<String>",
+        );
+    }
 
     let handler = &function.sig.ident;
     let wrapper = format_ident!("__sjml_v1_{kind}_{}", handler);
@@ -190,6 +202,10 @@ fn expand_callback(attribute: TokenStream2, item: TokenStream2, kind: &str) -> T
             }
         }
     }
+}
+
+fn is_string_type(ty: &Type) -> bool {
+    matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "String"))
 }
 
 fn callback_name(attribute: TokenStream2) -> syn::Result<String> {
@@ -590,6 +606,20 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_entity_death_attempt_exports_the_sync_callback() {
+        let generated = expand_event(
+            quote!(name = "entity.death_attempt"),
+            quote! {
+                fn protect_player(event: EntityDeathAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_entity.death_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
     fn command_macro_generates_the_named_command_export() {
         let generated = expand_command(
             quote!(name = "demo.echo"),
@@ -607,6 +637,45 @@ mod tests {
                 },
             ),
             "lowercase ASCII identifier",
+        );
+    }
+
+    #[test]
+    fn client_command_macro_generates_a_separate_named_client_export() {
+        let generated = expand_callback(
+            quote!(name = "demo.local"),
+            quote! {
+                fn local(value: String) -> SjmlResult<String> { Ok(value) }
+            },
+            "client_command",
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_client_command_demo.local"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+        diagnostic(
+            expand_callback(
+                quote!(name = "Bad ID"),
+                quote! {
+                    fn local(value: String) -> SjmlResult<String> { Ok(value) }
+                },
+                "client_command",
+            ),
+            "lowercase ASCII identifier",
+        );
+    }
+
+    #[test]
+    fn client_command_macro_requires_string_feedback() {
+        diagnostic(
+            expand_callback(
+                quote!(name = "demo.local"),
+                quote! {
+                    fn local(_: ()) -> SjmlResult<u32> { Ok(1) }
+                },
+                "client_command",
+            ),
+            "must return SjmlResult<String>",
         );
     }
 

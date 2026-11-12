@@ -196,6 +196,13 @@ NeoForge restores the block snapshots when a handler vetoes; the successful
 `block.place` notification remains unchanged. Any matching authorized veto
 cancels the full placement, including a multi-place operation.
 
+`entity.death_attempt` requires the same two capabilities and runs synchronously
+on the logical-server thread. A guest receives a detached identity and position
+snapshot; returning `true` cancels the death transition and the host restores the
+victim to at least one health so the entity does not remain in a zero-health
+state. The ordinary `entity.death` notification is skipped for this vetoed
+attempt. Invalid callbacks disable their module and fail open.
+
 Discarding a loaded non-player entity requires both `entity.read` and the
 separate `entity.remove` request/grant. The host performs the discard on the
 logical-server thread and immediately revokes the module's handle. Static
@@ -248,7 +255,10 @@ exposes NBT or arbitrary data components. `player_inventory::set_slot` instead
 requires `entity.read` plus `inventory.write` and a live player session. It
 accepts only a canonical registered item ID and a count valid for both the
 item and target slot, creates a fresh default stack, and synchronizes through
-the active menu. Guest code cannot set item components or arbitrary NBT.
+the active menu. `player_inventory::set_damage` uses the same grant to change
+durability on an existing damageable item, preserves its other components, and
+rejects values that would break the item. Guest code cannot set arbitrary item
+components or NBT.
 
 Player attribute reads and writes accept a live server-player handle and the
 existing attribute allowlist. Reads require `entity.read`; writes additionally

@@ -23,4 +23,3 @@ canonical lowercase `namespace:path` biome ID as a Rust `String`.
 A loaded biome without a canonical registry key, or a malformed host registry
 ID, is treated as a host error. The value is detached and does not retain a
 Minecraft holder or world reference.
-

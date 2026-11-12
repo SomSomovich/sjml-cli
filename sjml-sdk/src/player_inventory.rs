@@ -1,7 +1,7 @@
 //! Bounded reads and single-slot writes for a live player's inventory.
 //!
-//! `read` requires both `entity.read` and `inventory.read`. `set_slot` requires both
-//! `entity.read` and `inventory.write`. Both operations are available only to logical-server
+//! `read` requires both `entity.read` and `inventory.read`. `set_slot` and `set_damage` require
+//! both `entity.read` and `inventory.write`. All operations are available only to logical-server
 //! modules, use the owning server thread, and resolve a live login session on every call.
 
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +25,8 @@ pub const MAX_PLAYER_INVENTORY_SLOT_INDEX: u32 = 40;
 pub const MAX_PLAYER_INVENTORY_SLOT_COUNT: u32 = 4096;
 /// Maximum UTF-8 item registry ID length accepted by the player inventory writer.
 pub const MAX_PLAYER_INVENTORY_ITEM_ID_BYTES: usize = 256;
+/// Maximum durability value accepted for a live player inventory item.
+pub const MAX_PLAYER_INVENTORY_DAMAGE: u32 = 65_535;
 
 /// The only two updates accepted by [`set_slot`]. New stacks use registered items' default components.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -50,6 +52,9 @@ extern "C" {
         item_id_length: i32,
         count: i32,
     ) -> i32;
+
+    #[link_name = "set_player_damage"]
+    fn imported_set_player_damage(player: i32, player_length: i32, slot: i32, damage: i32) -> i32;
 }
 
 /// Reads all slots in the current live player's inventory as a bounded detached snapshot.
@@ -135,6 +140,48 @@ pub fn set_slot(
         let _ = (player, item_id, count);
         Err(unsupported_target())
     }
+}
+
+/// Sets the current durability on a nonempty damageable stack in a live player's inventory.
+///
+/// Slot indices use the same layout as [`read`]. The host preserves all existing item components,
+/// rejects nondamageable/empty items and values greater than or equal to the item's maximum damage,
+/// then synchronizes the active menu. The requested value is capped at 65,535. Requires declared
+/// and administrator-granted `entity.read` and `inventory.write`, and a logical-server main thread.
+pub fn set_damage(player: PlayerHandle, slot: u32, damage: u32) -> SjmlResult<()> {
+    validate_damage(slot, damage)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle bytes remain live for the synchronous import.
+        let status = unsafe {
+            imported_set_player_damage(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                damage as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory durability update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, damage);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_damage(slot: u32, damage: u32) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX || damage > MAX_PLAYER_INVENTORY_DAMAGE {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory damage requires a slot in 0..=40 and a value in 0..=65535",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_slot_update(slot: u32, update: PlayerInventorySlotUpdate<'_>) -> SjmlResult<()> {
@@ -252,8 +299,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use super::read;
     use super::{
-        set_slot, validate_inventory, PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_SLOTS,
-        MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+        set_damage, set_slot, validate_damage, validate_inventory, PlayerInventorySlotUpdate,
+        MAX_PLAYER_INVENTORY_DAMAGE, MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
+        MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
     use crate::ErrorCode;
@@ -364,5 +412,36 @@ mod tests {
                 ErrorCode::InvalidArgument
             );
         }
+    }
+
+    #[test]
+    fn player_durability_writes_are_bounded_before_host_access() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        for (slot, damage) in [
+            (0, 0),
+            (MAX_PLAYER_INVENTORY_SLOT_INDEX, MAX_PLAYER_INVENTORY_DAMAGE),
+        ] {
+            assert_eq!(
+                set_damage(player, slot, damage).unwrap_err().code(),
+                ErrorCode::UnknownErrorCode,
+                "valid slot/damage {slot}/{damage} reaches the wasm-only host"
+            );
+        }
+        assert_eq!(
+            validate_damage(41, 1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_damage(0, MAX_PLAYER_INVENTORY_DAMAGE + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_damage(player, 0, MAX_PLAYER_INVENTORY_DAMAGE + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
     }
 }

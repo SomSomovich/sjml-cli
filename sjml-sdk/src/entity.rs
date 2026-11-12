@@ -6,6 +6,7 @@
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::BlockPos;
+use crate::world::RaycastPoint;
 #[cfg(target_arch = "wasm32")]
 use crate::{to_bytes, Decoder, MAX_STRING_BYTES};
 use crate::{
@@ -81,6 +82,8 @@ extern "C" {
     fn imported_loaded(output: i32, capacity: i32) -> i32;
     #[link_name = "within"]
     fn imported_within(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "raycast"]
+    fn imported_raycast(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "snapshot"]
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "apply_effect"]
@@ -132,10 +135,29 @@ struct SpatialResults {
     handles: Vec<EntityHandle>,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct EntityRaycastQuery {
+    world: WorldHandle,
+    start: RaycastPoint,
+    end: RaycastPoint,
+    entity_type_id: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct EntityRaycastResult {
+    handle: Option<EntityHandle>,
+}
+
 /// Maximum number of loaded non-player entities returned by [`within`].
 pub const MAX_SPATIAL_QUERY_RESULTS: usize = 256;
 /// Maximum horizontal or vertical extent for a loaded-entity spatial query.
 pub const MAX_SPATIAL_QUERY_RADIUS: f64 = 64.0;
+/// Maximum distance covered by [`raycast`].
+pub const MAX_ENTITY_RAYCAST_DISTANCE: f64 = 128.0;
 
 /// Returns loaded non-player entity handles inside a horizontal cylinder and vertical range.
 ///
@@ -193,6 +215,107 @@ pub fn within(
         let _ = world;
         Err(unsupported_target())
     }
+}
+
+/// Returns the nearest loaded non-player entity whose collision box intersects a segment.
+///
+/// Requires `entity.read` and `world.read`. The world handle must belong to this module and its
+/// active logical server. Both endpoints must be finite and within 30,000,000 blocks; the segment
+/// must be nonzero and at most 128 blocks long. The optional filter accepts one canonical
+/// namespace:path entity type ID. The host checks only loaded entities in the selected dimension,
+/// never loads chunks, returns `None` when there is no hit, and uses the UUID as a deterministic
+/// tie-break when entity boxes intersect the ray at the same distance.
+pub fn raycast(
+    world: WorldHandle,
+    start: RaycastPoint,
+    end: RaycastPoint,
+    entity_type_id: Option<&str>,
+) -> SjmlResult<Option<EntityHandle>> {
+    validate_entity_raycast(start, end, entity_type_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let request = EntityRaycastQuery {
+            world,
+            start,
+            end,
+            entity_type_id: entity_type_id.map(str::to_owned),
+        };
+        let request = to_bytes(&request)?;
+        let result: EntityRaycastResult = read_output(4 + 1 + 24, |output, capacity| {
+            // SAFETY: the encoded request stays live through the synchronous import and the
+            // output helper owns its entire destination allocation until stable decoding ends.
+            unsafe {
+                imported_raycast(
+                    request.as_ptr() as usize as u32 as i32,
+                    request.len() as u32 as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        Ok(result.handle)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_entity_raycast(
+    start: RaycastPoint,
+    end: RaycastPoint,
+    entity_type_id: Option<&str>,
+) -> SjmlResult<()> {
+    let valid_point = |point: RaycastPoint| {
+        point.x.is_finite()
+            && point.y.is_finite()
+            && point.z.is_finite()
+            && point.x.abs() <= 30_000_000.0
+            && point.y.abs() <= 30_000_000.0
+            && point.z.abs() <= 30_000_000.0
+    };
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let dz = end.z - start.z;
+    let length_squared = dx * dx + dy * dy + dz * dz;
+    if !valid_point(start)
+        || !valid_point(end)
+        || !length_squared.is_finite()
+        || length_squared <= 0.0
+        || length_squared > MAX_ENTITY_RAYCAST_DISTANCE * MAX_ENTITY_RAYCAST_DISTANCE
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity ray endpoints must be finite and the segment length must be greater than zero and at most 128 blocks",
+        ));
+    }
+    if let Some(entity_type_id) = entity_type_id {
+        validate_entity_type_id(entity_type_id)?;
+    }
+    Ok(())
+}
+
+fn validate_entity_type_id(entity_type_id: &str) -> SjmlResult<()> {
+    let Some((namespace, path)) = entity_type_id.split_once(':') else {
+        return Err(invalid_entity_type_id());
+    };
+    if entity_type_id.len() > 256
+        || namespace.is_empty()
+        || path.is_empty()
+        || path.contains(':')
+        || !namespace.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'.' | b'-')
+        })
+        || !path.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'_' | b'.' | b'-' | b'/')
+        })
+    {
+        return Err(invalid_entity_type_id());
+    }
+    Ok(())
 }
 
 fn validate_spatial_query(
@@ -566,11 +689,12 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, damage, remove_effect, set_velocity, validate_spatial_query, within,
-        EntityVelocity, SpatialQuery, SpatialResults, MAX_ENTITY_DAMAGE,
+        apply_effect, damage, raycast, remove_effect, set_velocity, validate_entity_raycast,
+        validate_spatial_query, within, EntityRaycastQuery, EntityRaycastResult, EntityVelocity,
+        SpatialQuery, SpatialResults, MAX_ENTITY_DAMAGE, MAX_ENTITY_RAYCAST_DISTANCE,
         MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
     };
-    use crate::{inventory::BlockPos, EntityHandle, ErrorCode, WorldHandle};
+    use crate::{inventory::BlockPos, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle};
 
     #[test]
     fn spatial_query_bounds_are_checked_before_host_access() {
@@ -661,6 +785,70 @@ mod tests {
         assert_eq!(
             crate::from_bytes::<SpatialResults>(&encoded_results).unwrap(),
             results
+        );
+    }
+
+    #[test]
+    fn entity_raycast_bounds_and_permissions_fail_closed_before_host_access() {
+        let start = RaycastPoint::new(0.0, 64.0, 0.0);
+        let end = RaycastPoint::new(10.0, 64.0, 0.0);
+        assert_eq!(MAX_ENTITY_RAYCAST_DISTANCE, 128.0);
+        assert!(validate_entity_raycast(start, end, Some("minecraft:zombie")).is_ok());
+        for (from, to, filter) in [
+            (start, start, None),
+            (start, RaycastPoint::new(128.01, 64.0, 0.0), None),
+            (RaycastPoint::new(f64::NAN, 64.0, 0.0), end, None),
+            (start, end, Some("Minecraft:Zombie")),
+        ] {
+            assert_eq!(
+                validate_entity_raycast(from, to, filter)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            raycast(WorldHandle::new(1, 2, 3, 4).unwrap(), start, end, None,)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn entity_raycast_codec_matches_host_schema_and_optional_handle_response() {
+        let query = EntityRaycastQuery {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            start: RaycastPoint::new(0.5, 64.0, -3.0),
+            end: RaycastPoint::new(12.0, 66.0, -3.0),
+            entity_type_id: Some("minecraft:zombie".to_owned()),
+        };
+        let encoded = crate::to_bytes(&query).unwrap();
+        assert_eq!(encoded.len(), 85 + 4 + "minecraft:zombie".len());
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(encoded[28..32].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(encoded[56..60].try_into().unwrap()), 1);
+        assert_eq!(
+            crate::from_bytes::<EntityRaycastQuery>(&encoded).unwrap(),
+            query
+        );
+
+        let hit = EntityRaycastResult {
+            handle: Some(EntityHandle::new(1, 2, 3, 4).unwrap()),
+        };
+        let encoded_hit = crate::to_bytes(&hit).unwrap();
+        assert_eq!(encoded_hit.len(), 4 + 1 + 24);
+        assert_eq!(
+            crate::from_bytes::<EntityRaycastResult>(&encoded_hit).unwrap(),
+            hit
+        );
+        let miss = EntityRaycastResult { handle: None };
+        let encoded_miss = crate::to_bytes(&miss).unwrap();
+        assert_eq!(encoded_miss.len(), 4 + 1);
+        assert_eq!(
+            crate::from_bytes::<EntityRaycastResult>(&encoded_miss).unwrap(),
+            miss
         );
     }
 

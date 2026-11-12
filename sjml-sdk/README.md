@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.50.0"
+sjml-sdk = "0.51.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -79,10 +79,15 @@ scaled GUI cursor coordinates on the physical client. See
 [player interaction vetoes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_INTERACTIONS.md),
 and [cursor position](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CURSOR_POSITION.md).
 
-SDK 0.50.0 adds loaded-entity spatial queries, allowlisted integer game-rule
-access, expected-state-guarded block-property writes, item-stack snapshots,
-server-player attribute access, player inventory slot writes, and synchronous
-block-placement vetoes. See
+SDK 0.51.0 adds loaded-entity spatial queries and raycasts, loaded-chunk
+enumeration, allowlisted integer game-rule access, expected-state-guarded
+block-property writes, item-stack snapshots, server-player attribute access,
+player inventory slot and durability writes, synchronous block-placement and
+entity-death vetoes, and manifest-declared local client commands. See
+[loaded chunks](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_LOADED_CHUNKS.md),
+[entity raycasts](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_RAYCAST.md),
+[entity death attempts](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_DEATH_ATTEMPTS.md),
+[client commands](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_COMMANDS.md),
 [spatial entity queries](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_SPATIAL_QUERY.md),
 [integer game rules](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_INTEGER_GAME_RULES.md),
 [block property writes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_BLOCK_PROPERTIES_WRITE.md),
@@ -102,7 +107,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.50.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.51.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

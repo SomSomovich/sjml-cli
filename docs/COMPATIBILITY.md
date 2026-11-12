@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.52.0` with ABI `1.42.0`. ABI compatibility is major-version based:
+The current host is `0.53.0` with ABI `1.43.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.42.0` therefore accepts
-`1.0.x` through `1.42.0` (including earlier ABI 1.32–1.41 guests), but rejects
+minor/patch version is equal or newer. A host at ABI `1.43.0` therefore accepts
+`1.0.x` through `1.43.0` (including earlier ABI 1.32–1.42 guests), but rejects
 a later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -159,3 +159,13 @@ use their existing narrow `world.read`, `world.write`, `entity.read`,
 placement veto, inventory slot mutation, and the end-to-end paths for spatial
 queries, integer gamerules, item snapshots, player attributes, and block-state
 properties.
+
+Host 0.53.0 / ABI 1.43.0 adds bounded durability updates to existing player
+inventory stacks, loaded-chunk enumeration, nearest loaded-entity raycasts,
+synchronous cancellable `entity.death_attempt`, and manifest-declared local
+client commands. Durability uses `entity.read` plus `inventory.write`; chunk
+queries use `world.read`; entity raycasts use `entity.read` plus `world.read`;
+death cancellation requires `events.subscribe` and `events.cancel`; local
+commands require a requested and locally granted `client.command`. The host
+GameTests now exercise these server-backed APIs; client command display and
+execution still need a display-backed Minecraft client check.

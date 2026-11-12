@@ -25,7 +25,7 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes SDK 0.50.0 and core ABI 1.42.0.
+unverified. This guide describes SDK 0.51.0 and core ABI 1.43.0.
 Save-scoped storage uses the current server save. Physical-client modules also
 have a separate `ClientProfile` scope backed by per-mod local configuration
 files; they cannot access server save scopes.
@@ -113,20 +113,21 @@ See [scheduled block ticks](WORLD_SCHEDULED_TICKS.md),
 [player interaction vetoes](PLAYER_INTERACTIONS.md), and
 [cursor position](CURSOR_POSITION.md).
 
-SDK 0.50.0 adds loaded non-player entity queries with `entity::within`,
-allowlisted integer game-rule reads and writes, expected-state-guarded block
-property updates, bounded item-stack snapshots, and player inventory slot
-mutation. Player attributes can now be read and changed for server players
-through the same allowlist used for other living entities. A synchronous
-`block.place_attempt` handler can veto block placement before the new state is
-committed. These APIs use the documented `entity.read`, `world.read`,
-`world.write`, `entity.attributes.write`, `inventory.read`, `inventory.write`,
-and `events.cancel` capabilities. See [spatial entity queries](ENTITY_SPATIAL_QUERY.md),
-[integer game rules](WORLD_INTEGER_GAME_RULES.md),
-[block property updates](WORLD_BLOCK_PROPERTIES_WRITE.md),
-[item-stack snapshots](ITEM_STACK_SNAPSHOT.md),
-[player inventory writes](PLAYER_INVENTORY_WRITES.md), and
-[block placement vetoes](BLOCK_PLACE_ATTEMPTS.md).
+SDK 0.51.0 adds bounded durability updates to existing player inventory stacks,
+already-loaded chunk enumeration, nearest loaded-entity raycasts, synchronous
+cancellation of entity death attempts, and manifest-declared physical-client
+commands. The earlier 0.50.0 APIs in this guide include loaded-entity spatial
+queries, integer game rules, expected-state-guarded block-property updates,
+item-stack snapshots, player inventory slot writes, server-player attributes,
+and cancellable block placement. Durability uses `entity.read` and
+`inventory.write`; chunk enumeration uses `world.read`; entity raycasts use
+`entity.read` and `world.read`; death cancellation uses `events.subscribe` and
+`events.cancel`; client commands require `client.command`. See [player
+inventory writes](PLAYER_INVENTORY_WRITES.md), [loaded chunks](WORLD_LOADED_CHUNKS.md),
+[entity raycasts](ENTITY_RAYCAST.md), [death attempts](ENTITY_DEATH_ATTEMPTS.md),
+[client commands](CLIENT_COMMANDS.md), [spatial entity queries](ENTITY_SPATIAL_QUERY.md),
+[integer game rules](WORLD_INTEGER_GAME_RULES.md), [block property updates](WORLD_BLOCK_PROPERTIES_WRITE.md),
+[item-stack snapshots](ITEM_STACK_SNAPSHOT.md), and [block placement vetoes](BLOCK_PLACE_ATTEMPTS.md).
 
 Client modules can subscribe to bounded active-screen mouse-click, key-press,
 and typed-character events through `screen_input::subscribe`. Scroll events
@@ -225,7 +226,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.50.0"
+sjml-sdk = "0.51.0"
 ```
 
 For development against this checkout, use
@@ -238,40 +239,40 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.50.0/sjml/). The exact
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.51.0/sjml/). The exact
 function signatures and public types there are the reference for Rust callers.
 
 | Module | Main API |
 | --- | --- |
-| [`abi`](https://docs.rs/sjml-sdk/0.50.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
-| [`batch`](https://docs.rs/sjml-sdk/0.50.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
-| [`block_entity`](https://docs.rs/sjml-sdk/0.50.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
-| [`client_chat`](https://docs.rs/sjml-sdk/0.50.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
-| [`client_input`](https://docs.rs/sjml-sdk/0.50.0/sjml/client_input/) | Global key, mouse-button, and observational mouse-wheel events, plus bounded cursor position when no screen is open. |
-| [`client_keybindings`](https://docs.rs/sjml-sdk/0.50.0/sjml/client_keybindings/) | Named client key mappings with bounded callbacks and Controls-screen rebinding. |
-| [`chat_messages`](https://docs.rs/sjml-sdk/0.50.0/sjml/chat_messages/) | Local chat-message snapshots and separately capability-gated display filtering. |
-| [`client_notifications`](https://docs.rs/sjml-sdk/0.50.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
-| [`client_audio`](https://docs.rs/sjml-sdk/0.50.0/sjml/client_audio/) | Bounded client-local sound playback through Minecraft's sound manager. |
-| [`entity`](https://docs.rs/sjml-sdk/0.50.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration and spatial queries, effect apply/removal, bounded discard, and generic damage. |
-| [`entity_attributes`](https://docs.rs/sjml-sdk/0.50.0/sjml/entity_attributes/) | Bounded reads and base-value writes for selected vanilla living-entity and server-player attributes. |
-| [`entity_data`](https://docs.rs/sjml-sdk/0.50.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.50.0/sjml/events/) | Typed lifecycle, world, player movement/interaction/respawn, entity, inventory, and resource events. |
-| [`gl`](https://docs.rs/sjml-sdk/0.50.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
-| [`host`](https://docs.rs/sjml-sdk/0.50.0/sjml/host/) | ABI version query and host logging. |
-| [`inventory`](https://docs.rs/sjml-sdk/0.50.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, component updates, and slot-to-slot transfers. |
-| [`player_inventory`](https://docs.rs/sjml-sdk/0.50.0/sjml/player_inventory/) | Read-only detached snapshots of live player inventory slots. |
-| [`menu`](https://docs.rs/sjml-sdk/0.50.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
-| [`network`](https://docs.rs/sjml-sdk/0.50.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
-| [`player`](https://docs.rs/sjml-sdk/0.50.0/sjml/player/) | Online player handles, detached snapshots, equipment, abilities, vitals, game mode, motion, effects, teleport, and action-bar messages. |
-| [`recipe`](https://docs.rs/sjml-sdk/0.50.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
-| [`registry`](https://docs.rs/sjml-sdk/0.50.0/sjml/registry/) | Static item, block, entity, fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipes, and related declarations. |
-| [`render`](https://docs.rs/sjml-sdk/0.50.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
-| [`screen_input`](https://docs.rs/sjml-sdk/0.50.0/sjml/screen_input/) | Bounded mouse, key, text, and opt-in scroll events delivered to the active screen. |
-| [`storage`](https://docs.rs/sjml-sdk/0.50.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
-| [`task`](https://docs.rs/sjml-sdk/0.50.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
-| [`widgets`](https://docs.rs/sjml-sdk/0.50.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
-| [`world`](https://docs.rs/sjml-sdk/0.50.0/sjml/world/) | Loaded-world handles, block snapshots/properties, bounded updates/ticks, property updates, weather, borders, time, and boolean/integer gamerules. |
-| [`prelude`](https://docs.rs/sjml-sdk/0.50.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
+| [`abi`](https://docs.rs/sjml-sdk/0.51.0/sjml/abi/) | Typed, generation-checked handles, wire spans, host input allocation, and guest ABI glue. |
+| [`batch`](https://docs.rs/sjml-sdk/0.51.0/sjml/batch/) | Batches only imports that the host marks as batchable. |
+| [`block_entity`](https://docs.rs/sjml-sdk/0.51.0/sjml/block_entity/) | Loaded block-entity lookup and detached snapshots, including bounded NBT. |
+| [`client_chat`](https://docs.rs/sjml-sdk/0.51.0/sjml/client_chat/) | Native chat layout, theming, and pointer callbacks. |
+| [`client_input`](https://docs.rs/sjml-sdk/0.51.0/sjml/client_input/) | Global key, mouse-button, and observational mouse-wheel events, plus bounded cursor position when no screen is open. |
+| [`client_keybindings`](https://docs.rs/sjml-sdk/0.51.0/sjml/client_keybindings/) | Named client key mappings with bounded callbacks and Controls-screen rebinding. |
+| [`chat_messages`](https://docs.rs/sjml-sdk/0.51.0/sjml/chat_messages/) | Local chat-message snapshots and separately capability-gated display filtering. |
+| [`client_notifications`](https://docs.rs/sjml-sdk/0.51.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
+| [`client_audio`](https://docs.rs/sjml-sdk/0.51.0/sjml/client_audio/) | Bounded client-local sound playback through Minecraft's sound manager. |
+| [`entity`](https://docs.rs/sjml-sdk/0.51.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, spatial queries, and bounded raycasts; effect apply/removal, discard, and generic damage. |
+| [`entity_attributes`](https://docs.rs/sjml-sdk/0.51.0/sjml/entity_attributes/) | Bounded reads and base-value writes for selected vanilla living-entity and server-player attributes. |
+| [`entity_data`](https://docs.rs/sjml-sdk/0.51.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
+| [`events`](https://docs.rs/sjml-sdk/0.51.0/sjml/events/) | Typed lifecycle, world, player movement/interaction/respawn, cancellable entity death attempts, entity, inventory, and resource events. |
+| [`gl`](https://docs.rs/sjml-sdk/0.51.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
+| [`host`](https://docs.rs/sjml-sdk/0.51.0/sjml/host/) | ABI version query and host logging. |
+| [`inventory`](https://docs.rs/sjml-sdk/0.51.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, component updates, and slot-to-slot transfers. |
+| [`player_inventory`](https://docs.rs/sjml-sdk/0.51.0/sjml/player_inventory/) | Detached inventory snapshots, bounded slot set/clear, and durability changes for existing damageable stacks. |
+| [`menu`](https://docs.rs/sjml-sdk/0.51.0/sjml/menu/) | Bounded server menus with read-only slots and explicit action callbacks. |
+| [`network`](https://docs.rs/sjml-sdk/0.51.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
+| [`player`](https://docs.rs/sjml-sdk/0.51.0/sjml/player/) | Online player handles, detached snapshots, equipment, abilities, vitals, game mode, motion, effects, teleport, and action-bar messages. |
+| [`recipe`](https://docs.rs/sjml-sdk/0.51.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
+| [`registry`](https://docs.rs/sjml-sdk/0.51.0/sjml/registry/) | Static item, block, entity, fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipes, and related declarations. |
+| [`render`](https://docs.rs/sjml-sdk/0.51.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, and model drawing. |
+| [`screen_input`](https://docs.rs/sjml-sdk/0.51.0/sjml/screen_input/) | Bounded mouse, key, text, and opt-in scroll events delivered to the active screen. |
+| [`storage`](https://docs.rs/sjml-sdk/0.51.0/sjml/storage/) | Stable typed records, save/client-profile scopes, and schema migrations. |
+| [`task`](https://docs.rs/sjml-sdk/0.51.0/sjml/task/) | Owned async work, timers, cancellation, worker compute, and asynchronous service calls. |
+| [`widgets`](https://docs.rs/sjml-sdk/0.51.0/sjml/widgets/) | Bounded button, text-field, tooltip, and progress-bar state helpers. |
+| [`world`](https://docs.rs/sjml-sdk/0.51.0/sjml/world/) | Loaded-world handles and chunk enumeration, block snapshots/properties, bounded updates/ticks, weather, borders, time, and boolean/integer gamerules. |
+| [`prelude`](https://docs.rs/sjml-sdk/0.51.0/sjml/prelude/) | Common callbacks, derives, handles, event types, and result/error types. |
 
 Stable codecs (`StableEncode`, `StableDecode`, `Encoder`, and `Decoder`) are
 re-exported at the crate root; the implementation module is intentionally
@@ -529,6 +530,12 @@ Guest callback errors, traps, or malformed replies disable only the module
 whose command callback failed; the command reports a generic failure to its
 caller. Brigadier rejects malformed command input before invoking the guest.
 
+Physical-client commands use `[[modules.client_commands]]` and
+`#[client_command(name = "...")]`, are namespaced beneath `/sjmlclient`, and
+require the local `client.command` grant. They do not dispatch server commands
+or modify server state. See [client command declarations](CLIENT_COMMANDS.md)
+for the argument and callback contract.
+
 The `#[event]` attributes above export callbacks; they do not register them for
 delivery. From `mod_init` in a retained logical-server instance, explicitly
 subscribe with `events::subscribe(event_name, priority)`. The NeoForge adapter
@@ -537,18 +544,19 @@ recognizes `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `entity.death`, `entity.spawned`, `entity.effect.tick`, `block.break`,
 `block.place`, `player.interacted`, `entity.damaged`, `world.loaded`, and
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`;
-callbacks run on the owning logical-server thread. The sixteen notifications require
-`events.subscribe`. The cancellable
-`block.break` callback requires both `events.subscribe` and the distinct
-`events.cancel` capability. Both capabilities appear in the combined module
-and administrator-grant declarations above.
+`entity.death_attempt` is synchronous and cancellable. Server event callbacks
+run on the owning logical-server thread. Notifications require
+`events.subscribe`; cancellable `block.break`, `block.place_attempt`,
+`player.interaction`, and `entity.death_attempt` also require `events.cancel`.
+Both capabilities appear in the combined module and administrator-grant
+declarations above.
 
 `events::subscribe` returns an `EventSubscriptionHandle`. Keep that handle if
 you need to call `events::unsubscribe(handle)` later; closing the module also
 removes its subscriptions. Each active module instance may hold at most 256
 subscriptions. Event
 names must be 1–128 bytes of lowercase ASCII letters, digits, `.`, `_`, or `-`,
-starting with a letter or digit, and must be one of the seventeen names listed
+starting with a letter or digit, and must be one of the supported names listed
 above. Priorities are `Highest`, `High`, `Normal`, `Low`, and `Lowest` in that
 order; equal priorities retain module activation order and subscription order.
 The subscription imports are available only when `events.subscribe` is both
@@ -714,15 +722,22 @@ Pickup uses NeoForge's successful post-insertion hook; crafting uses the
 successful result-take hook. A cancellable toss is reported on the next server
 tick only after its item entity is confirmed in the level. The slot is `None`
 when the hook cannot identify the exact player inventory slot.
+`entity.death_attempt` accepts a detached `EntityDeathAttempt` snapshot. Its
+synchronous handler returns a stable boolean; an authorized `true` cancels the
+death and restores the victim to at least one health. The ordinary
+`entity.death` notification is skipped for that vetoed attempt. The guest sees
+only UUID/type/dimension strings, optional server-player profile name, and
+coordinates. See [death attempts](ENTITY_DEATH_ATTEMPTS.md).
+
 `block.break` accepts the schema-v1 `BlockBreak` record with `player_id`,
 `dimension_id`, and `block_id` stable strings, then signed `i32` coordinates
 `x`, `y`, and `z`. Its handler returns `SjmlResult<bool>`: only the exact stable
 boolean encodings `0` and `1` are accepted, and any authorized `true` vetoes
 the break. A malformed return or callback error disables only that module and
-does not veto. All seventeen event adapters run on the owning logical-server
-thread, in subscription priority order. The sixteen notifications require the
-manifest request and administrator grant for `events.subscribe`, while
-`block.break` requires both `events.subscribe` and `events.cancel`. Guest
+does not veto. Event adapters run on the owning logical-server thread, in
+subscription priority order. Notifications require the manifest request and
+administrator grant for `events.subscribe`; cancellable events also require
+`events.cancel`. Guest
 commands use the manifest schema described above.
 
 This defines the SDK guest convention. The NeoForge bootstrap invokes the
@@ -798,10 +813,10 @@ from 1 through 1,200 ticks. The ordinary `subscribe` call uses 20 ticks for
 
 The host validates an event name as strict UTF-8 of 1–128 bytes using only
 lowercase ASCII letters, digits, `.`, `_`, or `-`, with a letter or digit first;
-it must also be one of the seventeen event names above. `events.subscribe` must be
+it must also be one of the supported event names above. `events.subscribe` must be
 requested in the module descriptor and granted by the administrator before
 these imports are bound. A `block.break` subscription also requires the
-separate `events.cancel` request and grant. Calls are accepted only from
+separate `events.cancel` request and grant for cancellable events. Calls are accepted only from
 integrated-server or dedicated-server execution contexts. Static registration
 instances cannot subscribe. A callback failure disables only that module; an
 invalid `block.break` result or callback failure does not veto the break.

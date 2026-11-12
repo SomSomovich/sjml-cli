@@ -54,7 +54,8 @@ activation. It does not select or download a host version.
 | `permissions` | array of strings | no | Capability requests; each must also be granted by the server administrator before protected operations are enabled. |
 | `provides` | array of strings | no | Service IDs this module implements. Each must also have a matching entry in `exports`. |
 | `[[modules.exports]]` | array of tables | no | Versioned service exports and their visibility. |
-| `[[modules.commands]]` | array of tables | no | Guest commands declared for this module; client-only modules cannot declare commands. |
+| `[[modules.commands]]` | array of tables | no | Server guest commands; client-only modules cannot declare them. |
+| `[[modules.client_commands]]` | array of tables | no | Local client commands; only `client` and `both` modules can declare them. |
 | `[[modules.channels]]` | array of tables | no | Versioned network channels and allowed directions. |
 
 `side` is an execution setting; `[mod].distribution` is a separate peer
@@ -91,6 +92,19 @@ argument. Command names are limited to 128 characters, 64 commands per module,
 and 16 arguments per command. Commands require the `content.register`
 capability. See [guest command declarations](FORMAT.md#guest-command-declarations)
 and the [SDK command guide](SDK_GUIDE.md#manifest-declared-commands).
+
+### `[[modules.client_commands]]` and `[[modules.client_commands.arguments]]`
+
+Client commands use the same bounded argument schema and callback payload
+limits as server commands, but are local to a physical Minecraft client. They
+are allowed for modules with `side = "client"` or `side = "both"`; server-only
+modules cannot declare them. Each entry accepts the same `name`,
+`schema_version`, `permission_level`, and ordered `arguments` keys. The Rust
+callback uses `#[client_command(name = "...")]` and returns
+`SjmlResult<String>`. The module must request and receive `client.command` on
+that local installation. Commands are registered beneath
+`/sjmlclient <package> <module> <command>` and never invoke server commands.
+See [client command declarations](CLIENT_COMMANDS.md).
 
 ### `[[modules.channels]]`
 

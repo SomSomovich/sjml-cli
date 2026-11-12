@@ -20,7 +20,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
     };
     if matches!(
         name.as_str(),
-        "block.break" | "block.place_attempt" | "player.interaction"
+        "block.break" | "block.place_attempt" | "player.interaction" | "entity.death_attempt"
     ) {
         return error(
             Span::call_site(),
@@ -279,6 +279,13 @@ mod tests {
                 quote! { async fn interaction(_: PlayerInteractionAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "player.interaction is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.death_attempt"),
+                quote! { async fn death_attempt(_: EntityDeathAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.death_attempt is cancellable",
         );
     }
 
