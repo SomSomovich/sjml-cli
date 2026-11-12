@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.56.0"
+abi = "^1.57.0"
 minecraft = "~1.21.1"
-sjml = "^0.66.0"
+sjml = "^0.67.0"
 
 [[modules]]
 id = "main"

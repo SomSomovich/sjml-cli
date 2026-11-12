@@ -6,12 +6,14 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.56.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.57.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.56.0 adds
-bounded interactive physical-client screens under `client.ui.screen`, with
-owner-directed `client.screen.action` callbacks. ABI 1.55.0 adds the
+incompatible. Build metadata does not affect version ordering. ABI 1.57.0 adds
+bounded schema-v2 text-entry forms to interactive physical-client screens,
+with owner-directed `client.screen.form_submit` callbacks. ABI 1.56.0 adds
+schema-v1 screens under `client.ui.screen`, with owner-directed
+`client.screen.action` callbacks. ABI 1.55.0 adds the
 synchronous, cancellable, physical-client `client.chat.send_attempt` event.
 It passes bounded original text and requires `client.chat.send.observe` plus
 `events.subscribe` and `events.cancel`; it never rewrites signed chat. ABI
@@ -1215,6 +1217,15 @@ one to four buttons with labels of 1–96 bytes. Text must be strict UTF-8 and
 cannot contain control characters; empty body lines are allowed. All text is
 literal and is rendered by a bounded vanilla `Screen` with ordinary buttons.
 
+ABI 1.57.0 adds schema-v2 form requests to the same `open_screen` import. The
+schema-v1 fields remain unchanged; schema v2 appends `u32 field_count` (1–4),
+then each text field's stable UTF-8 `field_id`, literal `label`, initial
+`value`, and `u32 max_utf8_bytes`. Field IDs are 1–64 lowercase ASCII bytes,
+unique among themselves and distinct from button IDs. Labels are 1–96 bytes;
+initial values may be empty but cannot exceed the configured 1–128 byte limit.
+Values and labels must be strict UTF-8 without control characters, and the
+whole request remains capped at 4,096 bytes.
+
 When a button is clicked, the screen closes and the owning module receives the
 direct callback export `sjml_v1_event_client.screen.action`. Its schema-v1
 payload is `u32 schema_version` (`1`), stable UTF-8 `screen_id`, and stable
@@ -1225,6 +1236,16 @@ external screen closure does not emit a button action. The callback can open
 another owner screen after the first screen closes. `Screen` does not pause
 integrated-server ticks. See
 [interactive client screens](CLIENT_SCREEN.md).
+
+When a schema-v2 form button is clicked, the host closes the form and invokes
+the owner's direct export `sjml_v1_event_client.screen.form_submit`. Its
+schema-v1 payload is `u32 schema_version` (`1`), `screen_id`, `button_id`,
+`u32 field_count`, then each field value as a schema-v1 `ClientScreenFormValue`
+record containing `field_id` and current `value` as stable UTF-8 strings in
+declaration order. Every button, including one labelled `Cancel`, submits the
+field values. Escape and external closure send no callback. The form callback
+must be exported before the form is opened; it is not routed via
+`events.subscribe`.
 
 ## Client toast notifications
 

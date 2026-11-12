@@ -118,6 +118,31 @@ pub struct ClientScreenAction {
     pub button_id: String,
 }
 
+/// One current text value returned by a module-owned client form screen.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ClientScreenFormValue {
+    /// Stable ID of the input field in the form definition.
+    pub id: String,
+    /// Literal value entered by the local user, bounded by that field's UTF-8 byte limit.
+    pub value: String,
+}
+
+/// Synchronous, non-cancellable submit notification for a module-owned client form screen.
+///
+/// The host emits `client.screen.form_submit` directly only to the owner of the form that received
+/// the click. It includes the clicked button and the current bounded values of all its fields.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ClientScreenFormSubmit {
+    /// ID of the module-owned form screen that was submitted.
+    pub screen_id: String,
+    /// ID of the button clicked on that form.
+    pub button_id: String,
+    /// Current values in field-definition order.
+    pub fields: Vec<ClientScreenFormValue>,
+}
+
 /// Synchronous cancellable logical-server right-click attempt for a block, entity, or item use.
 ///
 /// Return `Ok(true)` from the `player.interaction` event handler to veto this attempt.

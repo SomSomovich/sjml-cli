@@ -151,7 +151,9 @@ pub use client_keybindings::{
     MAX_CLIENT_KEYBINDING_SUBSCRIPTIONS,
 };
 pub use client_notifications::NotificationKind;
-pub use client_screen::{ClientScreenButton, ClientScreenDefinition};
+pub use client_screen::{
+    ClientScreenButton, ClientScreenDefinition, ClientScreenFormDefinition, ClientScreenTextField,
+};
 pub use entity::{
     ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
     MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_EFFECT_ID_BYTES,
@@ -160,8 +162,8 @@ pub use entity::{
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use events::{
-    ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction, ItemTooltipLines,
-    PlayerSleepAttempt,
+    ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit,
+    ClientScreenFormValue, ItemTooltipLines, PlayerSleepAttempt,
 };
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
@@ -280,7 +282,10 @@ pub mod prelude {
     pub use crate::client_notifications;
     pub use crate::client_notifications::NotificationKind;
     pub use crate::client_screen;
-    pub use crate::client_screen::{ClientScreenButton, ClientScreenDefinition};
+    pub use crate::client_screen::{
+        ClientScreenButton, ClientScreenDefinition, ClientScreenFormDefinition,
+        ClientScreenTextField,
+    };
     pub use crate::entity;
     pub use crate::entity::{
         ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY,
@@ -299,13 +304,14 @@ pub mod prelude {
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
         BlockPlaceAttempt, ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction,
-        EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
-        EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged, ItemTooltipLines,
-        PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
-        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        ClientScreenFormSubmit, ClientScreenFormValue, EffectTickEvent, EntityDamageAttempt,
+        EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
+        EntityHealAttempt, EntityJoinAttempt, EntitySpawned, EntityTargetAttempt, EventPriority,
+        ExplosionAttempt, InventoryChanged, ItemTooltipLines, PlayerAdvancementEarned,
+        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft,
+        PlayerMoved, PlayerSleepAttempt, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{

@@ -1,13 +1,27 @@
-use sjml::events::ClientScreenAction;
+use sjml::events::{ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue};
 use sjml::{
     client_screen, event, from_bytes, to_bytes, ClientScreenButton, ClientScreenDefinition,
-    ErrorCode, SjmlResult,
+    ClientScreenFormDefinition, ClientScreenTextField, ErrorCode, SjmlResult,
 };
 
 #[event(name = "client.screen.action")]
 fn on_client_screen_action(action: ClientScreenAction) -> SjmlResult<()> {
     assert_eq!(action.screen_id, "demo:confirmation");
     assert_eq!(action.button_id, "accept");
+    Ok(())
+}
+
+#[event(name = "client.screen.form_submit")]
+fn on_client_screen_form_submit(form: ClientScreenFormSubmit) -> SjmlResult<()> {
+    assert_eq!(form.screen_id, "demo:profile");
+    assert_eq!(form.button_id, "save");
+    assert_eq!(
+        form.fields,
+        vec![ClientScreenFormValue {
+            id: "name".to_owned(),
+            value: "Ada".to_owned(),
+        }]
+    );
     Ok(())
 }
 
@@ -162,6 +176,104 @@ fn client_screen_action_uses_the_v1_two_string_event_payload_and_callback() {
     assert_eq!(to_bytes(&action).unwrap(), expected);
     assert_eq!(from_bytes::<ClientScreenAction>(&expected).unwrap(), action);
     assert_eq!(on_client_screen_action(action), Ok(()));
+}
+
+#[test]
+fn form_definition_validates_field_bounds_and_open_fails_closed_on_native_targets() {
+    let screen = || {
+        ClientScreenDefinition::new(
+            "demo:profile",
+            "Profile",
+            Vec::new(),
+            vec![ClientScreenButton::new("save", "Save").unwrap()],
+        )
+        .unwrap()
+    };
+    let field = || ClientScreenTextField::new("name", "Name", "Ada", 64).unwrap();
+    let definition = ClientScreenFormDefinition::new(screen(), vec![field()]).unwrap();
+    assert_eq!(definition.fields[0].initial_value, "Ada");
+
+    #[cfg(not(target_arch = "wasm32"))]
+    assert_eq!(
+        client_screen::open_form(&definition).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+
+    for (id, label, value, max_bytes) in [
+        ("Upper", "Name", "", 32),
+        ("name", "", "", 32),
+        ("name", "Name", "é", 1),
+        ("name", "Name", "x", 0),
+        ("name", "Name", "x", 129),
+        ("name", "Name", "a\nb", 8),
+    ] {
+        assert_eq!(
+            ClientScreenTextField::new(id, label, value, max_bytes)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    assert_eq!(
+        ClientScreenTextField::new("name", "Name", "x".repeat(129), 128)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        ClientScreenFormDefinition::new(screen(), Vec::new())
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        ClientScreenFormDefinition::new(
+            screen(),
+            (0..5)
+                .map(|index| {
+                    ClientScreenTextField::new(format!("field{index}"), "Field", "", 32).unwrap()
+                })
+                .collect(),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        ClientScreenFormDefinition::new(
+            screen(),
+            vec![ClientScreenTextField::new("save", "Name", "", 32).unwrap()],
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InvalidArgument
+    );
+}
+
+#[test]
+fn form_submit_callback_uses_stable_schema_v1_and_preserves_field_values() {
+    let form = ClientScreenFormSubmit {
+        screen_id: "demo:profile".to_owned(),
+        button_id: "save".to_owned(),
+        fields: vec![ClientScreenFormValue {
+            id: "name".to_owned(),
+            value: "Ada".to_owned(),
+        }],
+    };
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    append_string(&mut expected, "demo:profile");
+    append_string(&mut expected, "save");
+    expected.extend_from_slice(&1_u32.to_le_bytes());
+    expected.extend_from_slice(&1_u32.to_le_bytes());
+    append_string(&mut expected, "name");
+    append_string(&mut expected, "Ada");
+    assert_eq!(to_bytes(&form).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<ClientScreenFormSubmit>(&expected).unwrap(),
+        form
+    );
+    assert_eq!(on_client_screen_form_submit(form), Ok(()));
 }
 
 fn append_string(target: &mut Vec<u8>, value: &str) {

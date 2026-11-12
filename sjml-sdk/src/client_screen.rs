@@ -4,6 +4,8 @@ use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// Schema version used by client screen definitions sent to the host.
 pub const CLIENT_SCREEN_SCHEMA_VERSION: u32 = 1;
+/// Schema version used by client form definitions sent to the host.
+pub const CLIENT_SCREEN_FORM_SCHEMA_VERSION: u32 = 2;
 /// Maximum UTF-8 length of a screen or button ID.
 pub const MAX_CLIENT_SCREEN_ID_BYTES: usize = 64;
 /// Maximum UTF-8 length of a screen title.
@@ -16,6 +18,14 @@ pub const MAX_CLIENT_SCREEN_BODY_LINE_BYTES: usize = 160;
 pub const MAX_CLIENT_SCREEN_BUTTONS: usize = 4;
 /// Maximum UTF-8 length of one button label.
 pub const MAX_CLIENT_SCREEN_BUTTON_LABEL_BYTES: usize = 96;
+/// Maximum number of text fields in one form screen.
+pub const MAX_CLIENT_SCREEN_TEXT_FIELDS: usize = 4;
+/// Maximum UTF-8 length of one form field ID and label.
+pub const MAX_CLIENT_SCREEN_TEXT_FIELD_ID_BYTES: usize = MAX_CLIENT_SCREEN_ID_BYTES;
+/// Maximum UTF-8 length of one form field label.
+pub const MAX_CLIENT_SCREEN_TEXT_FIELD_LABEL_BYTES: usize = MAX_CLIENT_SCREEN_BUTTON_LABEL_BYTES;
+/// Maximum configurable UTF-8 length of one form field value.
+pub const MAX_CLIENT_SCREEN_TEXT_FIELD_VALUE_BYTES: u32 = 128;
 /// Maximum encoded size of a complete screen definition.
 pub const MAX_CLIENT_SCREEN_PAYLOAD_BYTES: usize = 4096;
 
@@ -138,6 +148,116 @@ impl ClientScreenDefinition {
     }
 }
 
+/// One bounded text input displayed on a form screen.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenTextField {
+    /// Stable lowercase key included in the submit callback.
+    pub id: String,
+    /// Literal label displayed above the input box.
+    pub label: String,
+    /// Literal initial value placed in the input box.
+    pub initial_value: String,
+    /// Maximum UTF-8 byte length accepted by the input box and returned by the host.
+    pub max_utf8_bytes: u32,
+}
+
+impl ClientScreenTextField {
+    /// Builds and validates one bounded text field.
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        initial_value: impl Into<String>,
+        max_utf8_bytes: u32,
+    ) -> SjmlResult<Self> {
+        let field = Self {
+            id: id.into(),
+            label: label.into(),
+            initial_value: initial_value.into(),
+            max_utf8_bytes,
+        };
+        field.validate()?;
+        Ok(field)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        validate_id(&self.id, "text field ID")?;
+        validate_text(
+            &self.label,
+            1,
+            MAX_CLIENT_SCREEN_TEXT_FIELD_LABEL_BYTES,
+            "text field label",
+        )?;
+        if !(1..=MAX_CLIENT_SCREEN_TEXT_FIELD_VALUE_BYTES).contains(&self.max_utf8_bytes) {
+            return Err(invalid(format!(
+                "text field max_utf8_bytes must be 1–{MAX_CLIENT_SCREEN_TEXT_FIELD_VALUE_BYTES}"
+            )));
+        }
+        validate_text(
+            &self.initial_value,
+            0,
+            self.max_utf8_bytes as usize,
+            "text field initial value",
+        )
+    }
+}
+
+/// A bounded form built on a screen definition and one to four text inputs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenFormDefinition {
+    /// Screen content and submit buttons.
+    pub screen: ClientScreenDefinition,
+    /// One to four uniquely identified text input fields.
+    pub fields: Vec<ClientScreenTextField>,
+}
+
+impl ClientScreenFormDefinition {
+    /// Builds and validates a bounded form screen.
+    pub fn new(
+        screen: ClientScreenDefinition,
+        fields: Vec<ClientScreenTextField>,
+    ) -> SjmlResult<Self> {
+        let definition = Self { screen, fields };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    fn validate(&self) -> SjmlResult<usize> {
+        let mut size = self.screen.validate()?;
+        if !(1..=MAX_CLIENT_SCREEN_TEXT_FIELDS).contains(&self.fields.len()) {
+            return Err(invalid(format!(
+                "a form must contain between 1 and {MAX_CLIENT_SCREEN_TEXT_FIELDS} text fields"
+            )));
+        }
+        for (index, field) in self.fields.iter().enumerate() {
+            field.validate()?;
+            if self.fields[..index]
+                .iter()
+                .any(|previous| previous.id == field.id)
+                || self
+                    .screen
+                    .buttons
+                    .iter()
+                    .any(|button| button.id == field.id)
+            {
+                return Err(invalid(
+                    "form field IDs must be unique and cannot match a button ID",
+                ));
+            }
+            size = checked_string_size(size, &field.id)?;
+            size = checked_string_size(size, &field.label)?;
+            size = checked_string_size(size, &field.initial_value)?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        if size > MAX_CLIENT_SCREEN_PAYLOAD_BYTES {
+            return Err(too_large(format!(
+                "encoded client form exceeds {MAX_CLIENT_SCREEN_PAYLOAD_BYTES} bytes"
+            )));
+        }
+        Ok(size)
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_client_ui_v1")]
 extern "C" {
@@ -152,6 +272,19 @@ extern "C" {
 /// IDs and cannot cancel the click. The bounded payload is copied synchronously by the host.
 pub fn open(definition: &ClientScreenDefinition) -> SjmlResult<()> {
     let payload = encode_definition(definition)?;
+    open_payload(&payload)
+}
+
+/// Opens a bounded text form on the local physical client.
+///
+/// The clicked button and the current value of every field are sent directly to the owning
+/// module as `client.screen.form_submit`. The host copies the bounded payload synchronously.
+pub fn open_form(definition: &ClientScreenFormDefinition) -> SjmlResult<()> {
+    let payload = encode_form_definition(definition)?;
+    open_payload(&payload)
+}
+
+fn open_payload(payload: &[u8]) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
     {
         // SAFETY: the bounded payload remains live while the host synchronously copies it.
@@ -194,6 +327,22 @@ fn encode_definition(definition: &ClientScreenDefinition) -> SjmlResult<Vec<u8>>
     for button in &definition.buttons {
         write_string(&mut payload, &button.id)?;
         write_string(&mut payload, &button.label)?;
+    }
+    debug_assert!(payload.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    Ok(payload)
+}
+
+fn encode_form_definition(definition: &ClientScreenFormDefinition) -> SjmlResult<Vec<u8>> {
+    let capacity = definition.validate()?;
+    let mut payload = encode_definition(&definition.screen)?;
+    payload.reserve(capacity.saturating_sub(payload.len()));
+    payload[..4].copy_from_slice(&CLIENT_SCREEN_FORM_SCHEMA_VERSION.to_le_bytes());
+    write_u32(&mut payload, definition.fields.len() as u32);
+    for field in &definition.fields {
+        write_string(&mut payload, &field.id)?;
+        write_string(&mut payload, &field.label)?;
+        write_string(&mut payload, &field.initial_value)?;
+        write_u32(&mut payload, field.max_utf8_bytes);
     }
     debug_assert!(payload.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
     Ok(payload)
@@ -259,8 +408,8 @@ fn payload_overflow() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_definition, ClientScreenButton, ClientScreenDefinition,
-        MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
+        encode_definition, encode_form_definition, ClientScreenButton, ClientScreenDefinition,
+        ClientScreenFormDefinition, ClientScreenTextField, MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
     };
 
     #[test]
@@ -289,6 +438,50 @@ mod tests {
         append_string(&mut expected, "No");
         assert_eq!(encoded, expected);
         assert!(encoded.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    }
+
+    #[test]
+    fn encodes_schema_v2_form_fields_after_the_unchanged_screen_prefix() {
+        let screen = ClientScreenDefinition::new(
+            "demo:profile",
+            "Profile",
+            vec!["Enter your name".to_owned()],
+            vec![ClientScreenButton::new("save", "Save").unwrap()],
+        )
+        .unwrap();
+        let form = ClientScreenFormDefinition::new(
+            screen.clone(),
+            vec![ClientScreenTextField::new("name", "Name", "Ada", 64).unwrap()],
+        )
+        .unwrap();
+        let encoded = encode_form_definition(&form).unwrap();
+        let mut expected = encode_definition(&screen).unwrap();
+        expected[..4].copy_from_slice(&2_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "name");
+        append_string(&mut expected, "Name");
+        append_string(&mut expected, "Ada");
+        expected.extend_from_slice(&64_u32.to_le_bytes());
+        assert_eq!(encoded, expected);
+        assert!(encoded.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    }
+
+    #[test]
+    fn rejects_duplicate_or_button_colliding_form_field_ids() {
+        let screen = ClientScreenDefinition::new(
+            "demo:profile",
+            "Profile",
+            Vec::new(),
+            vec![ClientScreenButton::new("save", "Save").unwrap()],
+        )
+        .unwrap();
+        let field = || ClientScreenTextField::new("name", "Name", "", 32).unwrap();
+        assert!(ClientScreenFormDefinition::new(screen.clone(), vec![field(), field()]).is_err());
+        assert!(ClientScreenFormDefinition::new(
+            screen,
+            vec![ClientScreenTextField::new("save", "Name", "", 32).unwrap()],
+        )
+        .is_err());
     }
 
     fn append_string(target: &mut Vec<u8>, value: &str) {

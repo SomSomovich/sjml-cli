@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.64.0"
+sjml-sdk = "0.65.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -171,7 +171,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.64.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.65.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)
@@ -183,3 +183,6 @@ The full workspace and command-line tool are in the
 SDK 0.63.0 also provides the physical-client `client.chat.send_attempt` event, which can veto the original outgoing message without changing Minecraft’s signed-chat flow. Reading outgoing text requires `client.chat.send.observe`; vetoing also requires `events.subscribe` and `events.cancel`. See the outgoing chat guide in the workspace documentation.
 
 SDK 0.64.0 adds bounded `client_screen::open` screens with literal text and up to four vanilla buttons. Button actions are dispatched directly to the owning module as `client.screen.action`; opening requires `client.ui.screen`, and the callback does not require `events.subscribe`. See `docs/CLIENT_SCREEN.md` in the workspace documentation.
+
+
+SDK 0.65.0 adds bounded client form screens with up to four UTF-8-limited text fields. Values are delivered directly to the owner through `client.screen.form_submit`; schema-v1 button screens remain compatible. See `docs/CLIENT_SCREEN.md` in the workspace documentation.

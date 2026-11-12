@@ -64,6 +64,11 @@ arbitrary widget callbacks. A button action is dispatched only to the module
 that owns that screen, and module teardown closes only its screen instance.
 The API refuses to replace another screen, does not pause integrated-server
 ticks, and does not require `events.subscribe` for the direct action callback.
+Schema-v2 forms add at most four labelled text fields with per-field UTF-8 byte
+limits. The host rejects control characters and returns values only to the
+owning client module after a button click; it does not send form values to the
+server. A module must explicitly use a separate authorized networking API to
+transmit any value elsewhere.
 
 Task groups bound the number of queued and running operations per module and
 bound each requested timeout. A timeout completes the operation with a timeout
