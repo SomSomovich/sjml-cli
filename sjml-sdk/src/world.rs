@@ -66,6 +66,13 @@ pub const MAX_WORLD_CHUNK_RADIUS: u32 = 16;
 pub const MAX_WORLD_CHUNKS: usize = 512;
 /// Maximum stable response size for [`loaded_chunks`].
 pub const MAX_WORLD_CHUNKS_RESPONSE_BYTES: usize = 8 + MAX_WORLD_CHUNKS * 12;
+/// Maximum number of biome IDs returned by one [`biome_ids`] call.
+pub const MAX_WORLD_BIOME_IDS: usize = 4_000;
+/// Maximum UTF-8 bytes in one biome ID returned by [`biome_ids`].
+pub const MAX_WORLD_BIOME_ID_BYTES: usize = 256;
+/// Maximum stable response size for [`biome_ids`].
+pub const MAX_WORLD_BIOME_IDS_RESPONSE_BYTES: usize =
+    8 + MAX_WORLD_BIOME_IDS * (4 + MAX_WORLD_BIOME_ID_BYTES);
 
 /// Runtime heightmap used by [`heightmap`]. ABI values are stable for world-v1.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -397,6 +404,50 @@ impl StableDecode for LoadedChunksResponse {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
+struct BiomeIdsQuery {
+    world: WorldHandle,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, StableEncode)]
+#[sjml(version = 1)]
+struct BiomeIdsResponse {
+    ids: Vec<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for BiomeIdsResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported biome-ID response schema",
+            ));
+        }
+        let count = decoder.read_length(MAX_WORLD_BIOME_IDS)?;
+        let mut ids = Vec::new();
+        ids.try_reserve_exact(count).map_err(|_| {
+            SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not reserve memory for biome-ID results",
+            )
+        })?;
+        for _ in 0..count {
+            let length = decoder.read_length(MAX_WORLD_BIOME_ID_BYTES)?;
+            let id = String::from_utf8(decoder.read_raw(length)?.to_vec()).map_err(|_| {
+                SjmlError::new(ErrorCode::InvalidUtf8, "biome ID contains malformed UTF-8")
+            })?;
+            ids.push(id);
+        }
+        validate_biome_ids(&ids)?;
+        Ok(Self { ids })
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
 struct BlockPropertiesQuery {
     world: WorldHandle,
     position: BlockPos,
@@ -546,6 +597,8 @@ extern "C" {
         output: i32,
         capacity: i32,
     ) -> i32;
+    #[link_name = "biome_ids"]
+    fn imported_biome_ids(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "heightmap"]
     fn imported_heightmap(
         handle: i32,
@@ -985,6 +1038,61 @@ pub fn biome_at(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<Str
         let _ = (world, position);
         Err(unsupported_target())
     }
+}
+
+/// Lists all registered biome IDs for this module's loaded server world in lexical order.
+///
+/// Requires `world.read` and a live server-side [`WorldHandle`]. The registry is read directly;
+/// chunks are never loaded or queried. Results are complete or an error if more than
+/// [`MAX_WORLD_BIOME_IDS`] biomes are registered.
+pub fn biome_ids(world: WorldHandle) -> SjmlResult<Vec<String>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&BiomeIdsQuery { world })?;
+        let response: BiomeIdsResponse = read_output(
+            MAX_WORLD_BIOME_IDS_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the versioned query and bounded destination remain live for this sync call.
+                unsafe {
+                    imported_biome_ids(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        validate_biome_ids(&response.ids)?;
+        Ok(response.ids)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_biome_ids(ids: &[String]) -> SjmlResult<()> {
+    if ids.len() > MAX_WORLD_BIOME_IDS {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "host returned more than 4000 biome IDs",
+        ));
+    }
+    let mut previous: Option<&str> = None;
+    for id in ids {
+        validate_resource_id(id, "biome")?;
+        if previous.is_some_and(|previous| previous >= id.as_str()) {
+            return Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "host returned duplicate or unsorted biome IDs",
+            ));
+        }
+        previous = Some(id);
+    }
+    Ok(())
 }
 
 /// Reads a vanilla runtime heightmap value at block x/z coordinates.
@@ -2302,21 +2410,22 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        block_properties, collides, day_time, daylight_cycle_enabled, integer_game_rule,
+        biome_ids, block_properties, collides, day_time, daylight_cycle_enabled, integer_game_rule,
         loaded_chunks, play_sound, raycast, schedule_block_tick, set_block, set_block_properties,
         set_daylight_cycle_enabled, set_game_time, set_integer_game_rule, set_time, spawn_entity,
-        spawn_particle, validate_block_property_updates, validate_loaded_chunk_query,
-        validate_loaded_chunk_results, Aabb, BlockPropertiesMutation, BlockPropertiesQuery,
-        BlockPropertiesResponse, BlockProperty, BlockStateBatch, BlockStateQuery,
-        BlockStateSnapshot, ChunkPos, DaylightCycleSnapshot, LoadedChunksQuery,
-        LoadedChunksResponse, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
-        WeatherCondition, WeatherSnapshot, WorldCollisionQuery, WorldEntitySpawnRequest,
-        WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery, WorldGameRuleSnapshot,
-        WorldIntegerGameRule, WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery,
-        WorldIntegerGameRuleSnapshot, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
-        MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
-        MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
-        MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_GAME_TIME_TICKS,
+        spawn_particle, validate_biome_ids, validate_block_property_updates,
+        validate_loaded_chunk_query, validate_loaded_chunk_results, Aabb, BiomeIdsQuery,
+        BiomeIdsResponse, BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse,
+        BlockProperty, BlockStateBatch, BlockStateQuery, BlockStateSnapshot, ChunkPos,
+        DaylightCycleSnapshot, LoadedChunksQuery, LoadedChunksResponse, RaycastBlockMode,
+        RaycastFluidMode, RaycastHit, RaycastPoint, WeatherCondition, WeatherSnapshot,
+        WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation,
+        WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
+        WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot,
+        WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BIOME_IDS,
+        MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_PROPERTIES,
+        MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
+        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_GAME_TIME_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -2438,6 +2547,64 @@ mod tests {
                 .unwrap_err()
                 .code(),
             "response count is capped before allocating or reading entries"
+        );
+    }
+
+    #[test]
+    fn biome_id_query_response_and_enumeration_are_bounded_and_canonical() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let query = crate::to_bytes(&BiomeIdsQuery { world }).unwrap();
+        assert_eq!(28, query.len());
+        assert_eq!(1_u32.to_le_bytes(), query[0..4]);
+
+        let ids = vec!["alpha:forest".to_owned(), "minecraft:plains".to_owned()];
+        let encoded = crate::to_bytes(&BiomeIdsResponse { ids: ids.clone() }).unwrap();
+        assert_eq!(
+            ids,
+            crate::from_bytes::<BiomeIdsResponse>(&encoded).unwrap().ids
+        );
+        assert_eq!(
+            1_040_008, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES,
+            "the maximum response remains below the one MiB ABI payload cap"
+        );
+        assert_eq!(256, MAX_WORLD_BIOME_ID_BYTES);
+
+        assert!(validate_biome_ids(&ids).is_ok());
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            validate_biome_ids(&["zeta:forest".to_owned(), "alpha:plains".to_owned()])
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            validate_biome_ids(&["Minecraft:Plains".to_owned()])
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            validate_biome_ids(&[format!("mod:{}", "a".repeat(MAX_WORLD_BIOME_ID_BYTES))])
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            biome_ids(world).unwrap_err().code(),
+            "native targets fail closed without fabricating registered biomes"
+        );
+
+        let oversized_count = [
+            1_u32.to_le_bytes(),
+            (MAX_WORLD_BIOME_IDS as u32 + 1).to_le_bytes(),
+        ]
+        .concat();
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            crate::from_bytes::<BiomeIdsResponse>(&oversized_count)
+                .unwrap_err()
+                .code(),
+            "response count is bounded before allocating strings"
         );
     }
 

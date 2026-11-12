@@ -3,7 +3,7 @@
 //! These functions are valid only from `#[mod_register]`. They stage bounded
 //! item, block, block-entity, generic entity and its attributes, creative-tab,
 //! fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipe, bounded villager trade, particle,
-//! sound, bounded attribute effect and its optional tick callback, and string data component declarations;
+//! sound, bounded attribute effect and its optional tick callback, and bounded string/integer data component declarations;
 //! they do not mutate world state or registries directly.
 
 use crate::{ErrorCode, SjmlError, SjmlResult};
@@ -628,6 +628,25 @@ pub struct StringComponentDefinition {
     pub max_characters: u32,
 }
 
+/// Inclusive integer value bounds for a persistent, network-synchronized data component.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IntegerComponentDefinition {
+    pub minimum: i32,
+    pub maximum: i32,
+}
+
+impl IntegerComponentDefinition {
+    /// Creates a component definition after checking that its inclusive range is ordered.
+    pub fn new(minimum: i32, maximum: i32) -> SjmlResult<Self> {
+        if minimum > maximum {
+            return Err(invalid_argument(
+                "integer component minimum must not exceed maximum",
+            ));
+        }
+        Ok(Self { minimum, maximum })
+    }
+}
+
 impl Default for StringComponentDefinition {
     fn default() -> Self {
         Self {
@@ -952,6 +971,21 @@ extern "C" {
         component_path_length: i32,
         value_pointer: i32,
         value_length: i32,
+    ) -> i32;
+    #[link_name = "register_integer_component"]
+    fn imported_register_integer_component(
+        path_pointer: i32,
+        path_length: i32,
+        minimum: i32,
+        maximum: i32,
+    ) -> i32;
+    #[link_name = "set_item_integer_component"]
+    fn imported_set_item_integer_component(
+        item_path_pointer: i32,
+        item_path_length: i32,
+        component_path_pointer: i32,
+        component_path_length: i32,
+        value: i32,
     ) -> i32;
 }
 
@@ -2496,6 +2530,69 @@ pub fn set_item_string_component(
     }
 }
 
+/// Registers a persistent, network-synchronized bounded integer data component type.
+pub fn register_integer_component(
+    path: &str,
+    definition: IntegerComponentDefinition,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    if definition.minimum > definition.maximum {
+        return Err(invalid_argument(
+            "integer component minimum must not exceed maximum",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded path and scalar range before returning.
+        let status = unsafe {
+            imported_register_integer_component(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                definition.minimum,
+                definition.maximum,
+            )
+        };
+        return status_result(status, "host rejected the integer component declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = definition;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets an integer component default on an item registered by this module.
+///
+/// The host checks that the component belongs to this module and that the value falls within the
+/// inclusive range supplied to [`register_integer_component`].
+pub fn set_item_integer_component(
+    item_path: &str,
+    component_path: &str,
+    value: i32,
+) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    validate_path(component_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies both bounded paths and the scalar value before returning.
+        let status = unsafe {
+            imported_set_item_integer_component(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as u32 as i32,
+                value,
+            )
+        };
+        return status_result(status, "host rejected the integer component default");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = value;
+        Err(unsupported_target())
+    }
+}
+
 fn validate_path(path: &str) -> SjmlResult<()> {
     if path.is_empty()
         || path.len() > MAX_CONTENT_PATH_BYTES
@@ -2609,6 +2706,47 @@ mod tests {
         assert_eq!(EntityDefinition::default().height, 1.8);
         assert_eq!(FluidDefinition::default().tick_rate, 5);
         assert_eq!(FluidDefinition::default().slope_find_distance, 4);
+    }
+
+    #[test]
+    fn integer_component_definitions_validate_ranges_before_host_access() {
+        let definition = IntegerComponentDefinition::new(-5, 10).unwrap();
+        assert_eq!(definition.minimum, -5);
+        assert_eq!(definition.maximum, 10);
+        assert_eq!(
+            IntegerComponentDefinition::new(1, 0).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            register_integer_component(
+                "charge",
+                IntegerComponentDefinition {
+                    minimum: 2,
+                    maximum: 1
+                }
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            register_integer_component("charge", definition)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_item_integer_component("ruby", "charge", 5)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_item_integer_component("../ruby", "charge", 5)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
     }
 
     #[test]

@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.55.0` with ABI `1.45.0`. ABI compatibility is major-version based:
+The current host is `0.56.0` with ABI `1.46.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.45.0` therefore accepts
-`1.0.x` through `1.45.0` (including earlier ABI 1.32–1.44 guests), but rejects
+minor/patch version is equal or newer. A host at ABI `1.46.0` therefore accepts
+`1.0.x` through `1.46.0` (including earlier ABI 1.32–1.45 guests), but rejects
 a later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -186,3 +186,13 @@ Replacement requires `client.chat.observe` and the separately granted
 Legacy one-byte Show/Hide callbacks remain compatible. Host/SDK contract tests
 cover bounds, permission revocation, action decoding, and subscriber ordering;
 visible behavior still needs a display-backed Minecraft client.
+
+Host 0.56.0 / ABI 1.46.0 / SDK 0.54.0 adds bounded registry-backed biome ID
+enumeration, module-owned bounded integer components for existing block
+inventory stacks, and cancellable `entity.target_attempt` events from
+NeoForge's `LivingChangeTargetEvent`. The biome API never loads chunks;
+component reads/writes require their separate inventory grants; target vetoes
+require `events.subscribe` plus `events.cancel`. Host/SDK contract tests cover
+the contracts, and a dedicated-server GameTest verifies a target change is
+vetoed. See [biome IDs](WORLD_BIOME_IDS.md), [integer item components](INTEGER_ITEM_COMPONENTS.md),
+and [entity target attempts](ENTITY_TARGET_ATTEMPTS.md).

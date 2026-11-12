@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static SAW_PIG_DEATH: AtomicBool = AtomicBool::new(false);
 static SAW_PIG_DEATH_ATTEMPT: AtomicBool = AtomicBool::new(false);
+static ARM_ENTITY_TARGET_ATTEMPT: AtomicBool = AtomicBool::new(false);
+static SAW_ENTITY_TARGET_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_EFFECT_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_BLOCK_PLACE: AtomicBool = AtomicBool::new(false);
 static SAW_BLOCK_PLACE_VETO: AtomicBool = AtomicBool::new(false);
@@ -172,6 +174,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("block.break", EventPriority::High)?;
     events::subscribe("entity.death", EventPriority::Normal)?;
     events::subscribe("entity.death_attempt", EventPriority::Normal)?;
+    events::subscribe("entity.target_attempt", EventPriority::Normal)?;
     events::subscribe("entity.spawned", EventPriority::Normal)?;
     events::subscribe("entity.effect.tick", EventPriority::Normal)?;
     events::subscribe("block.place", EventPriority::Normal)?;
@@ -209,6 +212,17 @@ fn veto_cow_death_attempt(event: EntityDeathAttempt) -> SjmlResult<bool> {
     let veto = event.entity_type_id == "minecraft:cow";
     if veto {
         SAW_PIG_DEATH_ATTEMPT.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
+}
+
+#[event(name = "entity.target_attempt")]
+fn veto_armed_entity_target_attempt(event: EntityTargetAttempt) -> SjmlResult<bool> {
+    let veto = event.target_change_type.ends_with("#MOB_TARGET")
+        && event.requested_target_id.is_some()
+        && ARM_ENTITY_TARGET_ATTEMPT.swap(false, Ordering::Relaxed);
+    if veto {
+        SAW_ENTITY_TARGET_ATTEMPT.store(true, Ordering::Relaxed);
     }
     Ok(veto)
 }
@@ -381,6 +395,25 @@ fn check_cow_death_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "entity.death_attempt callback did not veto the cow",
+        ))
+    }
+}
+
+#[command(name = "entity.target_attempt.arm")]
+fn arm_entity_target_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    SAW_ENTITY_TARGET_ATTEMPT.store(false, Ordering::Relaxed);
+    ARM_ENTITY_TARGET_ATTEMPT.store(true, Ordering::Relaxed);
+    Ok("armed entity target veto".to_owned())
+}
+
+#[command(name = "entity.target_attempt.check")]
+fn check_entity_target_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    if SAW_ENTITY_TARGET_ATTEMPT.swap(false, Ordering::Relaxed) {
+        Ok("guest vetoed the entity target attempt".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity.target_attempt callback did not veto the target change",
         ))
     }
 }

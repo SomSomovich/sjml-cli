@@ -204,6 +204,33 @@ extern "C" {
         value_length: i32,
     ) -> i32;
 
+    #[link_name = "read_integer_component"]
+    fn imported_read_integer_component(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        side: i32,
+        side_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "write_integer_component"]
+    fn imported_write_integer_component(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        value: i32,
+    ) -> i32;
+
     #[link_name = "transfer"]
     fn imported_transfer(
         world: i32,
@@ -427,6 +454,52 @@ pub fn read_string_component(
     }
 }
 
+/// Reads one module-owned bounded integer component from a loaded, non-empty block-inventory slot.
+///
+/// The path must name a component registered by this module through
+/// [`crate::registry::register_integer_component`]. `None` is returned for an absent inventory,
+/// empty slot, or unset component. The optional side selects the block's item-handler capability;
+/// the call requires `world.read` and `inventory.read` and runs on the owning server thread.
+pub fn read_integer_component(
+    world: WorldHandle,
+    position: BlockPos,
+    side: Option<Direction>,
+    slot: u32,
+    component_path: &str,
+) -> SjmlResult<Option<i32>> {
+    validate_component_path(component_path)?;
+    validate_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        let side = to_bytes(&side)?;
+        read_output(|output, capacity| {
+            // SAFETY: stable input buffers and the allocated output remain live for this synchronous call.
+            unsafe {
+                imported_read_integer_component(
+                    world.as_ptr() as usize as u32 as i32,
+                    world.len() as i32,
+                    position.as_ptr() as usize as u32 as i32,
+                    position.len() as i32,
+                    side.as_ptr() as usize as u32 as i32,
+                    side.len() as i32,
+                    slot as i32,
+                    component_path.as_ptr() as usize as u32 as i32,
+                    component_path.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, side, component_path);
+        Err(unsupported_target())
+    }
+}
+
 /// Replaces one module-owned string component on a non-empty loaded inventory slot.
 /// The host copies the original stack before changing the component, preserving its item,
 /// count, and unrelated data. The block entity must implement Minecraft's `Container` API;
@@ -465,6 +538,47 @@ pub fn write_string_component(
             )
         };
         status_result(status, "host rejected the item component write")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, component_path, value);
+        Err(unsupported_target())
+    }
+}
+
+/// Writes one module-owned integer component on an existing, non-empty container slot.
+///
+/// The component path must have been registered by this module. The host checks the registered
+/// inclusive range, copies the stack before changing the value, and preserves the item, count, and
+/// unrelated components. This operation is unsided because it updates a block `Container`;
+/// it requires `world.read` and `inventory.write` and runs synchronously on the server thread.
+pub fn write_integer_component(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    component_path: &str,
+    value: i32,
+) -> SjmlResult<()> {
+    validate_component_path(component_path)?;
+    validate_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: stable input buffers and the scalar value remain live through the synchronous call.
+        let status = unsafe {
+            imported_write_integer_component(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as i32,
+                value,
+            )
+        };
+        status_result(status, "host rejected the integer component write")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -578,9 +692,9 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        transfer, validate_slot, validate_transfer_count, BlockPos, Direction, InventoryEndpoint,
-        ItemStackSnapshot, MAX_CUSTOM_ITEM_NAME_BYTES, MAX_INVENTORY_SLOTS,
-        MAX_ITEM_TRANSFER_COUNT,
+        read_integer_component, transfer, validate_slot, validate_transfer_count,
+        write_integer_component, BlockPos, Direction, InventoryEndpoint, ItemStackSnapshot,
+        MAX_CUSTOM_ITEM_NAME_BYTES, MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
     };
     use crate::{ErrorCode, WorldHandle};
 
@@ -680,6 +794,62 @@ mod tests {
         assert_eq!(
             transfer(world, endpoint, endpoint, 1).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn integer_component_reads_and_writes_validate_local_inputs_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+
+        assert_eq!(
+            read_integer_component(world, position, None, MAX_INVENTORY_SLOTS as u32, "charge")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            read_integer_component(world, position, None, 0, "Charge")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            read_integer_component(world, position, None, 0, "charge")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            write_integer_component(world, position, 0, "../charge", 3)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            write_integer_component(world, position, MAX_INVENTORY_SLOTS as u32, "charge", 3)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            write_integer_component(world, position, 0, "charge", -10)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn integer_component_optional_values_use_tag_then_little_endian_i32() {
+        assert_eq!(crate::to_bytes(&None::<i32>).unwrap(), [0]);
+        assert_eq!(
+            crate::to_bytes(&Some(-12_i32)).unwrap(),
+            [1, 0xf4, 0xff, 0xff, 0xff]
+        );
+        assert_eq!(
+            crate::from_bytes::<Option<i32>>(&[1, 0xf4, 0xff, 0xff, 0xff]).unwrap(),
+            Some(-12)
         );
     }
 }

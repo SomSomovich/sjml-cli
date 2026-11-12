@@ -634,6 +634,20 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_entity_target_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "entity.target_attempt"),
+            quote! {
+                fn keep_entity_target(event: EntityTargetAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_entity.target_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
     fn command_macro_generates_the_named_command_export() {
         let generated = expand_command(
             quote!(name = "demo.echo"),

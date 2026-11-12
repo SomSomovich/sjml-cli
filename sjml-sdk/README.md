@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.53.0"
+sjml-sdk = "0.54.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -108,6 +108,14 @@ separate
 `client.chat.rewrite` grant; the older one-byte Show/Hide result remains
 compatible. See the [chat-message API contract](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_CHAT_MESSAGES.md).
 
+SDK 0.54.0 adds bounded biome-ID enumeration from a loaded world's registry,
+module-owned integer item components for loaded block inventories, and the
+cancellable `entity.target_attempt` event. The first two are restricted to
+server contexts and declared capabilities; target vetoes require both event
+subscription and cancellation grants. See the [biome IDs](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_BIOME_IDS.md),
+[integer item components](https://github.com/SomSomovich/sjml-cli/blob/master/docs/INTEGER_ITEM_COMPONENTS.md),
+and [entity target attempts](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_TARGET_ATTEMPTS.md).
+
 ```rust
 use sjml::prelude::*;
 
@@ -120,7 +128,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.53.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.54.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

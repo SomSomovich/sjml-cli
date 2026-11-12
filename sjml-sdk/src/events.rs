@@ -161,6 +161,24 @@ pub struct EntityDamageAttempt {
     pub amount: f32,
 }
 
+/// Synchronous cancellable attempt to change a living entity's target on the logical server.
+///
+/// Return `Ok(true)` from the `entity.target_attempt` handler to keep the entity's existing
+/// target. The event provides the requested target at the time SJML observes it; `None` means
+/// NeoForge is attempting to clear the target. Target changes may come from a mob's explicit
+/// target setter or its behavior-tree attack-target behavior.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityTargetAttempt {
+    /// Canonical UUID string of the living entity whose target would change.
+    pub entity_id: String,
+    /// UUID of the requested new target, or `None` when attempting to clear the target.
+    pub requested_target_id: Option<String>,
+    /// Stable target-change origin, such as `LivingTargetType#MOB_TARGET` or
+    /// `LivingTargetType#BEHAVIOR_TARGET`; mod-defined origins use their fully-qualified class name.
+    pub target_change_type: String,
+}
+
 /// Synchronous lifecycle notification for one logical-server level.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -561,9 +579,9 @@ mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
         EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntitySpawned, EventPriority, InventoryChanged, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerMoved, PlayerRespawned, ResourcesReloaded, ServerTick, WorldLifecycle,
-        MAX_SERVER_TICK_INTERVAL,
+        EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerMoved, PlayerRespawned, ResourcesReloaded, ServerTick,
+        WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -794,6 +812,41 @@ mod tests {
         assert_eq!(
             from_bytes::<EntityDamageAttempt>(&encoded).unwrap(),
             environment_damage
+        );
+    }
+
+    #[test]
+    fn cancellable_entity_target_attempt_matches_host_schema_v1_bytes() {
+        let event = EntityTargetAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            requested_target_id: Some("00000000-0000-0000-0000-000000000002".to_owned()),
+            target_change_type: "net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent$LivingTargetType#MOB_TARGET".to_owned(),
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.entity_id);
+        expected.push(1);
+        append_test_string(&mut expected, event.requested_target_id.as_deref().unwrap());
+        append_test_string(&mut expected, &event.target_change_type);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<EntityTargetAttempt>(&encoded).unwrap(), event);
+
+        let clear_target = EntityTargetAttempt {
+            requested_target_id: None,
+            ..event
+        };
+        let encoded = to_bytes(&clear_target).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &clear_target.entity_id);
+        expected.push(0);
+        append_test_string(&mut expected, &clear_target.target_change_type);
+        assert_eq!(encoded, expected, "None target uses the stable option tag");
+        assert_eq!(
+            from_bytes::<EntityTargetAttempt>(&encoded).unwrap(),
+            clear_target
         );
     }
 

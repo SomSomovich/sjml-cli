@@ -25,6 +25,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "player.interaction"
             | "entity.death_attempt"
             | "entity.damage_attempt"
+            | "entity.target_attempt"
     ) {
         return error(
             Span::call_site(),
@@ -290,6 +291,13 @@ mod tests {
                 quote! { async fn death_attempt(_: EntityDeathAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.death_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.target_attempt"),
+                quote! { async fn target_attempt(_: EntityTargetAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.target_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

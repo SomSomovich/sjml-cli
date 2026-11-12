@@ -6,10 +6,10 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.45.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.46.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.45.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.46.0 adds registry-backed bounded biome ID enumeration, module-owned bounded integer components on existing block-inventory stacks, and the cancellable `entity.target_attempt` event. Biome enumeration requires `world.read` and does not load chunks; component declarations require `content.register`, and inventory reads/writes require `world.read` plus `inventory.read` or `inventory.write`; target vetoes require `events.subscribe` and `events.cancel`. ABI 1.45.0 adds
 a replacement result to local client chat-message callbacks, allowing bounded
 literal spans with formatting, hover text, and safe local click actions under
 `client.chat.rewrite`. ABI 1.44.0 adds `sjml_world_v1.set_game_time` for the shared elapsed clock, `sjml_player_v1.teleport_to_world` to an already-loaded destination chunk, bounded static villager trade declarations, and the synchronous cancellable `entity.damage_attempt` callback before damage mitigation. Game-time writes require `world.read` and `world.write`; cross-dimension teleport requires `entity.read`, `player.teleport`, and `world.read`; trade declarations require `content.register` on a server-capable module; damage vetoes require `events.subscribe` and `events.cancel`. ABI 1.43.0 adds
@@ -220,6 +220,18 @@ an administrator grant. Subscriptions run by priority, with equal priorities
 preserving module activation order and per-module registration order. Callback
 failures disable only the affected module.
 
+The synchronous cancellable `sjml_v1_event_entity.target_attempt` callback
+receives schema-v1 `EntityTargetAttempt`: little-endian `u32` version `1`, a
+length-prefixed canonical UUID string for the living entity, an optional
+requested-target UUID (`u8` tag `0=None`, `1=Some` followed by the string), and
+a length-prefixed target-change type string. It is captured from NeoForge's
+cancellable `LivingChangeTargetEvent` on the owning server thread. The callback
+must return exactly one stable boolean byte and requires both
+`events.subscribe` and `events.cancel`; returning true preserves the entity's
+existing target, including preserving `None` when a clear-target attempt is
+vetoed. Already-cancelled events do not reach guest callbacks. This callback is
+synchronous and cannot use `#[event_async]`.
+
 NeoForge also invokes the synchronous cancellable
 `sjml_v1_event_block.break` callback on that same server thread only after
 explicit subscription. Its `BlockBreak`
@@ -344,10 +356,10 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`,
-`entity.death`, `entity.spawned`, `entity.effect.tick`, `block.break`,
+`entity.death`, `entity.spawned`, `entity.effect.tick`, `entity.target_attempt`, `block.break`,
 `block.place`, `player.interacted`, `player.interaction`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`.
-Subscribing to `block.break` or `player.interaction` additionally requires the
+Subscribing to `block.break`, `player.interaction`, or `entity.target_attempt` additionally requires the
 module to request and receive the separate `events.cancel` capability. Static
 registration instances cannot subscribe. A subscription callback runs
 synchronously on the owning logical-server thread. Non-cancellable handlers may
@@ -461,6 +473,8 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.add_to_creative_tab` | `(tab_path_ptr: i32, tab_path_len: i32, item_path_ptr: i32, item_path_len: i32) -> i32` | Add a previously declared module-owned item or block item to a tab. |
 | `sjml_registry_v1.register_string_component` | `(path_ptr: i32, path_len: i32, max_characters: i32) -> i32` | Register a persistent/network-synchronized bounded UTF-8 string component type. |
 | `sjml_registry_v1.set_item_string_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value_ptr: i32, value_len: i32) -> i32` | Set a static string-component default on a previously declared item or block item. |
+| `sjml_registry_v1.register_integer_component` | `(path_ptr: i32, path_len: i32, minimum: i32, maximum: i32) -> i32` | Register a module-owned integer component with inclusive bounds. |
+| `sjml_registry_v1.set_item_integer_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value: i32) -> i32` | Set an in-range static integer-component default on a previously declared item or block item. |
 
 Paths are 1–256 lowercase ASCII letters, digits, `.`, `_`, or `-`. Boolean
 fields accept exactly zero or one. Item stack sizes are 1–99; block strengths
@@ -1064,6 +1078,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `game_rule` | `query_ptr, query_len, out_ptr, out_capacity` | Read an allowlisted boolean gamerule using a 32-byte schema-v1 query and exact 5-byte response; requires `world.read` |
 | `set_game_rule` | `mutation_ptr, mutation_len` | Set an allowlisted boolean gamerule from a 33-byte schema-v1 mutation; requires `world.read` and `world.write` |
 | `biome_at` | `handle_ptr, handle_len, x, y, z, out_ptr, out_capacity` | Stable `Option<String>`: u32 UTF-8 length (`0` means unavailable), then canonical biome ID bytes |
+| `biome_ids` | `query_ptr, query_len, out_ptr, out_capacity` | Enumerate up to 4,000 canonical IDs from this world's biome registry using a schema-v1 query/response; requires `world.read` and never loads chunks |
 | `set_time` | `handle_ptr, handle_len, day_time_low, day_time_high` | Set absolute daylight-cycle time; status only |
 | `set_daylight_cycle_enabled` | `handle_ptr, handle_len, enabled` | Set vanilla `doDaylightCycle`; `enabled` must be 0 or 1 |
 | `block_states` | `query_ptr, query_len, out_ptr, out_capacity` | Stable ordered `Vec<Option<BlockStateSnapshot>>` |
@@ -1110,6 +1125,14 @@ biome ID of at most 256 bytes; a zero length means the position is outside
 build height or belongs to an unloaded chunk. It requires `world.read`, checks
 the owning logical-server thread and loaded-world handle, and never loads a
 chunk. See [world biome lookup](WORLD_BIOMES.md).
+`biome_ids` accepts exactly 28 query bytes: little-endian `u32 schema=1` and
+the 24-byte world handle. Its complete response is `u32 schema=1`, `u32 count`,
+then up to 4,000 canonical, strictly UTF-8 biome IDs as length-prefixed
+strings. IDs are sorted lexically, each is at most 256 bytes, and the entire
+response must fit in the guest-provided output span or no bytes are written.
+The host enumerates the selected world's biome registry only; it does not query
+or load chunks. It requires `world.read`, a valid loaded-world handle, and the
+logical-server thread. See [biome ID enumeration](WORLD_BIOME_IDS.md).
 The complete declared capacity is bounds checked. Only the encoded value is
 written; the remaining capacity is padding, not part of its stable encoding.
 Insufficient capacity returns `PAYLOAD_TOO_LARGE` before handle allocation.
@@ -1566,6 +1589,28 @@ bytes. Static `mod_register` calls are denied, and the host binds each import
 only when its complete capability set is requested and granted. The write
 grant is not scoped to particular blocks or items, so it permits a module to
 change its own registered component on any reachable container slot.
+
+## Module-owned integer components on inventory items
+
+Integer components are registered by the module with an inclusive signed
+`i32` minimum and maximum. The declaration phase can assign an in-range default
+to a same-module item; runtime imports can read or write one existing stack in
+a loaded block `Container`. The host accepts only components owned by the
+calling module and copies the stack before replacement, preserving its count
+and unrelated components.
+
+| Import | WebAssembly signature | Capability and behavior |
+| --- | --- | --- |
+| `read_integer_component` | `(world_ptr, world_len, position_ptr, position_len, side_ptr, side_len, slot, component_path_ptr, component_path_len, out_ptr, out_capacity) -> i32` | Requires `world.read` and `inventory.read`. Writes `Option<i32>` as byte `0`, or byte `1` followed by little-endian signed `i32`. |
+| `write_integer_component` | `(world_ptr, world_len, position_ptr, position_len, slot, component_path_ptr, component_path_len, value) -> i32` | Requires `world.read` and `inventory.write`; value must fit the registered inclusive bounds. Zero status means the copied stack was updated. |
+
+The read uses the optional sided item-handler capability and returns `None`
+for an absent inventory, empty slot, or unset value. The write is unsided,
+rejects empty slots and positions without a `Container`, and preserves the
+existing item, count, and unrelated components. Both calls are server-thread
+only, reject unloaded chunks instead of loading them, and are unavailable to
+client-side modules. Minecraft's persistent and network codecs enforce the
+same component bounds. See [integer item components](INTEGER_ITEM_COMPONENTS.md).
 
 The `transfer` import requires both `world.read` and `inventory.write` and moves
 items between two loaded block item-handler slots in one host call. Its 15
