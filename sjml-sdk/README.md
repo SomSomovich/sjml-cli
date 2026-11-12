@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.62.0"
+sjml-sdk = "0.63.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -171,7 +171,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.62.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.63.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)
@@ -179,3 +179,5 @@ and [manifest schema](https://github.com/SomSomovich/sjml-cli/blob/master/docs/M
 
 The full workspace and command-line tool are in the
 [sjml-cli repository](https://github.com/SomSomovich/sjml-cli).
+
+SDK 0.63.0 also provides the physical-client `client.chat.send_attempt` event, which can veto the original outgoing message without changing Minecraft’s signed-chat flow. Reading outgoing text requires `client.chat.send.observe`; vetoing also requires `events.subscribe` and `events.cancel`. See the outgoing chat guide in the workspace documentation.

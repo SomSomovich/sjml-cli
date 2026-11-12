@@ -93,6 +93,18 @@ pub struct PlayerInteracted {
     pub block_position: Option<BlockPos>,
 }
 
+/// Synchronous cancellable physical-client attempt to send the original chat text to the server.
+///
+/// Requires `client.chat.send.observe` to read the text, `events.subscribe` to receive the event,
+/// and `events.cancel` to veto it. SJML never rewrites this message; a veto prevents sending before
+/// Minecraft constructs the signed chat packet.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ClientChatSendAttempt {
+    /// Original plain text typed by the local user, before other mods change the outgoing value.
+    pub message: String,
+}
+
 /// Synchronous cancellable logical-server right-click attempt for a block, entity, or item use.
 ///
 /// Return `Ok(true)` from the `player.interaction` event handler to veto this attempt.
@@ -871,13 +883,13 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
-        BlockPlaceAttempt, ClientItemTooltip, EffectTickEvent, EntityDamageAttempt, EntityDamaged,
-        EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
-        EntityJoinAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt,
-        InventoryChanged, ItemTooltipLines, PlayerAdvancementEarned, PlayerDropAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerMoved, PlayerRespawned,
-        PlayerSleepAttempt, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        MAX_SERVER_TICK_INTERVAL,
+        BlockPlaceAttempt, ClientChatSendAttempt, ClientItemTooltip, EffectTickEvent,
+        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
+        EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged, ItemTooltipLines,
+        PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerMoved, PlayerRespawned, PlayerSleepAttempt, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -946,6 +958,23 @@ mod tests {
         assert_eq!(
             total_limited.push("x").unwrap_err().code(),
             ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn outgoing_chat_attempt_round_trips_original_text() {
+        let attempt = ClientChatSendAttempt {
+            message: "Привет 👋".into(),
+        };
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        let text = attempt.message.as_bytes();
+        expected.extend_from_slice(&(text.len() as u32).to_le_bytes());
+        expected.extend_from_slice(text);
+        let encoded = to_bytes(&attempt).unwrap();
+        assert_eq!(encoded, expected);
+        assert_eq!(
+            from_bytes::<ClientChatSendAttempt>(&encoded).unwrap(),
+            attempt
         );
     }
 

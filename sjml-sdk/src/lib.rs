@@ -157,7 +157,7 @@ pub use entity::{
 };
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
-pub use events::{ClientItemTooltip, ItemTooltipLines, PlayerSleepAttempt};
+pub use events::{ClientChatSendAttempt, ClientItemTooltip, ItemTooltipLines, PlayerSleepAttempt};
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
     GlDepthFunction, GlExecutionReport, GlFramebufferAttachment, GlIndexType, GlPrimitiveMode,
@@ -291,14 +291,14 @@ pub mod prelude {
     pub use crate::events;
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
-        BlockPlaceAttempt, ClientItemTooltip, EffectTickEvent, EntityDamageAttempt, EntityDamaged,
-        EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
-        EntityJoinAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt,
-        InventoryChanged, ItemTooltipLines, PlayerAdvancementEarned, PlayerDropAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft, PlayerMoved,
-        PlayerSleepAttempt, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT,
-        MAX_SERVER_TICK_INTERVAL,
+        BlockPlaceAttempt, ClientChatSendAttempt, ClientItemTooltip, EffectTickEvent,
+        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
+        EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged, ItemTooltipLines,
+        PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
+        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{

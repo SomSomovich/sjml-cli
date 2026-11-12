@@ -6,12 +6,15 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.54.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.55.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.54.0 adds
-the synchronous, client-only `client.item.tooltip` event, whose callback can
-append bounded literal tooltip lines when separately granted
+incompatible. Build metadata does not affect version ordering. ABI 1.55.0 adds
+the synchronous, cancellable, physical-client `client.chat.send_attempt` event.
+It passes bounded original text and requires `client.chat.send.observe` plus
+`events.subscribe` and `events.cancel`; it never rewrites signed chat. ABI
+1.54.0 adds the synchronous, client-only `client.item.tooltip` event, whose
+callback can append bounded literal tooltip lines when separately granted
 `client.item.tooltip.modify`. ABI 1.53.0 adds
 selected hotbar-slot reads and writes, bounded active-effect snapshots for
 loaded living entities, reads and writes for entries in existing scoreboard
@@ -445,8 +448,9 @@ exact player inventory slot. No live inventory or item stack is exposed, and
 the callback cannot alter the completed change.
 Guest commands are described below.
 Server event subscriptions are accepted only in integrated-server and
-dedicated-server execution contexts. `client.item.tooltip` is accepted only in
-the physical-client context. Non-cancellable notification callbacks may use
+dedicated-server execution contexts. `client.item.tooltip` and
+`client.chat.send_attempt` are accepted only in the physical-client context.
+Non-cancellable notification callbacks may use
 `#[event_async]`; cancellable callbacks and callbacks that return a value to
 Minecraft synchronously, including `client.item.tooltip`, must use `#[event]`.
 
@@ -486,10 +490,11 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `block.break_attempt`, `block.place`, `block.place_attempt`, `player.interacted`,
 `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
-`inventory.changed`, `resources.reloaded`, `menu.action`, and
-`client.item.tooltip`.
+`inventory.changed`, `resources.reloaded`, `menu.action`, `client.item.tooltip`,
+and `client.chat.send_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.interaction`, `player.drop_attempt`, `player.sleep_attempt`,
+`client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, or `world.explosion_attempt` additionally
@@ -529,6 +534,23 @@ most 2,048 combined bytes. Strings must be non-empty and contain no control
 characters. The host caps one tooltip at 64 callbacks, 64 lines, and 8,192
 combined output bytes. Returned strings become literal tooltip components
 appended after vanilla content; they cannot carry style or interaction data.
+
+### Client outgoing chat veto
+
+The guest export is `sjml_v1_event_client.chat.send_attempt`; it runs only in a
+physical-client module. The callback receives the original text from NeoForge's
+cancellable `ClientChatEvent`, encoded as little-endian `u32 schema_version`
+(`1`) followed by one stable UTF-8 string. The message is limited to 32,768
+bytes and control characters are rejected. Guest code returns one stable
+boolean byte: `1` vetoes sending, `0` allows it.
+
+Subscribing requires `events.subscribe`, `events.cancel`, and the separate
+`client.chat.send.observe` grant because the payload contains user-typed text.
+The hook never replaces the message value, so Minecraft retains its ordinary
+signed-chat route when the user sends it. A veto happens before it is sent.
+Callbacks run on the client main thread and are synchronous; at most 64
+callbacks are invoked for one send attempt. A nested chat send from a guest
+callback is vetoed to prevent recursion and a callback bypass.
 
 ## Async task and service imports
 

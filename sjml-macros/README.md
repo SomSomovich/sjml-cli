@@ -11,9 +11,9 @@ The SDK re-exports lifecycle attributes `#[mod_register]`, `#[mod_init]`, and
 and stable payload codecs used by the host.
 
 `#[event_async]` is for non-cancellable notifications whose callback returns
-`SjmlResult<()>`. Cancellable events and synchronous result events such as
-`client.item.tooltip` must use `#[event]`; the macro rejects async handlers for
-both classes.
+`SjmlResult<()>`. Cancellable events such as `client.chat.send_attempt` and
+synchronous result events such as `client.item.tooltip` must use `#[event]`;
+the macro rejects async handlers for both classes.
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for supported signatures, examples, schema annotations, and callback

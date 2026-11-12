@@ -98,3 +98,8 @@ The host import is `sjml_client_chat_send_v1.send(i32, i32) -> i32`; the two
 arguments point to UTF-8 bytes in guest memory. It is independent of the
 message callback subscription import and checks `client.chat.send` on every
 call.
+
+Modules that need to read and veto text the user types can separately subscribe
+to `client.chat.send_attempt`. That event never changes outgoing text and uses
+the local `client.chat.send.observe` grant plus `events.cancel`; see
+[Outgoing client chat veto](CLIENT_CHAT_SEND.md).

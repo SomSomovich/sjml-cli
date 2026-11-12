@@ -48,13 +48,14 @@ result during tooltip construction; keep handlers short and avoid unrelated
 work in them. The host never exposes an `ItemStack`, components, or item NBT
 through this event.
 
-The `client.item.tooltip` event passes only a registry ID, stack count, and
-durability values to a synchronous client callback. Appended output is bounded
-literal text and requires the separate `client.item.tooltip.modify` grant.
-Callbacks run on the client main thread because Minecraft consumes their
-result during tooltip construction; keep handlers short and avoid unrelated
-work in them. The host never exposes an `ItemStack`, components, or item NBT
-through this event.
+Outgoing client chat can be vetoed with the synchronous
+`client.chat.send_attempt` callback. It receives the original plain text from
+NeoForge's `ClientChatEvent`, requires the explicit `client.chat.send.observe`
+grant to inspect that text, and requires `events.subscribe` plus `events.cancel`
+to subscribe and veto. SJML never rewrites the message; allowed messages
+continue through Minecraft's regular signed-chat path. Callbacks run on the
+client main thread, and nested chat sends from a guest callback are canceled to
+prevent recursion or bypassing a veto.
 
 Task groups bound the number of queued and running operations per module and
 bound each requested timeout. A timeout completes the operation with a timeout

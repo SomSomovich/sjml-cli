@@ -26,6 +26,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "player.interaction"
             | "player.drop_attempt"
             | "player.sleep_attempt"
+            | "client.chat.send_attempt"
             | "entity.death_attempt"
             | "entity.damage_attempt"
             | "entity.heal_attempt"
@@ -375,6 +376,13 @@ mod tests {
                 quote! { async fn screen_key(_: ScreenKeyPressedEvent) -> SjmlResult<()> { Ok(()) } },
             ),
             "client.screen.key_pressed is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "client.chat.send_attempt"),
+                quote! { async fn chat_send(_: ClientChatSendAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "client.chat.send_attempt is cancellable",
         );
     }
 

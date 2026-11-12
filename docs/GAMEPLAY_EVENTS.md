@@ -35,3 +35,9 @@ payloads. They expose no Minecraft objects and do not cause chunks to load.
 The physical-client `client.item.tooltip` callback is synchronous and can
 append bounded literal lines to a vanilla tooltip; it is documented separately
 in [Client item-tooltip events](ITEM_TOOLTIP_EVENTS.md).
+
+The physical-client `client.chat.send_attempt` callback synchronously receives
+the original outgoing text and may veto it. It never rewrites the text, so
+allowed messages retain Minecraft's normal signed-chat path. It requires
+`client.chat.send.observe`, `events.subscribe`, and `events.cancel`; see
+[outgoing client chat veto](CLIENT_CHAT_SEND.md).
