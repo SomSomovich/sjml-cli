@@ -14,6 +14,10 @@ fn native_entity_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        entity::active_effects(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
         entity::discard(handle).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );
@@ -106,6 +110,26 @@ fn native_entity_api_reports_unsupported_imports() {
             .unwrap_err()
             .code(),
         ErrorCode::UnknownErrorCode
+    );
+}
+
+#[test]
+fn active_effect_snapshot_value_uses_the_host_schema_field_order() {
+    let effect = entity::ActiveEffect {
+        effect_id: "minecraft:speed".to_owned(),
+        amplifier: 3,
+        remaining_duration_ticks: -1,
+    };
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    let id = effect.effect_id.as_bytes();
+    expected.extend_from_slice(&(id.len() as u32).to_le_bytes());
+    expected.extend_from_slice(id);
+    expected.extend_from_slice(&effect.amplifier.to_le_bytes());
+    expected.extend_from_slice(&effect.remaining_duration_ticks.to_le_bytes());
+    assert_eq!(to_bytes(&effect).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<entity::ActiveEffect>(&expected).unwrap(),
+        effect
     );
 }
 

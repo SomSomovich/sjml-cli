@@ -117,6 +117,32 @@ pub struct PlayerInteractionAttempt {
     pub block_position: Option<BlockPos>,
 }
 
+/// Synchronous cancellable attempt by a logical-server player to sleep at a bed.
+///
+/// NeoForge 21.1.265 exposes this through `CanPlayerSleepEvent`. Return `Ok(true)` from a
+/// `player.sleep_attempt` handler to reject the attempt when `can_veto` is true. The host uses
+/// NeoForge's sleep-problem result instead of event cancellation and preserves any denial already
+/// set by vanilla or another mod. The callback runs on the server thread and requires both
+/// `events.subscribe` and `events.cancel`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerSleepAttempt {
+    /// Canonical UUID string of the player attempting to sleep.
+    pub player_id: String,
+    /// Current in-game profile name of the player.
+    pub player_name: String,
+    /// Resource location of the level containing the bed.
+    pub dimension_id: String,
+    /// Integer position of the bed block.
+    pub bed_position: BlockPos,
+    /// Vanilla's original sleep problem, if any, as its stable enum name.
+    pub vanilla_problem_id: Option<String>,
+    /// Current sleep problem after higher-priority NeoForge listeners, if any.
+    pub current_problem_id: Option<String>,
+    /// Whether the host can still reject the attempt without replacing an existing denial.
+    pub can_veto: bool,
+}
+
 /// Synchronous cancellable logical-server attempt to drop an item stack from a player inventory.
 ///
 /// Return `Ok(true)` from the `player.drop_attempt` handler to veto the toss when `can_cancel` is
@@ -784,8 +810,8 @@ mod tests {
         EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
         EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged,
         PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerMoved, PlayerRespawned, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        PlayerMoved, PlayerRespawned, PlayerSleepAttempt, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -1425,6 +1451,49 @@ mod tests {
         assert_eq!(
             from_bytes::<PlayerInteractionAttempt>(&encoded).unwrap(),
             item_attempt
+        );
+    }
+
+    #[test]
+    fn cancellable_player_sleep_attempt_round_trips_bed_and_existing_problem_state() {
+        let attempt = PlayerSleepAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            player_name: "Alice".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            bed_position: BlockPos { x: -2, y: 64, z: 7 },
+            vanilla_problem_id: Some("NOT_POSSIBLE_NOW".to_owned()),
+            current_problem_id: None,
+            can_veto: true,
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &attempt.player_id);
+        append_test_string(&mut expected, &attempt.player_name);
+        append_test_string(&mut expected, &attempt.dimension_id);
+        expected.extend_from_slice(&1_i32.to_le_bytes()); // nested BlockPos schema version
+        expected.extend_from_slice(&(-2_i32).to_le_bytes());
+        expected.extend_from_slice(&(64_i32).to_le_bytes());
+        expected.extend_from_slice(&(7_i32).to_le_bytes());
+        expected.push(1);
+        append_test_string(&mut expected, "NOT_POSSIBLE_NOW");
+        expected.push(0);
+        expected.push(1);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<PlayerSleepAttempt>(&encoded).unwrap(), attempt);
+
+        let already_denied = PlayerSleepAttempt {
+            vanilla_problem_id: None,
+            current_problem_id: Some("OTHER_PROBLEM".to_owned()),
+            can_veto: false,
+            ..attempt
+        };
+        let encoded = to_bytes(&already_denied).unwrap();
+        assert_eq!(
+            from_bytes::<PlayerSleepAttempt>(&encoded).unwrap(),
+            already_denied
         );
     }
 

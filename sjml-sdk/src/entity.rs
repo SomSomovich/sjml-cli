@@ -7,13 +7,22 @@
 use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::BlockPos;
 use crate::world::RaycastPoint;
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::Decoder;
 #[cfg(target_arch = "wasm32")]
-use crate::{to_bytes, Decoder, MAX_STRING_BYTES};
+use crate::{to_bytes, MAX_STRING_BYTES};
 use crate::{
     EntityHandle, ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
 };
 
-const MAX_EFFECT_ID_BYTES: usize = 256;
+/// Maximum number of active status effects returned for one entity.
+pub const MAX_ACTIVE_ENTITY_EFFECTS: usize = 64;
+/// Maximum UTF-8 byte length of an active effect's canonical ID.
+pub const MAX_ENTITY_EFFECT_ID_BYTES: usize = 256;
+/// Maximum response bytes for the bounded versioned active-effect snapshot.
+pub const MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES: usize =
+    8 + MAX_ACTIVE_ENTITY_EFFECTS * (4 + 4 + MAX_ENTITY_EFFECT_ID_BYTES + 4 + 4);
+const MAX_EFFECT_ID_BYTES: usize = MAX_ENTITY_EFFECT_ID_BYTES;
 pub(crate) const MAX_EFFECT_DURATION_TICKS: u32 = 72_000;
 /// Maximum absolute entity velocity component in blocks per tick.
 pub const MAX_ENTITY_VELOCITY_COMPONENT: f64 = 64.0;
@@ -60,6 +69,51 @@ pub struct EntityVelocity {
     pub z: f64,
 }
 
+/// Detached active status effect on a loaded living non-player entity.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ActiveEffect {
+    /// Canonical lowercase namespace:path effect registry ID.
+    pub effect_id: String,
+    /// Zero-based vanilla effect amplifier.
+    pub amplifier: u32,
+    /// Remaining ticks, or `-1` for an infinite-duration effect.
+    pub remaining_duration_ticks: i32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, StableEncode)]
+#[sjml(version = 1)]
+struct ActiveEffectsResponse {
+    effects: Vec<ActiveEffect>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for ActiveEffectsResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported active entity-effect response schema",
+            ));
+        }
+        let count = decoder.read_length(MAX_ACTIVE_ENTITY_EFFECTS)?;
+        let mut effects = Vec::new();
+        effects.try_reserve_exact(count).map_err(|_| {
+            SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not reserve memory for active entity effects",
+            )
+        })?;
+        for _ in 0..count {
+            effects.push(ActiveEffect::decode(decoder)?);
+        }
+        validate_active_effects(&effects)?;
+        Ok(Self { effects })
+    }
+}
+
 impl EntityVelocity {
     /// Constructs a velocity after checking that every component is finite and bounded.
     pub fn new(x: f64, y: f64, z: f64) -> SjmlResult<Self> {
@@ -96,6 +150,8 @@ extern "C" {
     fn imported_raycast(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "snapshot"]
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "active_effects"]
+    fn imported_active_effects(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "apply_effect"]
     fn imported_apply_effect(
         handle: i32,
@@ -450,6 +506,41 @@ pub fn snapshot(handle: EntityHandle) -> SjmlResult<EntitySnapshot> {
                 )
             }
         })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads a sorted detached list of active effects from a loaded living non-player entity.
+///
+/// Requires `entity.read` and runs on the owning logical server. The response contains at most
+/// 64 effects, sorted by canonical registry ID. IDs are limited to 256 UTF-8 bytes; amplifier
+/// values are `0..=255`. `remaining_duration_ticks` is the current remaining duration, or `-1`
+/// for a vanilla infinite-duration effect. The host verifies the handle and live entity on every
+/// call and does not load chunks.
+pub fn active_effects(handle: EntityHandle) -> SjmlResult<Vec<ActiveEffect>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let response: ActiveEffectsResponse = read_output(
+            MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the encoded handle and bounded output allocation remain live while the
+                // synchronous server import checks the handle and writes the detached snapshot.
+                unsafe {
+                    imported_active_effects(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as u32 as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        Ok(response.effects)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1054,6 +1145,34 @@ pub(crate) fn validate_effect_id(effect_id: &str) -> SjmlResult<()> {
     Ok(())
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_active_effects(effects: &[ActiveEffect]) -> SjmlResult<()> {
+    if effects.len() > MAX_ACTIVE_ENTITY_EFFECTS {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "host returned more than 64 active entity effects",
+        ));
+    }
+    let mut previous: Option<&str> = None;
+    for effect in effects {
+        validate_effect_id(&effect.effect_id)?;
+        if effect.amplifier > 255 || effect.remaining_duration_ticks < -1 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid active effect amplifier or duration",
+            ));
+        }
+        if previous.is_some_and(|previous| previous >= effect.effect_id.as_str()) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host active effects are not strictly sorted by canonical ID",
+            ));
+        }
+        previous = Some(&effect.effect_id);
+    }
+    Ok(())
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn status_result(status: i32, message: &str) -> SjmlResult<()> {
     if status == 0 {
@@ -1105,16 +1224,82 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, clear_custom_name, custom_name, damage, fire_ticks, raycast, remove_effect,
-        set_custom_name, set_fire_ticks, set_velocity, validate_custom_name,
-        validate_entity_raycast, validate_spatial_query, within, EntityCustomNameResponse,
-        EntityRaycastQuery, EntityRaycastResult, EntityVelocity, SpatialQuery, SpatialResults,
+        active_effects, apply_effect, clear_custom_name, custom_name, damage, fire_ticks, raycast,
+        remove_effect, set_custom_name, set_fire_ticks, set_velocity, validate_active_effects,
+        validate_custom_name, validate_entity_raycast, validate_spatial_query, within,
+        ActiveEffect, ActiveEffectsResponse, EntityCustomNameResponse, EntityRaycastQuery,
+        EntityRaycastResult, EntityVelocity, SpatialQuery, SpatialResults,
+        MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES,
         MAX_ENTITY_CUSTOM_NAME_BYTES, MAX_ENTITY_CUSTOM_NAME_CODE_POINTS,
         MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES, MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS,
         MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
         MAX_SPATIAL_QUERY_RESULTS,
     };
-    use crate::{inventory::BlockPos, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle};
+    use crate::{
+        inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
+    };
+
+    #[test]
+    fn active_effect_response_is_versioned_bounded_and_validated() {
+        assert_eq!(MAX_ACTIVE_ENTITY_EFFECTS, 64);
+        assert_eq!(MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, 17_416);
+        let response = ActiveEffectsResponse {
+            effects: vec![
+                ActiveEffect {
+                    effect_id: "minecraft:haste".to_owned(),
+                    amplifier: 1,
+                    remaining_duration_ticks: 200,
+                },
+                ActiveEffect {
+                    effect_id: "minecraft:speed".to_owned(),
+                    amplifier: 3,
+                    remaining_duration_ticks: -1,
+                },
+            ],
+        };
+        let encoded = to_bytes(&response).unwrap();
+        assert_eq!(
+            encoded.len(),
+            8 + (4 + 4 + "minecraft:haste".len() + 8) + (4 + 4 + "minecraft:speed".len() + 8)
+        );
+        assert_eq!(
+            crate::from_bytes::<ActiveEffectsResponse>(&encoded)
+                .unwrap()
+                .effects,
+            response.effects
+        );
+
+        let oversized_count = [1_u32.to_le_bytes(), 65_u32.to_le_bytes()].concat();
+        assert_eq!(
+            crate::from_bytes::<ActiveEffectsResponse>(&oversized_count)
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_active_effects(&[response.effects[1].clone(), response.effects[0].clone(),])
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_active_effects(&[ActiveEffect {
+                effect_id: "minecraft:speed".to_owned(),
+                amplifier: 256,
+                remaining_duration_ticks: 10,
+            }])
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            active_effects(EntityHandle::new(1, 2, 3, 4).unwrap())
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
 
     #[test]
     fn spatial_query_bounds_are_checked_before_host_access() {

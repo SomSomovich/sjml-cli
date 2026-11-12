@@ -114,6 +114,7 @@ pub mod player_inventory;
 pub mod recipe;
 pub mod registry;
 pub mod render;
+pub mod scoreboard;
 pub mod screen_input;
 mod serialization;
 pub mod storage;
@@ -150,11 +151,13 @@ pub use client_keybindings::{
 };
 pub use client_notifications::NotificationKind;
 pub use entity::{
-    EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ENTITY_VELOCITY_COMPONENT,
-    MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
+    ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
+    MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_EFFECT_ID_BYTES,
+    MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
 };
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
+pub use events::PlayerSleepAttempt;
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
     GlDepthFunction, GlExecutionReport, GlFramebufferAttachment, GlIndexType, GlPrimitiveMode,
@@ -174,9 +177,10 @@ pub use network::{
 };
 pub use player::{
     clear_respawn_point, custom_stat, grant_advancement, increment_custom_stat, respawn_point,
-    revoke_advancement, set_respawn_point, PlayerAbilities, PlayerCustomStat, PlayerEquipment,
-    PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint, PlayerSnapshot,
-    PlayerTitleTimings, PlayerVelocity, PlayerVitals, MAX_PLAYER_ADVANCEMENT_ID_BYTES,
+    revoke_advancement, selected_hotbar_slot, set_respawn_point, set_selected_hotbar_slot,
+    PlayerAbilities, PlayerCustomStat, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode,
+    PlayerMotion, PlayerRespawnPoint, PlayerSnapshot, PlayerTitleTimings, PlayerVelocity,
+    PlayerVitals, MAX_PLAYER_ADVANCEMENT_ID_BYTES, MAX_PLAYER_HOTBAR_SLOT_INDEX,
     MAX_PLAYER_RESPAWN_ANGLE, MAX_PLAYER_RESPAWN_COORDINATE, MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES,
     MAX_PLAYER_RESPAWN_POINT_BYTES, MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES,
     MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_PLAYER_TITLE_TEXT_CODE_POINTS,
@@ -200,6 +204,10 @@ pub use render::{
     RenderFrame, RenderLayer, RenderSubscriptionHandle, WorldModelBuilder, WorldRenderFrame,
     MAX_GUI_LAYER_ID_BYTES, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
     MAX_WORLD_MODEL_VERTICES,
+};
+pub use scoreboard::{
+    score as scoreboard_score, set_score as scoreboard_set_score, MAX_SCOREBOARD_ENTRY_BYTES,
+    MAX_SCOREBOARD_OBJECTIVE_BYTES, MAX_SCORE_VALUE,
 };
 pub use screen_input::{
     unsubscribe_key_pressed, ScreenInputEvent, ScreenInputSubscriptionHandle,
@@ -268,8 +276,10 @@ pub mod prelude {
     pub use crate::client_notifications::NotificationKind;
     pub use crate::entity;
     pub use crate::entity::{
-        EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ENTITY_RAYCAST_DISTANCE,
-        MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
+        ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY,
+        MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES,
+        MAX_ENTITY_EFFECT_ID_BYTES, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT,
+        MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
     };
     pub use crate::entity_attributes;
     pub use crate::entity_attributes::{AttributeValues, LivingAttribute};
@@ -285,9 +295,9 @@ pub mod prelude {
         EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
         EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt, InventoryChanged,
         PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerJoined, PlayerLeft, PlayerMoved, ProjectileImpactAttempt, ResourcesReloaded,
-        ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
+        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -315,11 +325,12 @@ pub mod prelude {
     pub use crate::player;
     pub use crate::player::{
         clear_item_cooldown, clear_respawn_point, grant_advancement, has_item_cooldown,
-        respawn_point, revoke_advancement, set_item_cooldown, set_respawn_point, PlayerAbilities,
-        PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint,
-        PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_ADVANCEMENT_ID_BYTES,
-        MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES, MAX_PLAYER_ITEM_COOLDOWN_TICKS,
-        MAX_PLAYER_RESPAWN_ANGLE, MAX_PLAYER_RESPAWN_COORDINATE,
+        respawn_point, revoke_advancement, selected_hotbar_slot, set_item_cooldown,
+        set_respawn_point, set_selected_hotbar_slot, PlayerAbilities, PlayerEquipment,
+        PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint, PlayerSnapshot,
+        PlayerVelocity, PlayerVitals, MAX_PLAYER_ADVANCEMENT_ID_BYTES,
+        MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES, MAX_PLAYER_HOTBAR_SLOT_INDEX,
+        MAX_PLAYER_ITEM_COOLDOWN_TICKS, MAX_PLAYER_RESPAWN_ANGLE, MAX_PLAYER_RESPAWN_COORDINATE,
         MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES, MAX_PLAYER_RESPAWN_POINT_BYTES,
         MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES, MAX_PLAYER_VELOCITY_COMPONENT,
     };
@@ -358,6 +369,8 @@ pub mod prelude {
         WorldRenderFrame, MAX_GUI_LAYER_ID_BYTES, MAX_RENDER_RESOURCE_PATH_BYTES,
         MAX_WORLD_MODEL_QUADS, MAX_WORLD_MODEL_VERTICES,
     };
+    pub use crate::scoreboard;
+    pub use crate::scoreboard::{score as scoreboard_score, set_score as scoreboard_set_score};
     pub use crate::screen_input;
     pub use crate::screen_input::{
         unsubscribe_key_pressed, ScreenInputEvent, ScreenInputSubscriptionHandle,

@@ -2,18 +2,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use sjml::{
     command, event,
-    events::{self, EventPriority, ExplosionAttempt, PlayerAdvancementEarned},
+    events::{self, EventPriority, ExplosionAttempt, PlayerAdvancementEarned, PlayerSleepAttempt},
     ErrorCode, SjmlError, SjmlResult, StableDecode,
 };
 
 const STORY_ROOT_ADVANCEMENT: &str = "minecraft:story/root";
 static SAW_STORY_ROOT_EARNED: AtomicBool = AtomicBool::new(false);
 static SAW_EXPLOSION_VETO: AtomicBool = AtomicBool::new(false);
+static SAW_PLAYER_SLEEP_VETO: AtomicBool = AtomicBool::new(false);
 
 /// Called by the GameTest guest's main module init export.
 pub(super) fn initialize() -> SjmlResult<()> {
     events::subscribe("player.advancement_earned", EventPriority::Normal)?;
     events::subscribe("world.explosion_attempt", EventPriority::Normal)?;
+    events::subscribe("player.sleep_attempt", EventPriority::Normal)?;
     Ok(())
 }
 
@@ -34,18 +36,29 @@ fn cancel_test_explosion(event: ExplosionAttempt) -> SjmlResult<bool> {
     Ok(veto)
 }
 
+#[event(name = "player.sleep_attempt")]
+fn cancel_test_sleep(event: PlayerSleepAttempt) -> SjmlResult<bool> {
+    let veto = event.can_veto && event.dimension_id == "minecraft:overworld";
+    if veto {
+        SAW_PLAYER_SLEEP_VETO.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
+}
+
 #[derive(StableDecode)]
 #[sjml(version = 1)]
 struct NoArguments {}
 
-#[command(name = "player.advancement.check")]
-fn check_story_root_earned(_: NoArguments) -> SjmlResult<String> {
-    if SAW_STORY_ROOT_EARNED.swap(false, Ordering::Relaxed) {
-        Ok("player advancement-earned callback delivered".to_owned())
+#[command(name = "gameplay.event.check")]
+fn check_gameplay_event(_: NoArguments) -> SjmlResult<String> {
+    let saw_story_root = SAW_STORY_ROOT_EARNED.swap(false, Ordering::Relaxed);
+    let saw_sleep_veto = SAW_PLAYER_SLEEP_VETO.swap(false, Ordering::Relaxed);
+    if saw_story_root || saw_sleep_veto {
+        Ok("guest gameplay-event callback delivered".to_owned())
     } else {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "player.advancement_earned callback did not observe minecraft:story/root",
+            "no expected player advancement or sleep-attempt event was observed",
         ))
     }
 }

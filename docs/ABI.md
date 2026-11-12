@@ -6,10 +6,17 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.52.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.53.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.52.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.53.0 adds
+selected hotbar-slot reads and writes, bounded active-effect snapshots for
+loaded living entities, reads and writes for entries in existing scoreboard
+objectives, and the synchronous cancellable `player.sleep_attempt` event.
+Hotbar writes require `entity.read` and `inventory.write`; effect reads require
+`entity.read`; scoreboard reads/writes require `scoreboard.read` and
+`scoreboard.write`; sleep vetoes require `events.subscribe` and `events.cancel`.
+ABI 1.52.0 adds
 loaded-Mob AI enable/disable, bounded player respawn-point read/set/clear,
 literal custom names on existing player-inventory stacks, and vanilla
 neighboring-redstone-signal reads that use only loaded chunks. AI control

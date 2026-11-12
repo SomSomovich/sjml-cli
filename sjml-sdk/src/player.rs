@@ -630,6 +630,8 @@ pub const MAX_PLAYER_TITLE_TEXT_BYTES: usize = 1024;
 pub const MAX_PLAYER_TITLE_TEXT_CODE_POINTS: usize = 256;
 /// Maximum fade or stay duration, in ticks, for a player title.
 pub const MAX_PLAYER_TITLE_TIMING_TICKS: u32 = 6_000;
+/// Largest valid selected hotbar index; vanilla players have slots `0..=8`.
+pub const MAX_PLAYER_HOTBAR_SLOT_INDEX: u8 = 8;
 
 /// Vanilla title animation timings in server ticks.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -680,6 +682,10 @@ extern "C" {
     fn imported_vitals(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "game_mode"]
     fn imported_game_mode(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "selected_hotbar_slot"]
+    fn imported_selected_hotbar_slot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_selected_hotbar_slot"]
+    fn imported_set_selected_hotbar_slot(handle: i32, length: i32, slot: i32) -> i32;
     #[link_name = "set_game_mode"]
     fn imported_set_game_mode(handle: i32, length: i32, game_mode: i32) -> i32;
     #[link_name = "respawn_point"]
@@ -903,6 +909,74 @@ pub fn game_mode(handle: PlayerHandle) -> SjmlResult<PlayerGameMode> {
             }
         })?;
         PlayerGameMode::try_from(snapshot.mode)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the selected hotbar index of an online player on the logical server.
+///
+/// The returned slot is always in `0..=8`. Requires the declared and granted
+/// `entity.read` capability. Client modules, static registration, and stale
+/// player handles cannot read the selection.
+pub fn selected_hotbar_slot(handle: PlayerHandle) -> SjmlResult<u8> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let slot = read_output::<u8>(1, |output, capacity| {
+            // SAFETY: the encoded handle and output buffer remain live through this synchronous import.
+            unsafe {
+                imported_selected_hotbar_slot(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as u32 as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if slot > MAX_PLAYER_HOTBAR_SLOT_INDEX {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned a selected hotbar slot outside 0..=8",
+            ));
+        }
+        Ok(slot)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Changes an online player's selected hotbar index without changing item stacks.
+///
+/// The slot must be in `0..=8`. Requires `entity.read` and `inventory.write`
+/// in a logical-server module. The host validates the live session and server
+/// thread, then sends Minecraft's carried-slot packet to synchronize the
+/// selection to that player's client.
+pub fn set_selected_hotbar_slot(handle: PlayerHandle, slot: u8) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_HOTBAR_SLOT_INDEX {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "selected hotbar slot must be between 0 and 8",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and bounded slot scalar remain live for the synchronous host call.
+        let status = unsafe {
+            imported_set_selected_hotbar_slot(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                slot as i32,
+            )
+        };
+        status_result(status, "host rejected the selected hotbar slot change")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

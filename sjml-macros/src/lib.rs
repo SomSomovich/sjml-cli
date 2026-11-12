@@ -232,14 +232,14 @@ fn callback_name(attribute: TokenStream2) -> syn::Result<String> {
                     return Err(syn::Error::new_spanned(
                         &value.value,
                         "name must be a string",
-                    ))
+                    ));
                 }
             },
             _ => {
                 return Err(syn::Error::new_spanned(
                     &value.value,
                     "name must be a string",
-                ))
+                ));
             }
         },
         _ => {
@@ -733,6 +733,20 @@ mod tests {
         assert!(generated
             .to_string()
             .contains("sjml_v1_event_player.drop_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
+    fn cancellable_player_sleep_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "player.sleep_attempt"),
+            quote! {
+                fn prevent_sleep(event: PlayerSleepAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_player.sleep_attempt"));
         assert!(generated.to_string().contains("dispatch_payload"));
     }
 

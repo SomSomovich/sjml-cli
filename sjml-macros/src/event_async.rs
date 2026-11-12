@@ -120,14 +120,14 @@ fn callback_name(attribute: TokenStream) -> syn::Result<String> {
                     return Err(syn::Error::new_spanned(
                         &value.value,
                         "name must be a string",
-                    ))
+                    ));
                 }
             },
             _ => {
                 return Err(syn::Error::new_spanned(
                     &value.value,
                     "name must be a string",
-                ))
+                ));
             }
         },
         _ => {

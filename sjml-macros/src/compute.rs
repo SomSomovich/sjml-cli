@@ -88,21 +88,21 @@ fn callback_name(attribute: TokenStream2) -> syn::Result<String> {
                     return Err(syn::Error::new_spanned(
                         &value.value,
                         "name must be a string",
-                    ))
+                    ));
                 }
             },
             _ => {
                 return Err(syn::Error::new_spanned(
                     &value.value,
                     "name must be a string",
-                ))
+                ));
             }
         },
         _ => {
             return Err(syn::Error::new_spanned(
                 argument,
                 "compute attribute accepts only name = \"...\"",
-            ))
+            ));
         }
     };
     if !valid_callback_identifier(&name) {

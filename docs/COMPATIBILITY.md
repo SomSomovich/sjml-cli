@@ -16,12 +16,12 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.62.0` with ABI `1.52.0`. ABI compatibility is major-version based:
+The current host is `0.63.0` with ABI `1.53.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.52.0` therefore accepts
-`1.0.x` through `1.52.0` (including earlier ABI 1.32–1.51 guests), but rejects
-a later contract it does not know. ABI `1.52.0` accepts ABI `1.0.x` through
-`1.52.0`, including packages targeting host 0.61.0 / ABI 1.51.0.
+minor/patch version is equal or newer. A host at ABI `1.53.0` therefore accepts
+`1.0.x` through `1.53.0` (including earlier ABI 1.32–1.52 guests), but rejects
+a later contract it does not know. ABI `1.53.0` accepts ABI `1.0.x` through
+`1.53.0`, including packages targeting host 0.62.0 / ABI 1.52.0.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
 
@@ -210,3 +210,5 @@ Host 0.60.0 / ABI 1.50.0 / SDK 0.58.0 adds vanilla max durability for registered
 Host 0.61.0 / ABI 1.51.0 / SDK 0.59.0 adds server-side advancement grants/revocations and custom-stat reads/increments; difficulty and saved Overworld spawn-point control; cancellable entity heal, effect-application, and join attempts; bounded names on block-inventory item stacks and transfers; effects applied by registered food; independent X/Y/Z model animation; and exact client GUI-layer suppression. Host calls validate IDs and bounds, enforce dedicated permissions and side/thread checks, and avoid loading chunks. The dedicated-server GameTest suite passed all 70 required cases, including the new server paths. See [advancements](PLAYER_ADVANCEMENTS.md), [statistics](PLAYER_STATISTICS.md), [world difficulty](WORLD_DIFFICULTY.md), [spawn points](WORLD_SPAWN_POINT.md), [entity events](ENTITY_HEAL_ATTEMPTS.md), [inventory names](BLOCK_INVENTORY_ITEM_NAMES.md), [inventory transfers](BLOCK_INVENTORY_MOVE.md), [food effects](ITEM_FOOD_EFFECTS.md), [model animation](MODEL_ANIMATIONS.md), and [GUI-layer suppression](GUI_LAYER_SUPPRESSION.md).
 
 Host 0.62.0 / ABI 1.52.0 / SDK 0.60.0 adds loaded-Mob AI toggles, player respawn-point reads and updates, literal custom names on existing player-inventory stacks, and a loaded-only vanilla neighboring-redstone-signal query. Respawn updates validate a loaded destination dimension and its bounds without loading its chunk. AI control requires `entity.read` and `entity.ai.control`; respawn writes require `entity.read` and `player.respawn.write`; player stack naming requires `entity.read` and `inventory.write`; redstone reads use `world.read`. The dedicated-server GameTest suite passed all 74 required cases. See [entity AI control](ENTITY_AI_CONTROL.md), [player inventory item names](PLAYER_INVENTORY_CUSTOM_NAMES.md), [player respawn points](PLAYER_RESPAWN_POINT.md), and [redstone signal reads](WORLD_REDSTONE_SIGNAL.md).
+
+Host 0.63.0 / ABI 1.53.0 / SDK 0.61.0 adds selected hotbar-slot reads/writes, bounded active-effect snapshots for loaded living entities, reads and writes for entries in existing scoreboard objectives, and synchronous cancellable `player.sleep_attempt`. Hotbar changes require `entity.read` and `inventory.write`; effect snapshots require `entity.read`; scoreboard operations require `scoreboard.read` or `scoreboard.write` and never create objectives; sleep vetoes use NeoForge's `CanPlayerSleepEvent` result and preserve an existing vanilla or mod denial. The dedicated-server GameTest suite now covers these paths. See [player hotbar](PLAYER_HOTBAR.md), [active entity effects](ENTITY_ACTIVE_EFFECTS.md), [scoreboard](SCOREBOARD.md), and [sleep attempts](PLAYER_SLEEP_ATTEMPT.md).

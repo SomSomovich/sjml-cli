@@ -330,3 +330,13 @@ they require both `world.read` and `world.write`. `world::set_block_properties`
 also requires both capabilities, an already-loaded block position, the exact
 expected current block ID, and registered property values. It changes only
 those properties and never loads chunks or replaces the block type.
+
+Player selected-hotbar reads require `entity.read`; changing the selected index
+also requires `inventory.write`, is limited to slots `0..=8`, and does not
+change stack contents. Active-effect snapshots require `entity.read` and return
+at most 64 detached records from a live loaded living entity. Scoreboard imports
+require `scoreboard.read` or `scoreboard.write`, run only on the owning server
+thread, and operate on existing objectives; writes cannot create objectives or
+change read-only criteria. `player.sleep_attempt` requires both event grants and
+can only replace an allowed sleep result with a denial; an existing vanilla or
+other-mod denial is preserved.

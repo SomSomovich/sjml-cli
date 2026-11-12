@@ -28,6 +28,8 @@ mod player_inventory_custom_name;
 mod player_respawn_point;
 #[path = "gametest/player_statistics.rs"]
 mod player_statistics;
+#[path = "gametest/scoreboard.rs"]
+mod scoreboard;
 #[path = "gametest/world_difficulty.rs"]
 mod world_difficulty;
 #[path = "gametest/world_redstone_signal.rs"]
@@ -1518,6 +1520,16 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
             "player inventory snapshot did not match the GameTest hotbar fixture",
         ));
     }
+    let original_hotbar_slot = player::selected_hotbar_slot(target_player)?;
+    let temporary_hotbar_slot = (original_hotbar_slot + 1) % 9;
+    let changed_hotbar_slot = (|| {
+        player::set_selected_hotbar_slot(target_player, temporary_hotbar_slot)?;
+        player::selected_hotbar_slot(target_player)
+    })();
+    let restore_hotbar_slot = player::set_selected_hotbar_slot(target_player, original_hotbar_slot);
+    let changed_hotbar_slot = changed_hotbar_slot?;
+    restore_hotbar_slot?;
+    let restored_hotbar_slot = player::selected_hotbar_slot(target_player)?;
     let original_attack_damage = sjml::entity_attributes::read_player(
         target_player,
         sjml::entity_attributes::LivingAttribute::AttackDamage,
@@ -1666,6 +1678,8 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         || temporary_vitals.experience_progress != 0.0
         || !cooldown_active
         || cooldown_cleared
+        || changed_hotbar_slot != temporary_hotbar_slot
+        || restored_hotbar_slot != original_hotbar_slot
         || (restored_vitals.health - original_vitals.health).abs() > 0.01
         || restored_vitals.food_level != original_vitals.food_level
         || (restored_vitals.saturation - original_vitals.saturation).abs() > 0.01
@@ -2034,6 +2048,12 @@ fn inspect_entities(arguments: EntityArguments) -> SjmlResult<String> {
             "loaded-entity spatial query omitted its center pig",
         ));
     }
+    let active_effects = entity::active_effects(pig_handle)?;
+    let observed_slowness = active_effects.iter().any(|effect| {
+        effect.effect_id == "minecraft:slowness"
+            && effect.amplifier == 0
+            && effect.remaining_duration_ticks > 0
+    });
     entity::remove_effect(pig_handle, "minecraft:slowness")?;
     let original_max_health = sjml::entity_attributes::read(
         pig_handle,
@@ -2104,6 +2124,7 @@ fn inspect_entities(arguments: EntityArguments) -> SjmlResult<String> {
         || (changed_max_health.base_value - temporary_max_health).abs() > 0.0001
         || (restored_max_health.base_value - original_max_health.base_value).abs() > 0.0001
         || changed_velocity != temporary_velocity
+        || !observed_slowness
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
