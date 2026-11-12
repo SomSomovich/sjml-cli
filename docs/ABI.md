@@ -6,10 +6,17 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.49.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.50.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.49.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.50.0 adds
+bounded static durability for module-owned standalone items, server-side player
+item cooldown reads/writes, non-cancellable earned-advancement notifications,
+and synchronous cancellable explosion-start events. Cooldown reads require
+`entity.read`, and changes additionally require `player.cooldown.write`; item
+durability declarations require `content.register`; advancement notifications
+require `events.subscribe`; explosion vetoes require `events.subscribe` and
+`events.cancel`. ABI 1.49.0 adds
 synchronous cancellable `entity.projectile_impact_attempt`, literal custom-name
 reads and writes for loaded non-player entities, bounded registered food
 properties, and owner-scoped editable chest menus with allowlisted input/output
@@ -50,7 +57,15 @@ and `events.cancel`.
 ABI 1.45.0 adds
 a replacement result to local client chat-message callbacks, allowing bounded
 literal spans with formatting, hover text, and safe local click actions under
-`client.chat.rewrite`. ABI 1.44.0 adds `sjml_world_v1.set_game_time` for the shared elapsed clock, `sjml_player_v1.teleport_to_world` to an already-loaded destination chunk, bounded static villager trade declarations, and the synchronous cancellable `entity.damage_attempt` callback before damage mitigation. Game-time writes require `world.read` and `world.write`; cross-dimension teleport requires `entity.read`, `player.teleport`, and `world.read`; trade declarations require `content.register` on a server-capable module; damage vetoes require `events.subscribe` and `events.cancel`. ABI 1.43.0 adds
+`client.chat.rewrite`. ABI 1.44.0 adds
+`sjml_world_v1.set_game_time` for the shared elapsed clock, guarded
+`sjml_player_v1.teleport_to_world` to an already-loaded destination chunk,
+bounded static villager trade declarations, and the synchronous cancellable
+`entity.damage_attempt` callback before damage mitigation. Game-time writes
+require `world.read` and `world.write`; cross-dimension teleport requires
+`entity.read`, `player.teleport`, and `world.read`; trade declarations require
+`content.register` on a server-capable module; damage vetoes require
+`events.subscribe` and `events.cancel`. ABI 1.43.0 adds
 bounded player-inventory durability writes, already-loaded chunk enumeration,
 nearest loaded-entity raycasts, the synchronous cancellable
 `entity.death_attempt` event, and manifest-declared physical-client commands.
@@ -284,6 +299,26 @@ requires `events.subscribe` and `events.cancel`; `true` cancels the impact.
 Block details are omitted if the target chunk is no longer loaded. This
 callback is synchronous and cannot use `#[event_async]`.
 
+The non-cancellable `sjml_v1_event_player.advancement_earned` callback receives
+schema-v1 `PlayerAdvancementEarned`: little-endian `u32(1)` followed by four
+length-prefixed UTF-8 strings in order (`player_id` canonical UUID,
+`display_name`, `dimension_id`, and `advancement_id`). The payload is limited to
+2 KiB and each string to 256 bytes. It fires after a server player earns an
+advancement and requires `events.subscribe`.
+
+The synchronous cancellable `sjml_v1_event_world.explosion_attempt` callback
+receives schema-v1 `ExplosionAttempt`: little-endian `u32(1)`, a
+length-prefixed `dimension_id`, optional `source_entity_id` and
+`source_entity_type_id` strings (each a stable `u8` 0/1 tag followed by a
+length-prefixed UTF-8 string when present), a length-prefixed `block_interaction`
+string, little-endian finite `f64` center coordinates `x`, `y`, `z`, and finite
+`f32 radius`. Source identity fields must be present together; radius is
+bounded to 128 and block interaction is one of `keep`, `destroy`,
+`destroy_with_decay`, or `trigger_block`. The callback returns one stable
+boolean byte; `true` cancels before explosion damage or block/fire changes.
+It requires `events.subscribe` and `events.cancel`, runs synchronously on the
+owning logical-server thread, and cannot use `#[event_async]`.
+
 NeoForge also invokes the synchronous cancellable
 `sjml_v1_event_block.break` callback on that same server thread only after
 explicit subscription. Its `BlockBreak`
@@ -420,10 +455,10 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`,
-`entity.death`, `entity.spawned`, `entity.effect.tick`, `entity.target_attempt`, `block.break`,
-`block.place`, `player.interacted`, `player.interaction`, `player.drop_attempt`, `entity.projectile_impact_attempt`, `entity.damaged`, `world.loaded`,
+`player.advancement_earned`, `entity.death`, `entity.spawned`, `entity.effect.tick`, `entity.target_attempt`, `entity.projectile_impact_attempt`, `world.explosion_attempt`, `block.break`,
+`block.place`, `player.interacted`, `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`.
-Subscribing to `block.break`, `player.interaction`, `player.drop_attempt`, `entity.target_attempt`, or `entity.projectile_impact_attempt` additionally requires the
+Subscribing to `block.break`, `player.interaction`, `player.drop_attempt`, `entity.target_attempt`, `entity.projectile_impact_attempt`, or `world.explosion_attempt` additionally requires the
 module to request and receive the separate `events.cancel` capability. Static
 registration instances cannot subscribe. A subscription callback runs
 synchronously on the owning logical-server thread. Non-cancellable handlers may
@@ -433,7 +468,7 @@ Task-admission and async handler errors are logged; they do not affect the
 already-delivered notification. These tasks use the existing bounded
 `sjml_async_v1.wake`/poll runtime and inherit its task quota, timeout,
 cancellation, and module-shutdown behavior. The async macro rejects
-`block.break`, `player.interaction`, `player.drop_attempt`, and `entity.projectile_impact_attempt`; their cancellation
+`block.break`, `player.interaction`, `player.drop_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; their cancellation
 results remain strictly synchronous.
 
 ## Async task and service imports
@@ -510,6 +545,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_item` | `(path_ptr: i32, path_len: i32, max_stack: i32, fire_resistant: i32) -> i32` | Stage an item under `<package>/<module>/<path>`. |
 | `sjml_registry_v1.set_item_enchantment_value` | `(item_path_ptr: i32, item_path_len: i32, value: i32) -> i32` | Set vanilla enchantability from 0 to 255 on a previously declared item owned by the same module. |
 | `sjml_registry_v1.set_item_food` | `(item_path_ptr: i32, item_path_len: i32, nutrition: i32, saturation_modifier_bits: i32, flags: i32) -> i32` | Set nutrition 1–20, finite saturation modifier 0–10, and vanilla `fast` (bit 0) / `always_eat` (bit 1) flags on a previously declared item owned by the same module. |
+| `sjml_registry_v1.set_item_max_damage` | `(item_path_ptr: i32, item_path_len: i32, max_damage: i32) -> i32` | Set vanilla maximum durability from 1 through 1,000,000 on a same-module standalone item declared with stack size 1. |
 | `sjml_registry_v1.register_block` | `(path_ptr: i32, path_len: i32, strength_bits: i32, resistance_bits: i32, requires_tool: i32, has_item: i32) -> i32` | Stage a basic block and optionally its `BlockItem`. |
 | `sjml_registry_v1.register_block_entity` | `(path_ptr: i32, path_len: i32, block_path_ptr: i32, block_path_len: i32) -> i32` | Stage a generic block entity type for a block declared by the same module. |
 | `sjml_registry_v1.register_entity_model` | `(path_ptr: i32, path_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded colored model for an entity declared by the same module, with optional model-wide and per-cuboid sine rotations. |
@@ -764,7 +800,7 @@ server-authoritative container menu. Open/read require `entity.read` and
 | --- | --- | --- |
 | `sjml_editable_menu_v1.open` | `(player_ptr: i32, player_len: i32, schema_ptr: i32, schema_len: i32) -> i32` | Opens an owner-scoped menu with empty declared input/output slots. |
 | `sjml_editable_menu_v1.read_slot` | `(player_ptr: i32, player_len: i32, slot: i32, output_ptr: i32, output_capacity: i32) -> i32` | Writes an optional detached item-ID/count snapshot for a declared slot. |
-| `sjml_editable_menu_v1.transfer` | `(player_ptr: i32, player_len: i32, source_kind: i32, source_slot: i32, destination_kind: i32, destination_slot: i32, count: i32) -> i32` | Moves 1–64 existing items between a declared menu slot and a player main-inventory/hotbar slot, or between two menu slots. |
+| `sjml_editable_menu_v1.transfer` | `(player_ptr: i32, player_len: i32, source_kind: i32, source_slot: i32, destination_kind: i32, destination_slot: i32, count: i32) -> i32` | Moves 1–64 existing items between a declared menu slot and a player main-inventory/hotbar slot, or between two declared menu slots. |
 
 The schema is at most 16 KiB and starts with little-endian `u32(1)` version,
 `u32` rows (1–6), a length-prefixed UTF-8 title (up to 256 bytes), and a `u32`
@@ -1397,6 +1433,9 @@ signatures but calls return `PERMISSION_DENIED`.
 | `teleport` | `(handle_ptr: i32, handle_len: i32, destination_ptr: i32, destination_len: i32) -> i32` | Teleport the current player session within its current dimension; status only |
 | `action_bar` | `(handle_ptr: i32, handle_len: i32, text_ptr: i32, text_len: i32) -> i32` | Send literal action-bar text; requires `entity.read` and `player.ui.actionbar` |
 | `title` | `(handle_ptr, handle_len, title_ptr, title_len, subtitle_ptr, subtitle_len, fade_in_ticks, stay_ticks, fade_out_ticks) -> i32` | Send literal title and optional subtitle; requires `entity.read` and `player.ui.title` |
+| `has_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len, out_ptr, out_capacity` | Write one stable boolean byte for the live player's cooldown state; requires `entity.read` |
+| `set_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len, ticks` | Set the vanilla cooldown to 1–72,000 server ticks; requires `entity.read` and `player.cooldown.write` |
+| `clear_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len` | Remove the vanilla item cooldown; requires `entity.read` and `player.cooldown.write` |
 
 `handle_len` must be 24. UUIDs are canonical lowercase UUID text, and
 dimension IDs are canonical `namespace:path`. Each stable string is limited to

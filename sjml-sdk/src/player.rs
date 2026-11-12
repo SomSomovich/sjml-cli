@@ -2,7 +2,7 @@
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
-//! `player.abilities.write`; action-bar messages require `player.ui.actionbar`, and title packets
+//! `player.abilities.write`; item cooldown changes require `player.cooldown.write`; action-bar messages require `player.ui.actionbar`, and title packets
 //! require `player.ui.title`. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
@@ -211,6 +211,10 @@ pub const MAX_PLAYER_HEALTH: f32 = 1_000_000.0;
 pub const MAX_PLAYER_FOOD_LEVEL: u32 = 20;
 /// Maximum experience level accepted by [`set_experience`].
 pub const MAX_PLAYER_EXPERIENCE_LEVEL: u32 = 20_000;
+/// Maximum duration accepted for a player item cooldown, in server ticks.
+pub const MAX_PLAYER_ITEM_COOLDOWN_TICKS: u32 = 72_000;
+/// Maximum UTF-8 size accepted for a namespaced item ID used with player cooldown APIs.
+pub const MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES: usize = 256;
 
 /// One of Minecraft's built-in player game modes.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -448,6 +452,30 @@ extern "C" {
     fn imported_set_food(handle: i32, length: i32, food_level: i32, saturation_bits: i32) -> i32;
     #[link_name = "set_experience"]
     fn imported_set_experience(handle: i32, length: i32, level: i32, progress_bits: i32) -> i32;
+    #[link_name = "has_item_cooldown"]
+    fn imported_has_item_cooldown(
+        handle: i32,
+        handle_length: i32,
+        item_id: i32,
+        item_id_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "set_item_cooldown"]
+    fn imported_set_item_cooldown(
+        handle: i32,
+        handle_length: i32,
+        item_id: i32,
+        item_id_length: i32,
+        ticks: i32,
+    ) -> i32;
+    #[link_name = "clear_item_cooldown"]
+    fn imported_clear_item_cooldown(
+        handle: i32,
+        handle_length: i32,
+        item_id: i32,
+        item_id_length: i32,
+    ) -> i32;
     #[link_name = "apply_effect"]
     fn imported_apply_effect(
         handle: i32,
@@ -862,6 +890,134 @@ pub fn set_experience(handle: PlayerHandle, level: u32, progress: f32) -> SjmlRe
         let _ = handle;
         Err(unsupported_target())
     }
+}
+
+/// Returns whether an online player has an active vanilla cooldown for a registered item.
+///
+/// Requires `entity.read` and a logical-server player handle. Minecraft exposes the active state
+/// through its public cooldown API; it does not expose the exact remaining tick count. Item IDs
+/// must be canonical non-air `namespace:path` values. The host checks the current login session
+/// and owning server thread for every call.
+pub fn has_item_cooldown(handle: PlayerHandle, item_id: &str) -> SjmlResult<bool> {
+    validate_cooldown_item_id(item_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let mut active = 0u8;
+        // SAFETY: handle, item ID, and the one-byte output remain live for the synchronous host call.
+        let status = unsafe {
+            imported_has_item_cooldown(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                item_id.as_ptr() as usize as u32 as i32,
+                item_id.len() as i32,
+                &mut active as *mut u8 as usize as u32 as i32,
+                1,
+            )
+        };
+        status_result(status, "host rejected the player item-cooldown read")?;
+        match active {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid player cooldown flag",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Starts a vanilla cooldown for a registered item on the online player.
+///
+/// Requires both `entity.read` and `player.cooldown.write`, declared by the module and granted by
+/// the server administrator. The duration is limited to 1–72,000 ticks. Client modules, stale
+/// sessions, static registration, and calls off the owning server thread are denied.
+pub fn set_item_cooldown(handle: PlayerHandle, item_id: &str, ticks: u32) -> SjmlResult<()> {
+    validate_cooldown_item_id(item_id)?;
+    if !(1..=MAX_PLAYER_ITEM_COOLDOWN_TICKS).contains(&ticks) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player item cooldown must be between 1 and 72000 ticks",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: handle and item ID remain live throughout the synchronous bounded import.
+        let status = unsafe {
+            imported_set_item_cooldown(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                item_id.as_ptr() as usize as u32 as i32,
+                item_id.len() as i32,
+                ticks as i32,
+            )
+        };
+        status_result(status, "host rejected the player item-cooldown change")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Clears a vanilla cooldown for a registered item on the online player.
+///
+/// Requires `entity.read` and `player.cooldown.write`. The host applies the change only to the
+/// current live server-side login session and synchronizes it using Minecraft's cooldown path.
+pub fn clear_item_cooldown(handle: PlayerHandle, item_id: &str) -> SjmlResult<()> {
+    validate_cooldown_item_id(item_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: handle and item ID remain live throughout the synchronous bounded import.
+        let status = unsafe {
+            imported_clear_item_cooldown(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                item_id.as_ptr() as usize as u32 as i32,
+                item_id.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the player item-cooldown clear")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_cooldown_item_id(item_id: &str) -> SjmlResult<()> {
+    let valid_resource_id = item_id.split_once(':').is_some_and(|(namespace, path)| {
+        !namespace.is_empty()
+            && !path.is_empty()
+            && namespace.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+            })
+            && path.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
+            })
+    });
+    if item_id.len() > MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player cooldown item ID exceeds 256 UTF-8 bytes",
+        ));
+    }
+    if !valid_resource_id || item_id == "minecraft:air" {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player cooldown item ID must be a canonical non-air namespace:path value",
+        ));
+    }
+    Ok(())
 }
 
 /// Applies a registered status effect to the current player for this login session.

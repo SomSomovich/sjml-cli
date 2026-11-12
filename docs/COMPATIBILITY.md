@@ -16,11 +16,12 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.58.0` with ABI `1.48.0`. ABI compatibility is major-version based:
+The current host is `0.60.0` with ABI `1.50.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.48.0` therefore accepts
-`1.0.x` through `1.48.0` (including earlier ABI 1.32–1.46 guests), but rejects
-a later contract it does not know.
+minor/patch version is equal or newer. A host at ABI `1.50.0` therefore accepts
+`1.0.x` through `1.50.0` (including earlier ABI 1.32–1.49 guests), but rejects
+a later contract it does not know. ABI `1.50.0` accepts ABI `1.0.x` through
+`1.50.0`, including packages targeting host 0.59.0 / ABI 1.49.0.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
 
@@ -170,14 +171,13 @@ commands require a requested and locally granted `client.command`. The host
 GameTests now exercise these server-backed APIs; client command display and
 execution still need a display-backed Minecraft client check.
 
-Host 0.54.0 / ABI 1.44.0 / SDK 0.52.0 adds bounded static villager trade offers,
+Host 0.54.0 / ABI 1.44.0 / SDK 0.52.0 adds bounded static villager offers,
 pre-mitigation cancellable `entity.damage_attempt`, cross-dimension server-player
 teleport into an already-loaded chunk, and shared elapsed `game_time` writes.
 These require `content.register`, `events.subscribe` plus `events.cancel`,
 `entity.read` plus `player.teleport` plus `world.read`, and `world.read` plus
-`world.write`, respectively. Dedicated-server GameTests exercise damage veto,
-dimension transfer, game-time mutation, and insertion into the live villager
-trade table.
+`world.write`, respectively. Focused host/SDK tests and GameTests exercise the
+live trade table, damage veto, dimension transfer, and game-time mutation.
 
 Host 0.55.0 / ABI 1.45.0 / SDK 0.53.0 adds local rich chat-message replacement
 with bounded literal spans, formatting, hover text, and safe click actions.
@@ -202,3 +202,7 @@ Host 0.57.0 / ABI 1.47.0 / SDK 0.55.0 adds module-owned integer-component access
 
 
 Host 0.58.0 / ABI 1.48.0 / SDK 0.56.0 adds inventory-safe cancellable player drop attempts, module-owned updates to its active read-only menu, bounded entity glowing/silent flags, and static item enchantment values. Drop vetoes require `events.subscribe` and `events.cancel` and are declined when the complete stack cannot be restored; menu updates require `entity.read` and `menu.open`; flag writes require `entity.state.write` plus `entity.read`; item declarations require `content.register`. See [drop attempts](PLAYER_DROP_ATTEMPTS.md), [menu updates](MENU_UPDATES.md), [entity state flags](ENTITY_STATE_FLAGS.md), and [item properties](ITEM_RARITY.md).
+
+Host 0.59.0 / ABI 1.49.0 / SDK 0.57.0 adds cancellable projectile-impact attempts, literal custom names on loaded non-player entities, bounded food properties for registered items, and editable server menus. Menu slots use explicit item allowlists, transfer only existing stacks, preserve count and components, and return remaining stacks on close; each module is limited to 32 transfers per server tick. The new event uses `events.subscribe` and `events.cancel`; entity custom-name writes use `entity.read` and `entity.custom_name.write`; food declarations use `content.register`; editable-menu reads use `entity.read` and `menu.open`, while transfers also need `menu.transfer`. See [projectile impacts](PROJECTILE_IMPACT_ATTEMPT.md), [custom names](ENTITY_CUSTOM_NAMES.md), [food properties](ITEM_FOOD.md), and [editable menus](EDITABLE_MENUS.md).
+
+Host 0.60.0 / ABI 1.50.0 / SDK 0.58.0 adds vanilla max durability for registered standalone items, server-side player item cooldown reads/writes, earned-advancement notifications, and cancellable explosion-start attempts. Durability declarations require `content.register` and a same-module item with stack size one. Cooldown reads require `entity.read`, while changes also require `player.cooldown.write` and accept 1–72,000 ticks. Advancement observation uses `events.subscribe`; explosion vetoes require both `events.subscribe` and `events.cancel` and run before damage or block changes. See [item durability](ITEM_DURABILITY.md), [player item cooldowns](PLAYER_COOLDOWNS.md), and [gameplay events](GAMEPLAY_EVENTS.md).

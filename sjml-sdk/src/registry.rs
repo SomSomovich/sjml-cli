@@ -9,6 +9,8 @@
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
 const MAX_CONTENT_PATH_BYTES: usize = 256;
+/// Maximum static vanilla damage capacity for one registered item.
+pub const MAX_ITEM_MAX_DAMAGE: u32 = 1_000_000;
 const MAX_FLUID_PATH_BYTES: usize = MAX_CONTENT_PATH_BYTES - "_flowing".len();
 const MAX_FLUID_TEXTURE_ID_BYTES: usize = 256;
 const MAX_COMPONENT_VALUE_BYTES: usize = 4096;
@@ -785,6 +787,8 @@ extern "C" {
     fn imported_set_item_rarity(path_pointer: i32, path_length: i32, rarity: i32) -> i32;
     #[link_name = "set_item_enchantment_value"]
     fn imported_set_item_enchantment_value(path_pointer: i32, path_length: i32, value: i32) -> i32;
+    #[link_name = "set_item_max_damage"]
+    fn imported_set_item_max_damage(path_pointer: i32, path_length: i32, max_damage: i32) -> i32;
     #[link_name = "set_item_food"]
     fn imported_set_item_food(
         path_pointer: i32,
@@ -1149,6 +1153,40 @@ pub fn set_item_enchantment_value(item_path: &str, value: u32) -> SjmlResult<()>
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = value;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets a registered item's vanilla durability capacity.
+///
+/// Call this from `#[mod_register]` after declaring a standalone item with
+/// [`ItemDefinition::max_stack_size`] set to `1`. Durability is stored in the
+/// normal vanilla `MAX_DAMAGE` component, so Minecraft handles stack damage,
+/// repair, and break behavior. `max_damage` must be in `1..=1_000_000`; the
+/// host rejects block items, buckets, stackable items, duplicate declarations,
+/// and items that belong to another module.
+pub fn set_item_max_damage(item_path: &str, max_damage: u32) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    if !(1..=MAX_ITEM_MAX_DAMAGE).contains(&max_damage) {
+        return Err(invalid_argument(
+            "item max damage must be between 1 and 1000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the damage capacity and owner.
+        let status = unsafe {
+            imported_set_item_max_damage(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                max_damage as i32,
+            )
+        };
+        return status_result(status, "host rejected the item max-damage declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = max_damage;
         Err(unsupported_target())
     }
 }
@@ -4030,6 +4068,36 @@ mod tests {
         );
         assert_eq!(
             set_item_enchantment_value("../ruby", 1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_max_damage_is_bounded_and_paths_validate_before_import() {
+        assert_eq!(MAX_ITEM_MAX_DAMAGE, 1_000_000);
+        assert_eq!(
+            set_item_max_damage("tool", 1).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_max_damage("tool", MAX_ITEM_MAX_DAMAGE)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_item_max_damage("tool", 0).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_max_damage("tool", MAX_ITEM_MAX_DAMAGE + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_max_damage("../tool", 20).unwrap_err().code(),
             ErrorCode::InvalidArgument
         );
     }

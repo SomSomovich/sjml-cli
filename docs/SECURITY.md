@@ -118,6 +118,11 @@ registered effect ID and bounded duration/amplifier, and resolves the current
 player for the same login session on the server thread. It does not require
 `world.read` and does not expose inventory or a mutable player reference.
 
+Player item-cooldown reads use the live session's vanilla cooldown manager and
+require `entity.read`; setting or clearing cooldowns also requires
+`player.cooldown.write`. These imports are server-only, accept registered
+non-air item IDs, and bound new cooldowns to 1–72,000 ticks.
+
 Teleportation additionally requires `player.teleport`. The host bounds every
 coordinate and rotation, revalidates the live player session, and checks the
 current dimension's build height, world border, and loaded chunk before moving
@@ -142,6 +147,8 @@ module per server tick. The callback requires a live event
 subscription plus `entity.read` and `menu.open`; it does not load client classes
 on dedicated servers and is unavailable during static registration or on
 physical-client module instances.
+
+Editable menus use a separate `sjml_editable_menu_v1` import. Opening and reading require `entity.read` and `menu.open`; transfer calls also require `menu.transfer`. Each menu declares one to 54 input/output slots. Inputs accept only explicitly allowlisted registered IDs, outputs reject player insertion, and a transfer preflights both endpoints before moving an existing item stack without changing its components. Each module is limited to 32 transfers per server tick. The menu returns remaining stacks to the player on close and drops only exact overflow remainders. It cannot create items or turn one item into another.
 
 ## Entity reads and attachments
 
@@ -278,10 +285,14 @@ requires the separately granted `entity.fire.write` capability; both recheck
 the live module-scoped handle and logical-server thread. Values are limited to
 `0..=72_000`, and a negative vanilla extinguished sentinel is reported as zero.
 
+`entity::custom_name` reads a bounded plain-text name from a live loaded non-player entity under `entity.read`. Set and clear calls also require `entity.custom_name.write`; the host builds `Component.literal` text, rejecting styling/control payloads and oversized names. Player names and arbitrary text components are outside this API.
+
 `entity::is_glowing` and `entity::is_silent` read only two fixed vanilla flags
 from live loaded non-player entities under `entity.read`. Their setters also
 require `entity.state.write`; the host rejects client, static-registration, and
 stale-handle calls. These flags do not expose general entity metadata or NBT.
+
+`entity.projectile_impact_attempt` runs synchronously on the logical server before a projectile applies its hit. It requires `events.subscribe` and `events.cancel`; callbacks receive detached projectile and hit data, and only a successful guest veto cancels the impact. Block hit details are read only from an already-loaded chunk.
 
 `player.drop_attempt` is synchronous and cancellable only when the host can
 restore the entire tossed stack to the player's inventory. It requires both
@@ -289,6 +300,8 @@ event capabilities. If the inventory is full, or a callback changes it so the
 whole stack no longer fits, the original toss continues (with only any
 unrestored remainder left in the world). The host never cancels a toss after a
 partial restore, preventing item loss or duplication.
+
+Food properties are declared during static registration under `content.register`. The host accepts bounded vanilla nutrition/saturation values and the `fast` / `always_eat` flags; it does not grant arbitrary item behavior or client-side item hooks.
 
 Integer game-rule writes use a fixed four-rule allowlist with narrow ranges;
 they require both `world.read` and `world.write`. `world::set_block_properties`

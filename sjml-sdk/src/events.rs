@@ -59,6 +59,20 @@ pub struct PlayerRespawned {
     pub end_conquered: bool,
 }
 
+/// Synchronous, non-cancellable notification emitted after a server player earns an advancement.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerAdvancementEarned {
+    /// Canonical UUID string of the player who earned the advancement.
+    pub player_id: String,
+    /// Current in-game profile name of the player.
+    pub display_name: String,
+    /// Resource location of the level where the advancement was earned.
+    pub dimension_id: String,
+    /// Registry ID of the earned advancement.
+    pub advancement_id: String,
+}
+
 /// Synchronous, observation-only snapshot of a logical-server player interaction attempt.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -243,6 +257,30 @@ pub struct WorldLifecycle {
     pub dimension_id: String,
     /// World game time when the lifecycle callback was delivered.
     pub game_time: i64,
+}
+
+/// Synchronous cancellable server-side explosion start, before any damage or block changes apply.
+///
+/// Return `Ok(true)` from the `world.explosion_attempt` handler to stop the entire explosion.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ExplosionAttempt {
+    /// Resource location identifying the level that would be exploded.
+    pub dimension_id: String,
+    /// Direct source entity UUID when the explosion was caused by an entity.
+    pub source_entity_id: Option<String>,
+    /// Registry ID of the direct source entity type when present.
+    pub source_entity_type_id: Option<String>,
+    /// Vanilla block behavior: `keep`, `destroy`, `destroy_with_decay`, or `trigger_block`.
+    pub block_interaction: String,
+    /// Explosion center X coordinate.
+    pub x: f64,
+    /// Explosion center Y coordinate.
+    pub y: f64,
+    /// Explosion center Z coordinate.
+    pub z: f64,
+    /// Vanilla explosion radius, bounded to `0..=128`.
+    pub radius: f32,
 }
 
 /// Synchronous, non-cancellable notification emitted after a scheduled server tick.
@@ -658,10 +696,10 @@ mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
         BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
-        EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged,
-        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerMoved,
-        PlayerRespawned, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        MAX_SERVER_TICK_INTERVAL,
+        EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt,
+        InventoryChanged, PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerMoved, PlayerRespawned, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -698,6 +736,22 @@ mod tests {
 
         let encoded = to_bytes(&event).unwrap();
         assert_eq!(from_bytes::<PlayerRespawned>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn advancement_earned_snapshot_round_trips_player_and_registry_identity() {
+        let event = PlayerAdvancementEarned {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            display_name: "Alice".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            advancement_id: "minecraft:story/root".to_owned(),
+        };
+
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(
+            from_bytes::<PlayerAdvancementEarned>(&encoded).unwrap(),
+            event
+        );
     }
 
     #[test]
@@ -1027,6 +1081,33 @@ mod tests {
         assert_eq!(
             from_bytes::<ProjectileImpactAttempt>(&encoded).unwrap(),
             block_impact
+        );
+    }
+
+    #[test]
+    fn cancellable_explosion_attempt_round_trips_source_and_block_behavior() {
+        let sourced = ExplosionAttempt {
+            dimension_id: "minecraft:overworld".to_owned(),
+            source_entity_id: Some("00000000-0000-0000-0000-000000000001".to_owned()),
+            source_entity_type_id: Some("minecraft:tnt".to_owned()),
+            block_interaction: "destroy_with_decay".to_owned(),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            radius: 4.0,
+        };
+        let encoded = to_bytes(&sourced).unwrap();
+        assert_eq!(from_bytes::<ExplosionAttempt>(&encoded).unwrap(), sourced);
+
+        let source_free = ExplosionAttempt {
+            source_entity_id: None,
+            source_entity_type_id: None,
+            ..sourced
+        };
+        let encoded = to_bytes(&source_free).unwrap();
+        assert_eq!(
+            from_bytes::<ExplosionAttempt>(&encoded).unwrap(),
+            source_free
         );
     }
 

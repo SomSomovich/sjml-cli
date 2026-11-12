@@ -274,11 +274,11 @@ pub mod prelude {
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt, BlockPlace,
         BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
-        EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged,
-        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft,
-        PlayerMoved, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT,
-        MAX_SERVER_TICK_INTERVAL,
+        EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, ExplosionAttempt,
+        InventoryChanged, PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerJoined, PlayerLeft, PlayerMoved, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
+        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -305,8 +305,10 @@ pub mod prelude {
     };
     pub use crate::player;
     pub use crate::player::{
-        PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
-        PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_VELOCITY_COMPONENT,
+        clear_item_cooldown, has_item_cooldown, set_item_cooldown, PlayerAbilities,
+        PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerSnapshot,
+        PlayerVelocity, PlayerVitals, MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES,
+        MAX_PLAYER_ITEM_COOLDOWN_TICKS, MAX_PLAYER_VELOCITY_COMPONENT,
     };
     pub use crate::player_inventory;
     pub use crate::player_inventory::{

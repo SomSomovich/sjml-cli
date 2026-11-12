@@ -28,6 +28,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.death_attempt"
             | "entity.damage_attempt"
             | "entity.target_attempt"
+            | "world.explosion_attempt"
             | "client.screen.key_pressed"
     ) {
         return error(
@@ -322,6 +323,13 @@ mod tests {
                 quote! { async fn damage_attempt(_: EntityDamageAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.damage_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "world.explosion_attempt"),
+                quote! { async fn explosion_attempt(_: WorldExplosionAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "world.explosion_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

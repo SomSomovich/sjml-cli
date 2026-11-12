@@ -3,9 +3,19 @@
 SDK 0.42.0 adds `sjml::client_chat` for ABI 1.34.0 client modules. It controls
 Minecraft's native chat rectangle, including its input field. The host draws a
 generic framed panel that a module can style with `ChatTheme`. When the screen
-is closed, the native chat render is hidden; message data, history, scrolling,
-links, filtering, and command suggestions remain native. This API does not yet
-expose message content or a replacement screen.
+is closed, the native HUD chat render is hidden. This controller does not
+replace `ChatScreen`, the native message history, or its input and suggestion
+behavior.
+
+The separate [`chat_messages` API](CLIENT_CHAT_MESSAGES.md) exposes detached
+incoming message text, local filtering, and safe local replacement. A mod can
+store these bounded strings in guest-owned state and draw its own HUD feed with
+the general [`render` API](RENDERING.md); the runnable
+[`client-chat example`](../../examples/client-chat/src/lib.rs) hides native HUD
+messages, draws a bounded scrollable feed, and keeps Minecraft's native chat
+input available when `ChatScreen` opens. `client.chat.filter` and `client.render`
+must be granted independently. Signed content is filtered or replaced only in
+the local display after Minecraft's verification and filtering checks.
 
 Request `client.chat.modify` in `sjml.toml` and grant the module in
 `config/sjml-permissions.toml`:

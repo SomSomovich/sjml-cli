@@ -6,6 +6,9 @@
 use sjml::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "gametest/gameplay_events.rs"]
+mod gameplay_events;
+
 static SAW_PIG_DEATH: AtomicBool = AtomicBool::new(false);
 static SAW_PIG_DEATH_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static ARM_ENTITY_TARGET_ATTEMPT: AtomicBool = AtomicBool::new(false);
@@ -47,6 +50,14 @@ fn register_test_content() -> SjmlResult<()> {
     registry::set_item_enchantment_value("gametest_enchantable", 31)?;
     registry::register_item("gametest_food", ItemDefinition::default())?;
     registry::set_item_food("gametest_food", ItemFood::new(6, 0.6)?.fast().always_eat())?;
+    registry::register_item(
+        "gametest_durable",
+        ItemDefinition {
+            max_stack_size: 1,
+            fire_resistant: false,
+        },
+    )?;
+    registry::set_item_max_damage("gametest_durable", 256)?;
     registry::register_integer_component(
         "player_charge",
         IntegerComponentDefinition::new(-10, 10)?,
@@ -204,6 +215,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("inventory.changed", EventPriority::Normal)?;
     events::subscribe("resources.reloaded", EventPriority::Normal)?;
     events::subscribe("menu.action", EventPriority::Normal)?;
+    gameplay_events::initialize()?;
     Ok(())
 }
 
@@ -1366,6 +1378,19 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
             "the GameTest player snapshot must be available",
         )
     })?;
+    let cooldown_item_id = "minecraft:diamond";
+    if player::has_item_cooldown(target_player, cooldown_item_id)? {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player cooldown GameTest expects its fixture item to start without a cooldown",
+        ));
+    }
+    let cooldown_set_and_read = player::set_item_cooldown(target_player, cooldown_item_id, 20)
+        .and_then(|()| player::has_item_cooldown(target_player, cooldown_item_id));
+    let cooldown_cleanup = player::clear_item_cooldown(target_player, cooldown_item_id);
+    let cooldown_active = cooldown_set_and_read?;
+    cooldown_cleanup?;
+    let cooldown_cleared = player::has_item_cooldown(target_player, cooldown_item_id)?;
     player::send_action_bar(target_player, "SJML GameTest action-bar request")?;
     let original_vitals = player::vitals(target_player)?;
     let original_game_mode = player::game_mode(target_player)?;
@@ -1551,6 +1576,8 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         || (temporary_vitals.saturation - temporary_saturation).abs() > 0.01
         || temporary_vitals.experience_level != temporary_experience_level
         || temporary_vitals.experience_progress != 0.0
+        || !cooldown_active
+        || cooldown_cleared
         || (restored_vitals.health - original_vitals.health).abs() > 0.01
         || restored_vitals.food_level != original_vitals.food_level
         || (restored_vitals.saturation - original_vitals.saturation).abs() > 0.01
