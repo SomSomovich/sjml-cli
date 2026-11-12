@@ -23,7 +23,6 @@ wrong-thread calls return an error.
 
 The operation is server-only and requires a live module-owned world handle,
 the server thread, and `world.read`. Unknown or currently empty tags simply do
-not match. The host exposes only the membership result; it does not enumerate
-tag contents. Codec, import-boundary, permission, unloaded-chunk, and dedicated
-server GameTests cover the contract. Item, fluid, and entity tag queries are
-not part of this API yet.
+not match. To enumerate bounded members, use the APIs described in
+[`WORLD_TAG_MEMBERS.md`](WORLD_TAG_MEMBERS.md). Codec, import-boundary,
+permission, unloaded-chunk, and dedicated server GameTests cover the contract.

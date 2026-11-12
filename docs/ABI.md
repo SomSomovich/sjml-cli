@@ -6,11 +6,13 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.65.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.66.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.65.0 adds
-loaded-only block and item tag membership queries. ABI 1.64.0 adds bounded physical-client
+incompatible. Build metadata does not affect version ordering. ABI 1.66.0 adds
+bounded member enumeration for block, item, fluid, and entity-type registry
+tags. ABI 1.65.0 adds loaded-only block and item tag membership queries. ABI
+1.64.0 adds bounded physical-client
 translation lookup, loaded-only structure queries, and synchronous cancellable
 bonemeal/fertilization attempts. ABI 1.63.0 adds
 bounded Brigadier command suggestions, owner-scoped registered-item use
@@ -1588,6 +1590,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `set_game_rule` | `mutation_ptr, mutation_len` | Set an allowlisted boolean gamerule from a 33-byte schema-v1 mutation; requires `world.read` and `world.write` |
 | `biome_at` | `handle_ptr, handle_len, x, y, z, out_ptr, out_capacity` | Stable `Option<String>`: u32 UTF-8 length (`0` means unavailable), then canonical biome ID bytes |
 | `biome_ids` | `query_ptr, query_len, out_ptr, out_capacity` | Enumerate up to 4,000 canonical IDs from this world's biome registry using a schema-v1 query/response; requires `world.read` and never loads chunks |
+| `tag_members` | `query_ptr, query_len, out_ptr, out_capacity` | Enumerate up to 1,024 sorted canonical members from one block, item, fluid, or entity-type tag; schema-v1 request and response; a four-byte output capacity probes required response size; requires `world.read` |
 | `set_time` | `handle_ptr, handle_len, day_time_low, day_time_high` | Set absolute daylight-cycle time; status only |
 | `set_daylight_cycle_enabled` | `handle_ptr, handle_len, enabled` | Set vanilla `doDaylightCycle`; `enabled` must be 0 or 1 |
 | `block_states` | `query_ptr, query_len, out_ptr, out_capacity` | Stable ordered `Vec<Option<BlockStateSnapshot>>` |
@@ -2443,6 +2446,30 @@ lexically sorted, unique, limited to 256 bytes each and 128 total. The host
 examines at most 4,096 structure references. Unavailable position/reference
 chunks produce availability 0; a loaded position with no matching generated
 structure piece produces availability 1 with zero IDs. No chunk is loaded.
+
+## World registry tag members
+
+`sjml_world_v1.tag_members(query_ptr, query_length, output_ptr,
+output_capacity)` requires `world.read`, a live module-owned world handle, and
+the owning logical-server thread. It is unavailable during static registration
+and to physical-client modules. The schema-v1 query is little-endian
+`u32(1)`, the 24-byte world handle, a `u32` registry selector, and a
+length-prefixed canonical tag ID. Registry selectors are stable ABI values:
+`0=block`, `1=item`, `2=fluid`, and `3=entity type`.
+
+An output capacity of exactly four bytes performs a size probe and writes a
+little-endian `u32` with the encoded response size. The caller then retries
+with a buffer of that size plus the four-byte length prefix. The final output
+starts with a little-endian `u32` containing the number of response bytes that
+follow. The response is `u32(1)`, a 0/1 tag-availability byte, a
+little-endian `u32` member count, then length-prefixed canonical registry IDs.
+IDs are sorted lexically and unique; each ID is at most 256 UTF-8 bytes and the
+count is at most 1,024. An absent tag has availability 0 and count 0. A
+registered empty tag has availability 1 and count 0. If the complete response
+does not fit the guest's output buffer, the host returns `PAYLOAD_TOO_LARGE`
+without writing a partial result. The host reads the active server registry
+and never accesses or loads chunks. Subsequent calls observe registry data
+after a resource reload. See [registry tag members](WORLD_TAG_MEMBERS.md).
 
 ## Bonemeal fertilization attempt
 

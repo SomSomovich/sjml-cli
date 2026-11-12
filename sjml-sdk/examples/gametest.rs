@@ -66,6 +66,8 @@ mod world_neighbor_update;
 mod world_redstone_signal;
 #[path = "gametest/world_spawn_point.rs"]
 mod world_spawn_point;
+#[path = "gametest/world_tag_members.rs"]
+mod world_tag_members;
 
 static SAW_PIG_DEATH: AtomicBool = AtomicBool::new(false);
 static SAW_PIG_DEATH_ATTEMPT: AtomicBool = AtomicBool::new(false);

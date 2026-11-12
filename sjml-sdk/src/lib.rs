@@ -287,15 +287,17 @@ pub use widgets::{
 };
 pub use world::{
     BlockProperty, BlockStateSnapshot, ChunkPos, FluidStateSnapshot, HeightmapType, LightSnapshot,
-    WorldBorderSnapshot, WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
-    MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
-    MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
+    TagRegistry, WorldBorderSnapshot, WorldDifficulty, WorldGameRule, WorldIntegerGameRule,
+    WorldSpawnPoint, MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES,
+    MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
     MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
     MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
     MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
     MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_CHUNKS, MAX_WORLD_CHUNKS_RESPONSE_BYTES,
     MAX_WORLD_CHUNK_RADIUS, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
-    MAX_WORLD_REDSTONE_SIGNAL, MAX_WORLD_SPAWN_POINT_BYTES,
+    MAX_WORLD_REDSTONE_SIGNAL, MAX_WORLD_SPAWN_POINT_BYTES, MAX_WORLD_TAG_ID_BYTES,
+    MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES, MAX_WORLD_TAG_MEMBERS_QUERY_BYTES,
+    MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES,
 };
 
 /// Common imports for an SJML guest module.
@@ -506,7 +508,7 @@ pub mod prelude {
     pub use crate::world;
     pub use crate::world::{
         BlockProperty, BlockStateSnapshot, ChunkPos, FluidStateSnapshot, HeightmapType,
-        LightSnapshot, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
+        LightSnapshot, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, TagRegistry,
         WorldBorderSnapshot, WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
         MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
         MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,

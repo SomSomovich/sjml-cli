@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.73.0"
+sjml-sdk = "0.74.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -171,7 +171,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.73.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.74.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)
@@ -198,3 +198,9 @@ membership queries through the world API. Both require `world.read`; block
 queries preserve `None` for unavailable chunks and item queries do not load
 chunks or inspect inventories. See `docs/WORLD_BLOCK_TAGS.md` and
 `docs/WORLD_ITEM_TAGS.md` in the workspace.
+
+SDK 0.74.0 adds bounded `world::tag_members` enumeration for block, item,
+fluid, and entity-type tags, with typed convenience functions. Results are
+sorted, limited to 1,024 members, and distinguish absent tags from present
+empty tags. The API requires `world.read` and reads the current logical-server
+registries without loading chunks. See `docs/WORLD_TAG_MEMBERS.md`.

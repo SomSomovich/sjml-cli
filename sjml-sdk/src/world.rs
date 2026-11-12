@@ -4,7 +4,7 @@
 //! limited to 1,024 live worlds.
 
 #[cfg(target_arch = "wasm32")]
-use crate::abi::{allocate_host_input, deallocate_host_input};
+use crate::abi::{allocate_host_input, deallocate_host_input, read_length_prefixed_output};
 use crate::inventory::{BlockPos, Direction};
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
@@ -95,6 +95,17 @@ pub const MAX_WORLD_ITEM_TAG_ID_BYTES: usize = 256;
 pub const MAX_WORLD_ITEM_TAG_QUERY_BYTES: usize = 4 + 24 + 2 * (4 + MAX_WORLD_ITEM_TAG_ID_BYTES);
 /// Maximum output bytes reserved for [`item_has_tag`].
 pub const MAX_WORLD_ITEM_TAG_RESPONSE_BYTES: usize = 5;
+/// Maximum entries enumerated for one block, item, fluid, or entity-type tag.
+pub const MAX_WORLD_TAG_MEMBERS: usize = 1_024;
+/// Maximum UTF-8 bytes in one tag or registry entry ID.
+pub const MAX_WORLD_TAG_ID_BYTES: usize = 256;
+/// Maximum encoded query size for [`tag_members`].
+pub const MAX_WORLD_TAG_MEMBERS_QUERY_BYTES: usize = 4 + 24 + 4 + 4 + MAX_WORLD_TAG_ID_BYTES;
+/// Maximum encoded response size reserved by [`tag_members`].
+pub const MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES: usize =
+    9 + MAX_WORLD_TAG_MEMBERS * (4 + MAX_WORLD_TAG_ID_BYTES);
+/// Maximum tag-members import output size, including its four-byte response-length prefix.
+pub const MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES: usize = 4 + MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES;
 /// Maximum stable response size reserved by [`structures_at`].
 pub const MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES: usize =
     9 + MAX_WORLD_STRUCTURES_AT * (4 + MAX_WORLD_STRUCTURE_ID_BYTES);
@@ -268,6 +279,20 @@ pub enum WeatherCondition {
     Clear = 0,
     Rain = 1,
     Thunder = 2,
+}
+
+/// Registry whose data-driven tag members [`tag_members`] enumerates.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u32)]
+pub enum TagRegistry {
+    /// Minecraft block registry.
+    Block = 0,
+    /// Minecraft item registry.
+    Item = 1,
+    /// Minecraft fluid registry.
+    Fluid = 2,
+    /// Minecraft entity-type registry.
+    EntityType = 3,
 }
 
 /// Stable allowlist of boolean vanilla world gamerules. Values are ABI IDs and are not Minecraft
@@ -550,6 +575,15 @@ struct ItemTagQuery {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct TagMembersQuery {
+    world: WorldHandle,
+    registry_type: u32,
+    tag_id: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug)]
 struct StructuresAtResponse {
     result: Option<Vec<String>>,
@@ -644,6 +678,12 @@ struct ItemTagResponse {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
+struct TagMembersResponse {
+    members: Option<Vec<String>>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 impl StableDecode for ItemTagResponse {
     fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
         if decoder.read_u32()? != 1 {
@@ -663,6 +703,56 @@ impl StableDecode for ItemTagResponse {
             }
         };
         Ok(Self { contains })
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for TagMembersResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        if decoder.read_u32()? != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported tag-members response schema",
+            ));
+        }
+        let available = match decoder.read_u8()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "tag-members availability flag must be 0 or 1",
+                ));
+            }
+        };
+        let count = decoder.read_length(MAX_WORLD_TAG_MEMBERS)?;
+        if !available && count != 0 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "an absent tag must have an empty member list",
+            ));
+        }
+        let mut members = Vec::new();
+        members.try_reserve_exact(count).map_err(|_| {
+            SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not reserve memory for tag members",
+            )
+        })?;
+        for _ in 0..count {
+            let length = decoder.read_length(MAX_WORLD_TAG_ID_BYTES)?;
+            let id = String::from_utf8(decoder.read_raw(length)?.to_vec()).map_err(|_| {
+                SjmlError::new(
+                    ErrorCode::InvalidUtf8,
+                    "tag member ID contains malformed UTF-8",
+                )
+            })?;
+            members.push(id);
+        }
+        validate_tag_member_ids(&members)?;
+        Ok(Self {
+            members: available.then_some(members),
+        })
     }
 }
 
@@ -886,6 +976,8 @@ extern "C" {
     fn imported_block_has_tag(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "item_has_tag"]
     fn imported_item_has_tag(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "tag_members"]
+    fn imported_tag_members(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "heightmap"]
     fn imported_heightmap(
         handle: i32,
@@ -1620,6 +1712,81 @@ pub fn item_has_tag(world: WorldHandle, item_id: &str, tag_id: &str) -> SjmlResu
     }
 }
 
+/// Returns sorted canonical members of a current vanilla, mod, or data-pack registry tag.
+///
+/// Supports the block, item, fluid, and entity-type registries. Requires a live logical-server
+/// world handle and `world.read`. `None` means the tag is absent; `Some(empty)` is a registered
+/// tag with no members. The result is capped at [`MAX_WORLD_TAG_MEMBERS`] entries and each ID at
+/// [`MAX_WORLD_TAG_ID_BYTES`] bytes. Calls observe the current server registries after resource
+/// reloads. This operation reads registry data only and never loads chunks.
+pub fn tag_members(
+    world: WorldHandle,
+    registry_type: TagRegistry,
+    tag_id: &str,
+) -> SjmlResult<Option<Vec<String>>> {
+    if tag_id.len() > MAX_WORLD_TAG_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "tag ID exceeds the 256-byte limit",
+        ));
+    }
+    validate_resource_id(tag_id, "tag")?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&TagMembersQuery {
+            world,
+            registry_type: registry_type as u32,
+            tag_id: tag_id.to_owned(),
+        })?;
+        let response: TagMembersResponse = read_length_prefixed_output(
+            MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the versioned query and bounded output live for this synchronous import.
+                unsafe {
+                    imported_tag_members(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        if let Some(members) = &response.members {
+            validate_tag_member_ids(members)?;
+        }
+        Ok(response.members)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, registry_type);
+        Err(unsupported_target())
+    }
+}
+
+/// Returns sorted block IDs in one current block tag.
+pub fn block_tag_members(world: WorldHandle, tag_id: &str) -> SjmlResult<Option<Vec<String>>> {
+    tag_members(world, TagRegistry::Block, tag_id)
+}
+
+/// Returns sorted item IDs in one current item tag.
+pub fn item_tag_members(world: WorldHandle, tag_id: &str) -> SjmlResult<Option<Vec<String>>> {
+    tag_members(world, TagRegistry::Item, tag_id)
+}
+
+/// Returns sorted fluid IDs in one current fluid tag.
+pub fn fluid_tag_members(world: WorldHandle, tag_id: &str) -> SjmlResult<Option<Vec<String>>> {
+    tag_members(world, TagRegistry::Fluid, tag_id)
+}
+
+/// Returns sorted entity-type IDs in one current entity-type tag.
+pub fn entity_type_tag_members(
+    world: WorldHandle,
+    tag_id: &str,
+) -> SjmlResult<Option<Vec<String>>> {
+    tag_members(world, TagRegistry::EntityType, tag_id)
+}
+
 fn validate_world_position(position: BlockPos) -> SjmlResult<()> {
     if position.x < -MAX_WORLD_BLOCK_COORDINATE
         || position.x > MAX_WORLD_BLOCK_COORDINATE
@@ -1677,6 +1844,34 @@ fn validate_biome_ids(ids: &[String]) -> SjmlResult<()> {
             return Err(SjmlError::new(
                 ErrorCode::UnknownErrorCode,
                 "host returned duplicate or unsorted biome IDs",
+            ));
+        }
+        previous = Some(id);
+    }
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_tag_member_ids(ids: &[String]) -> SjmlResult<()> {
+    if ids.len() > MAX_WORLD_TAG_MEMBERS {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "host returned more than 1024 tag members",
+        ));
+    }
+    let mut previous: Option<&str> = None;
+    for id in ids {
+        if id.len() > MAX_WORLD_TAG_ID_BYTES {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "tag member ID exceeds the 256-byte limit",
+            ));
+        }
+        validate_resource_id(id, "tag member")?;
+        if previous.is_some_and(|previous| previous >= id.as_str()) {
+            return Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "host returned duplicate or unsorted tag members",
             ));
         }
         previous = Some(id);
@@ -3164,17 +3359,19 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         biome_ids, block_has_tag, block_properties, collides, day_time, daylight_cycle_enabled,
-        fluid_at, integer_game_rule, item_has_tag, loaded_chunks, notify_neighbors_at, play_sound,
-        raycast, schedule_block_tick, set_block, set_block_properties, set_daylight_cycle_enabled,
+        entity_type_tag_members, fluid_at, fluid_tag_members, integer_game_rule, item_has_tag,
+        item_tag_members, loaded_chunks, notify_neighbors_at, play_sound, raycast,
+        schedule_block_tick, set_block, set_block_properties, set_daylight_cycle_enabled,
         set_game_time, set_integer_game_rule, set_time, spawn_entity, spawn_particle,
-        structures_at, validate_biome_ids, validate_block_property_updates,
+        structures_at, tag_members, validate_biome_ids, validate_block_property_updates,
         validate_loaded_chunk_query, validate_loaded_chunk_results, validate_structure_ids,
-        validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse, BlockPropertiesMutation,
-        BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateBatch,
-        BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse, ChunkPos,
-        DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemTagQuery, ItemTagResponse,
-        LoadedChunksQuery, LoadedChunksResponse, RaycastBlockMode, RaycastFluidMode, RaycastHit,
-        RaycastPoint, StructuresAtQuery, StructuresAtResponse, WeatherCondition, WeatherSnapshot,
+        validate_tag_member_ids, validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse,
+        BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
+        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse,
+        ChunkPos, DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemTagQuery,
+        ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, RaycastBlockMode,
+        RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery, StructuresAtResponse,
+        TagMembersQuery, TagMembersResponse, TagRegistry, WeatherCondition, WeatherSnapshot,
         WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation,
         WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
         WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot,
@@ -3187,6 +3384,8 @@ mod tests {
         MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
         MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_STRUCTURES_AT,
         MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES, MAX_WORLD_STRUCTURE_ID_BYTES,
+        MAX_WORLD_TAG_ID_BYTES, MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES,
+        MAX_WORLD_TAG_MEMBERS_QUERY_BYTES, MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -3648,6 +3847,154 @@ mod tests {
         assert_eq!(
             ErrorCode::InvalidArgument,
             crate::from_bytes::<ItemTagResponse>(&[1_u32.to_le_bytes().as_slice(), &[2]].concat())
+                .unwrap_err()
+                .code()
+        );
+    }
+
+    #[test]
+    fn registry_tag_member_query_and_response_match_the_host_wire_contract() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let query = crate::to_bytes(&TagMembersQuery {
+            world,
+            registry_type: TagRegistry::EntityType as u32,
+            tag_id: "minecraft:skeletons".to_owned(),
+        })
+        .unwrap();
+        let mut expected_query = Vec::new();
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&1_u64.to_le_bytes());
+        expected_query.extend_from_slice(&2_u64.to_le_bytes());
+        expected_query.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected_query.extend_from_slice(&(TagRegistry::EntityType as u32).to_le_bytes());
+        expected_query.extend_from_slice(&("minecraft:skeletons".len() as u32).to_le_bytes());
+        expected_query.extend_from_slice(b"minecraft:skeletons");
+        assert_eq!(expected_query, query);
+        assert_eq!(MAX_WORLD_TAG_MEMBERS_QUERY_BYTES, 292);
+        assert_eq!(MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES, 266_249);
+        assert_eq!(MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES, 266_253);
+        assert_eq!(MAX_WORLD_TAG_MEMBERS, 1024);
+        assert_eq!(MAX_WORLD_TAG_ID_BYTES, 256);
+
+        let available = [
+            1_u32.to_le_bytes().as_slice(),
+            &[1_u8],
+            2_u32.to_le_bytes().as_slice(),
+            18_u32.to_le_bytes().as_slice(),
+            b"minecraft:skeleton".as_slice(),
+            25_u32.to_le_bytes().as_slice(),
+            b"minecraft:wither_skeleton".as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            Some(vec![
+                "minecraft:skeleton".to_owned(),
+                "minecraft:wither_skeleton".to_owned()
+            ]),
+            crate::from_bytes::<TagMembersResponse>(&available)
+                .unwrap()
+                .members
+        );
+        let empty = [
+            1_u32.to_le_bytes().as_slice(),
+            &[1_u8],
+            0_u32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            Some(Vec::new()),
+            crate::from_bytes::<TagMembersResponse>(&empty)
+                .unwrap()
+                .members
+        );
+        let absent = [
+            1_u32.to_le_bytes().as_slice(),
+            &[0_u8],
+            0_u32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            None,
+            crate::from_bytes::<TagMembersResponse>(&absent)
+                .unwrap()
+                .members
+        );
+
+        let unsorted = [
+            1_u32.to_le_bytes().as_slice(),
+            &[1_u8],
+            2_u32.to_le_bytes().as_slice(),
+            25_u32.to_le_bytes().as_slice(),
+            b"minecraft:wither_skeleton".as_slice(),
+            18_u32.to_le_bytes().as_slice(),
+            b"minecraft:skeleton".as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            crate::from_bytes::<TagMembersResponse>(&unsorted)
+                .unwrap_err()
+                .code()
+        );
+        let unavailable_with_members = [
+            1_u32.to_le_bytes().as_slice(),
+            &[0_u8],
+            1_u32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            crate::from_bytes::<TagMembersResponse>(&unavailable_with_members)
+                .unwrap_err()
+                .code()
+        );
+        let oversized = [
+            1_u32.to_le_bytes().as_slice(),
+            &[1_u8],
+            (MAX_WORLD_TAG_MEMBERS as u32 + 1).to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            crate::from_bytes::<TagMembersResponse>(&oversized)
+                .unwrap_err()
+                .code()
+        );
+        let too_many = (0..=MAX_WORLD_TAG_MEMBERS)
+            .map(|index| format!("sjml_test:entry_{index:04}"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ErrorCode::PayloadTooLarge,
+            validate_tag_member_ids(&too_many).unwrap_err().code()
+        );
+        assert_eq!(
+            ErrorCode::InvalidArgument,
+            tag_members(world, TagRegistry::Block, "#minecraft:logs")
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            tag_members(world, TagRegistry::Block, "minecraft:logs")
+                .unwrap_err()
+                .code(),
+            "native targets must not fabricate registry tag contents"
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            entity_type_tag_members(world, "minecraft:skeletons")
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            fluid_tag_members(world, "minecraft:water")
+                .unwrap_err()
+                .code()
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            item_tag_members(world, "minecraft:planks")
                 .unwrap_err()
                 .code()
         );

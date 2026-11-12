@@ -20,5 +20,6 @@ The operation requires a live module-owned world handle, the owning logical
 server thread, and `world.read`. It is unavailable to physical-client modules
 and during static registration. The query reads registry membership only; it
 does not inspect a player's or container's inventory and does not load chunks.
-Item-tag contents are not enumerated by this API. Codec, import-boundary,
+To enumerate bounded item-tag members, see
+[`WORLD_TAG_MEMBERS.md`](WORLD_TAG_MEMBERS.md). Codec, import-boundary,
 permission, ownership, and dedicated-server GameTests cover the contract.

@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.75.0`, the Rust SDK/macros are `0.73.0`, and the ABI is
-`1.65.0`. ABI compatibility remains major-version based: host 0.75.0 accepts ABI
-`1.0.x` through `1.65.0`; it rejects later contracts it does not know. Packages
-using newer APIs declare ABI `^1.65.0` and host range `^0.75.0`.
+The current host is `0.76.0`, the Rust SDK/macros are `0.74.0`, and the ABI is
+`1.66.0`. ABI compatibility remains major-version based: host 0.76.0 accepts ABI
+`1.0.x` through `1.66.0`; it rejects later contracts it does not know. Packages
+using newer APIs declare ABI `^1.66.0` and host range `^0.76.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -269,3 +269,5 @@ Host 0.73.0 / ABI 1.63.0 / SDK/macros 0.71.0 adds bounded dynamic server-command
 Host 0.74.0 / ABI 1.64.0 / SDK/macros 0.72.0 adds `client_localization::translate` for the active client language, bounded loaded-only `world::structures_at` queries, and the cancellable `block.fertilize_attempt` bonemeal callback. Focused Java/Rust tests and dedicated-server GameTests cover these contracts; client-language display behavior still needs a live client check. The CLI crate is 0.1.4 locally; no crates.io release or public-repository sync was made.
 
 Host 0.75.0 / ABI 1.65.0 / SDK/macros 0.73.0 adds loaded-only `world::block_has_tag` queries and current-registry `world::item_has_tag` membership checks for canonical tag IDs. Block queries distinguish a loaded non-member from an unavailable position without loading chunks; item queries do not inspect inventory or load chunks. Codec, host import, Rust contract, and dedicated-server GameTests cover both contracts. The CLI crate is 0.1.5 locally; no crates.io release or public-repository sync was made.
+
+Host 0.76.0 / ABI 1.66.0 / SDK/macros 0.74.0 adds sorted bounded enumeration of current block, item, fluid, and entity-type tag members through `world::tag_members` and typed convenience functions. Results distinguish absent tags from registered empty tags and cap at 1,024 entries; all calls require `world.read` and never access chunks. The private CLI crate is 0.1.6 locally; no crates.io publication or public-repository sync was made.

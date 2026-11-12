@@ -197,6 +197,102 @@ where
     allocate_response(result)
 }
 
+/// Reads a response that starts with a little-endian `u32` byte length.
+///
+/// This lets bounded host responses reserve their full maximum without making the guest
+/// initialize or decode unused padding, which would waste callback instruction fuel.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn read_length_prefixed_output<T: StableDecode>(
+    maximum_capacity: u32,
+    mut invoke: impl FnMut(i32, i32) -> i32,
+) -> SjmlResult<T> {
+    const PREFIX_BYTES: u32 = core::mem::size_of::<u32>() as u32;
+    if maximum_capacity < PREFIX_BYTES + 9 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "length-prefixed host output capacity is smaller than its minimum response",
+        ));
+    }
+    let size_pointer = allocate_host_input(PREFIX_BYTES);
+    if size_pointer == 0 {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "could not allocate world response-size buffer",
+        ));
+    }
+    // Capacity four requests a size probe. The host writes only the required payload length.
+    unsafe { core::ptr::write_bytes(size_pointer as *mut u8, 0, PREFIX_BYTES as usize) };
+    let probe_status = invoke(size_pointer as i32, PREFIX_BYTES as i32);
+    if probe_status != 0 {
+        // SAFETY: release this exact allocation once after the synchronous probe.
+        unsafe { deallocate_host_input(size_pointer, PREFIX_BYTES) };
+        return Err(SjmlError::from_abi_code(
+            probe_status as u32,
+            "host rejected the world response-size query",
+        ));
+    }
+    // SAFETY: the prefix was initialized above and the allocation remains live.
+    let response_length = unsafe {
+        u32::from_le_bytes([
+            core::ptr::read(size_pointer as *const u8),
+            core::ptr::read((size_pointer + 1) as *const u8),
+            core::ptr::read((size_pointer + 2) as *const u8),
+            core::ptr::read((size_pointer + 3) as *const u8),
+        ])
+    };
+    // SAFETY: release the size-only allocation before reserving the exact response span.
+    unsafe { deallocate_host_input(size_pointer, PREFIX_BYTES) };
+    if response_length < 9 || response_length > maximum_capacity - PREFIX_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::UnknownErrorCode,
+            "host returned an invalid world response size",
+        ));
+    }
+
+    let capacity = PREFIX_BYTES + response_length;
+    let pointer = allocate_host_input(capacity);
+    if pointer == 0 {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "could not allocate world output buffer",
+        ));
+    }
+    unsafe { core::ptr::write_bytes(pointer as *mut u8, 0, PREFIX_BYTES as usize) };
+    let status = invoke(pointer as i32, capacity as i32);
+    let result = if status == 0 {
+        // SAFETY: the prefix was initialized above and the allocation remains live.
+        let written = unsafe {
+            u32::from_le_bytes([
+                core::ptr::read(pointer as *const u8),
+                core::ptr::read((pointer + 1) as *const u8),
+                core::ptr::read((pointer + 2) as *const u8),
+                core::ptr::read((pointer + 3) as *const u8),
+            ])
+        };
+        if written != response_length {
+            Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "host changed the world response size between query and read",
+            ))
+        } else {
+            // SAFETY: a successful host response owns and initializes exactly `written` bytes
+            // after the prefix; bounds were checked against the live guest allocation.
+            let bytes = unsafe {
+                core::slice::from_raw_parts((pointer + PREFIX_BYTES) as *const u8, written as usize)
+            };
+            crate::from_bytes(bytes)
+        }
+    } else {
+        Err(SjmlError::from_abi_code(
+            status as u32,
+            "host rejected the world read",
+        ))
+    };
+    // SAFETY: release this exact allocation once, after host access and decoding have finished.
+    unsafe { deallocate_host_input(pointer, capacity) };
+    result
+}
+
 /// Allocates guest-owned memory for a host-to-guest callback input span.
 ///
 /// The host must pair every successful non-empty allocation with

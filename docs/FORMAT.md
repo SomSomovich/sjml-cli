@@ -20,9 +20,9 @@ license = "MIT"
 distribution = "server_only"
 
 [runtime]
-abi = "^1.65.0"
+abi = "^1.66.0"
 minecraft = "~1.21.1"
-sjml = "^0.75.0"
+sjml = "^0.76.0"
 
 [[modules]]
 id = "core"

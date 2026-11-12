@@ -1,4 +1,4 @@
-use sjml::{command, entity, EntityHandle, ErrorCode, SjmlError, SjmlResult, StableDecode};
+use sjml::{command, entity, world, BlockPos, ErrorCode, SjmlError, SjmlResult, StableDecode};
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
@@ -6,13 +6,42 @@ struct RidingArguments {
     passenger_uuid: String,
     vehicle_uuid: String,
     other_vehicle_uuid: String,
+    center_x: i32,
+    center_y: i32,
+    center_z: i32,
 }
 
 #[command(name = "entity.riding.check")]
 fn exercise_entity_riding(arguments: RidingArguments) -> SjmlResult<String> {
-    let passenger = find_entity(&arguments.passenger_uuid)?;
-    let vehicle = find_entity(&arguments.vehicle_uuid)?;
-    let other_vehicle = find_entity(&arguments.other_vehicle_uuid)?;
+    let overworld = world::get("minecraft:overworld")?
+        .ok_or_else(|| failure("the GameTest Overworld is unavailable"))?;
+    let nearby = entity::within(
+        overworld,
+        BlockPos {
+            x: arguments.center_x,
+            y: arguments.center_y,
+            z: arguments.center_z,
+        },
+        8.0,
+        8.0,
+        Some("minecraft:pig"),
+    )?;
+    let mut passenger = None;
+    let mut vehicle = None;
+    let mut other_vehicle = None;
+    for handle in nearby {
+        match entity::snapshot(handle)?.uuid.as_str() {
+            uuid if uuid == arguments.passenger_uuid => passenger = Some(handle),
+            uuid if uuid == arguments.vehicle_uuid => vehicle = Some(handle),
+            uuid if uuid == arguments.other_vehicle_uuid => other_vehicle = Some(handle),
+            _ => {}
+        }
+    }
+    let passenger =
+        passenger.ok_or_else(|| failure("GameTest passenger is outside the local query"))?;
+    let vehicle = vehicle.ok_or_else(|| failure("GameTest vehicle is outside the local query"))?;
+    let other_vehicle = other_vehicle
+        .ok_or_else(|| failure("other GameTest vehicle is outside the local query"))?;
 
     if entity::riding_snapshot(passenger)?.vehicle.is_some() {
         return Err(failure("GameTest passenger unexpectedly started mounted"));
@@ -76,17 +105,6 @@ fn exercise_entity_riding(arguments: RidingArguments) -> SjmlResult<String> {
     }
 
     Ok("entity mount snapshots and non-forced mount lifecycle passed".to_owned())
-}
-
-fn find_entity(uuid: &str) -> SjmlResult<EntityHandle> {
-    for handle in entity::loaded()? {
-        if entity::snapshot(handle)?.uuid == uuid {
-            return Ok(handle);
-        }
-    }
-    Err(failure(
-        "requested GameTest entity is not present in loaded levels",
-    ))
 }
 
 fn failure(message: &'static str) -> SjmlError {
