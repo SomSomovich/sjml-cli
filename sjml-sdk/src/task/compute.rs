@@ -2,7 +2,7 @@
 
 #[cfg(target_arch = "wasm32")]
 use crate::from_bytes;
-use crate::{ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode, to_bytes};
+use crate::{to_bytes, ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
 use core::future::Future;
 use core::marker::PhantomData;
 use core::pin::Pin;
@@ -172,7 +172,7 @@ extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_COMPUTE_BYTES, spawn_compute};
+    use super::{spawn_compute, MAX_COMPUTE_BYTES};
     use crate::{ErrorCode, StableDecode, StableEncode};
     use core::future::Future;
     use core::pin::Pin;

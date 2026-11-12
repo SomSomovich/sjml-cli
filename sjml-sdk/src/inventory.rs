@@ -435,8 +435,8 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        BlockPos, Direction, InventoryEndpoint, MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
-        transfer, validate_slot, validate_transfer_count,
+        transfer, validate_slot, validate_transfer_count, BlockPos, Direction, InventoryEndpoint,
+        MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
     };
     use crate::{ErrorCode, WorldHandle};
 

@@ -2,7 +2,7 @@
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
-//! `player.abilities.write`. Player handles
+//! `player.abilities.write`; action-bar messages require `player.ui.actionbar`. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
 #[cfg(target_arch = "wasm32")]
@@ -377,6 +377,10 @@ pub const MAX_TELEPORT_COORDINATE: f64 = 29_999_984.0;
 pub const MAX_TELEPORT_YAW: f32 = 36_000.0;
 /// Maximum absolute velocity component accepted by the player motion API, in blocks per tick.
 pub const MAX_PLAYER_VELOCITY_COMPONENT: f64 = 64.0;
+/// Maximum UTF-8 size accepted for one literal player action-bar message.
+pub const MAX_ACTION_BAR_TEXT_BYTES: usize = 1024;
+/// Maximum Unicode scalar values accepted for one literal player action-bar message.
+pub const MAX_ACTION_BAR_TEXT_CODE_POINTS: usize = 256;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_player_v1")]
@@ -428,6 +432,8 @@ extern "C" {
         velocity: i32,
         velocity_length: i32,
     ) -> i32;
+    #[link_name = "action_bar"]
+    fn imported_action_bar(handle: i32, handle_length: i32, text: i32, text_length: i32) -> i32;
 }
 
 /// Returns every online player, sorted by canonical UUID. Before server binding and in client
@@ -558,6 +564,63 @@ pub fn set_game_mode(handle: PlayerHandle, game_mode: PlayerGameMode) -> SjmlRes
         let _ = (handle, game_mode);
         Err(unsupported_target())
     }
+}
+
+/// Sends bounded literal text to an online player as a vanilla action-bar message.
+///
+/// The text is not interpreted as JSON, a translation key, or a command. It must be nonblank,
+/// contain no control characters, and fit within 1,024 UTF-8 bytes and 256 Unicode scalar values.
+/// The host revalidates the module-owned player session and owning server thread for every call.
+///
+/// Requires the declared and administrator-granted entity.read and player.ui.actionbar
+/// capabilities. It is available only to logical-server modules; client modules and static
+/// registration cannot send messages. Each module is limited to ten messages per five-second
+/// window.
+pub fn send_action_bar(handle: PlayerHandle, text: &str) -> SjmlResult<()> {
+    validate_action_bar_text(text)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the handle and borrowed UTF-8 text remain live throughout the synchronous import.
+        let status = unsafe {
+            imported_action_bar(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                text.as_ptr() as usize as u32 as i32,
+                text.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the player action-bar message")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_action_bar_text(text: &str) -> SjmlResult<()> {
+    if text.trim().is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "action-bar text must not be blank",
+        ));
+    }
+    if text.len() > MAX_ACTION_BAR_TEXT_BYTES
+        || text.chars().count() > MAX_ACTION_BAR_TEXT_CODE_POINTS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "action-bar text exceeds 1024 UTF-8 bytes or 256 code points",
+        ));
+    }
+    if text.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "action-bar text must not contain control characters",
+        ));
+    }
+    Ok(())
 }
 
 /// Sets the current health of an online player on the owning logical server.

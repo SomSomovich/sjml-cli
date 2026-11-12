@@ -1504,10 +1504,10 @@ mod tests {
             .unwrap_err(),
             StorageError::AmbiguousMigrationPath
         );
-        assert!(
-            register_migration::<BranchB, BranchC, _>(|old| { Ok(BranchC { value: old.value }) })
-                .is_ok()
-        );
+        assert!(register_migration::<BranchB, BranchC, _>(|old| {
+            Ok(BranchC { value: old.value })
+        })
+        .is_ok());
     }
 
     #[test]

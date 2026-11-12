@@ -1,8 +1,8 @@
 //! Exclusive runtime control of the native client chat pane in logical GUI units.
 
-use crate::{ErrorCode, SjmlError, SjmlResult};
 #[cfg(any(target_arch = "wasm32", test))]
-use crate::{StableDecode, StableEncode, from_bytes};
+use crate::{from_bytes, StableDecode, StableEncode};
+use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// A finite native chat rectangle. The host clamps it to the viewport and minimum size.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -857,13 +857,11 @@ mod tests {
         body[8] = 32;
         assert!(crate::from_bytes::<Delivery>(&packet(3, &body)).is_err());
         for value in [0.0, -1.0, f32::NAN, 1_048_577.0] {
-            assert!(
-                crate::from_bytes::<Delivery>(&packet(
-                    0,
-                    &floats(&[value, 480.0, 0.0, 0.0, 120.0, 56.0])
-                ))
-                .is_err()
-            );
+            assert!(crate::from_bytes::<Delivery>(&packet(
+                0,
+                &floats(&[value, 480.0, 0.0, 0.0, 120.0, 56.0])
+            ))
+            .is_err());
         }
     }
     #[test]

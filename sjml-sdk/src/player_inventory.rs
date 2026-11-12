@@ -151,11 +151,11 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use super::read;
-    use super::{MAX_PLAYER_INVENTORY_SLOTS, validate_inventory};
+    use super::{validate_inventory, MAX_PLAYER_INVENTORY_SLOTS};
+    use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
     use crate::ErrorCode;
     #[cfg(not(target_arch = "wasm32"))]
     use crate::PlayerHandle;
-    use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
 
     #[test]
     fn player_inventory_snapshot_is_bounded_to_128_slots() {

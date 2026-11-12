@@ -6,13 +6,15 @@
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 #[cfg(target_arch = "wasm32")]
-use crate::{Decoder, MAX_STRING_BYTES, to_bytes};
+use crate::{to_bytes, Decoder, MAX_STRING_BYTES};
 use crate::{EntityHandle, ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
 
 const MAX_EFFECT_ID_BYTES: usize = 256;
 pub(crate) const MAX_EFFECT_DURATION_TICKS: u32 = 72_000;
 /// Maximum absolute entity velocity component in blocks per tick.
 pub const MAX_ENTITY_VELOCITY_COMPONENT: f64 = 64.0;
+/// Maximum damage amount accepted by one [`damage`] call.
+pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
 
 /// Current identity, type, dimension, and coordinates of one loaded non-player entity.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -96,6 +98,8 @@ extern "C" {
         velocity: i32,
         velocity_length: i32,
     ) -> i32;
+    #[link_name = "damage"]
+    fn imported_damage(handle: i32, handle_length: i32, amount_bits: i32) -> i32;
 }
 
 /// Returns all loaded non-player entities across the server's loaded dimensions, including modded
@@ -271,6 +275,40 @@ pub fn set_velocity(handle: EntityHandle, velocity: EntityVelocity) -> SjmlResul
     }
 }
 
+/// Requests one bounded generic damage hit against a loaded living non-player entity.
+///
+/// The module must request and receive both `entity.read` and `entity.damage`. The host uses
+/// Minecraft's fixed generic damage source and ordinary `LivingEntity::hurt` path, so vanilla
+/// invulnerability, mitigation, damage hooks, and death behavior remain authoritative. A
+/// successful result means the host performed the request; Minecraft may ignore or cancel it.
+/// The guest cannot choose an attacker, damage type, or Java object.
+pub fn damage(handle: EntityHandle, amount: f32) -> SjmlResult<()> {
+    if !amount.is_finite() || amount <= 0.0 || amount > MAX_ENTITY_DAMAGE {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity damage must be finite and within (0, 64]",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and f32 bits remain valid for this synchronous import.
+        let status = unsafe {
+            imported_damage(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                amount.to_bits() as i32,
+            )
+        };
+        status_result(status, "host rejected the entity damage request")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 pub(crate) fn validate_effect_id(effect_id: &str) -> SjmlResult<()> {
     let invalid = || {
         SjmlError::new(
@@ -351,7 +389,10 @@ fn unsupported_target() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_effect, set_velocity, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
+    use super::{
+        apply_effect, damage, set_velocity, EntityVelocity, MAX_ENTITY_DAMAGE,
+        MAX_ENTITY_VELOCITY_COMPONENT,
+    };
     use crate::{EntityHandle, ErrorCode};
 
     #[test]
@@ -424,6 +465,37 @@ mod tests {
                 .code(),
             ErrorCode::InvalidArgument,
             "invalid values must fail before any host import is attempted"
+        );
+    }
+
+    #[test]
+    fn generic_damage_is_finite_positive_and_bounded_before_host_access() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(MAX_ENTITY_DAMAGE, 64.0);
+        assert_eq!(
+            damage(handle, 0.0).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            damage(handle, -0.5).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            damage(handle, f32::NAN).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            damage(handle, f32::INFINITY).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            damage(handle, MAX_ENTITY_DAMAGE + 0.01).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            damage(handle, 1.0).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
         );
     }
 }

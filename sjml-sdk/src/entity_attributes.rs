@@ -213,7 +213,7 @@ fn unsupported_target() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{AttributeValues, LivingAttribute, decode_values};
+    use super::{decode_values, AttributeValues, LivingAttribute};
     use crate::{EntityHandle, ErrorCode};
 
     #[test]
@@ -228,17 +228,13 @@ mod tests {
         );
         assert!(LivingAttribute::MaxHealth.validate_base(20.0).is_ok());
         assert!(LivingAttribute::MaxHealth.validate_base(0.99).is_err());
-        assert!(
-            LivingAttribute::MovementSpeed
-                .validate_base(f64::NAN)
-                .is_err()
-        );
+        assert!(LivingAttribute::MovementSpeed
+            .validate_base(f64::NAN)
+            .is_err());
         assert!(LivingAttribute::Armor.validate_base(30.01).is_err());
-        assert!(
-            LivingAttribute::KnockbackResistance
-                .validate_base(0.75)
-                .is_ok()
-        );
+        assert!(LivingAttribute::KnockbackResistance
+            .validate_base(0.75)
+            .is_ok());
 
         let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
         #[cfg(not(target_arch = "wasm32"))]

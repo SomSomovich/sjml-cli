@@ -4,9 +4,9 @@ use crate::abi::EventSubscriptionHandle;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::BlockPos;
-use crate::{ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
 #[cfg(target_arch = "wasm32")]
 use crate::{from_bytes, to_bytes};
+use crate::{ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
 
 /// Default `server.tick` subscription cadence, in server ticks.
 pub const DEFAULT_SERVER_TICK_INTERVAL: u32 = 20;
@@ -458,13 +458,13 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        BlockBreak, BlockPlace, EffectTickEvent, EntityDamaged, EntityDeath, EntitySpawned,
-        EventPriority, InventoryChanged, MAX_SERVER_TICK_INTERVAL, PlayerInteracted, PlayerMoved,
-        PlayerRespawned, ResourcesReloaded, ServerTick, WorldLifecycle, subscribe,
-        subscribe_with_interval, unsubscribe,
+        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
+        EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
+        PlayerInteracted, PlayerMoved, PlayerRespawned, ResourcesReloaded, ServerTick,
+        WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
-    use crate::ErrorCode;
     use crate::inventory::BlockPos;
+    use crate::ErrorCode;
     use crate::{from_bytes, to_bytes};
 
     #[test]

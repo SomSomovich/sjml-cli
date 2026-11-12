@@ -1,6 +1,6 @@
 use sjml::{
-    BlockPos, ErrorCode, WorldHandle,
     world::{self, HeightmapType, LightSnapshot},
+    BlockPos, ErrorCode, WorldHandle,
 };
 
 #[test]

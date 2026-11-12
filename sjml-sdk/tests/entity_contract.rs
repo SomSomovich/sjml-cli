@@ -27,6 +27,10 @@ fn native_entity_api_reports_unsupported_imports() {
             .code(),
         ErrorCode::UnknownErrorCode
     );
+    assert_eq!(
+        entity::damage(handle, 1.0).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
 }
 
 #[test]

@@ -523,6 +523,20 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         world::set_daylight_cycle_enabled(overworld, original_daylight_cycle);
     let observed_daylight_cycle = observed_daylight_cycle?;
     restored_daylight_cycle?;
+    let original_keep_inventory = world::game_rule(overworld, world::WorldGameRule::KeepInventory)?;
+    let changed_keep_inventory = world::set_game_rule(
+        overworld,
+        world::WorldGameRule::KeepInventory,
+        !original_keep_inventory,
+    )
+    .and_then(|()| world::game_rule(overworld, world::WorldGameRule::KeepInventory));
+    let restored_keep_inventory = world::set_game_rule(
+        overworld,
+        world::WorldGameRule::KeepInventory,
+        original_keep_inventory,
+    );
+    let changed_keep_inventory = changed_keep_inventory?;
+    restored_keep_inventory?;
     let border_mutation_observed = if original_border.remaining_lerp_millis == 0 {
         let changed_center_x = if original_border.center_x > world::MAX_WORLD_BORDER_CENTER - 1.0 {
             original_border.center_x - 1.0
@@ -623,6 +637,9 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         || observed_day_time != changed_day_time
         || observed_daylight_cycle == original_daylight_cycle
         || world::daylight_cycle_enabled(overworld)? != original_daylight_cycle
+        || changed_keep_inventory != !original_keep_inventory
+        || world::game_rule(overworld, world::WorldGameRule::KeepInventory)?
+            != original_keep_inventory
         || !border_mutation_observed
         || biome_id
             .as_deref()
@@ -909,6 +926,7 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
             )
         })?;
     let target_player = players[target_index];
+    player::send_action_bar(target_player, "SJML GameTest action-bar request")?;
     let vitals = players
         .iter()
         .copied()
@@ -1167,6 +1185,7 @@ fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
     let restore_velocity = entity::set_velocity(pig_handle, original_velocity);
     let changed_velocity = changed_velocity?;
     restore_velocity?;
+    entity::damage(pig_handle, 1.0)?;
     if snapshots.is_empty()
         || !snapshots
             .iter()

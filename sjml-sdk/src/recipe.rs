@@ -82,7 +82,7 @@ impl RecipeEvaluation {
 
 #[cfg(test)]
 mod tests {
-    use super::{CraftingSlot, RECIPE_CALLBACK_SCHEMA_VERSION, RecipeEvaluation, RecipeMatchInput};
+    use super::{CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION};
     use crate::{from_bytes, to_bytes};
 
     #[test]

@@ -155,6 +155,49 @@ pub enum WeatherCondition {
     Thunder = 2,
 }
 
+/// Stable allowlist of boolean vanilla world gamerules. Values are ABI IDs and are not Minecraft
+/// registry or implementation ordinals.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u32)]
+pub enum WorldGameRule {
+    /// `doDaylightCycle`.
+    DaylightCycle = 0,
+    /// `doWeatherCycle`.
+    WeatherCycle = 1,
+    /// `doMobSpawning`.
+    MobSpawning = 2,
+    /// `mobGriefing`.
+    MobGriefing = 3,
+    /// `keepInventory`.
+    KeepInventory = 4,
+    /// `doFireTick`.
+    FireTick = 5,
+    /// `doMobLoot`.
+    MobLoot = 6,
+    /// `doTileDrops`.
+    BlockDrops = 7,
+    /// `doEntityDrops`.
+    EntityDrops = 8,
+    /// `naturalRegeneration`.
+    NaturalRegeneration = 9,
+    /// `disableRaids`.
+    DisableRaids = 10,
+    /// `announceAdvancements`.
+    AnnounceAdvancements = 11,
+    /// `showDeathMessages`.
+    ShowDeathMessages = 12,
+    /// `doInsomnia`.
+    Insomnia = 13,
+    /// `doImmediateRespawn`.
+    ImmediateRespawn = 14,
+    /// `doPatrolSpawning`.
+    PatrolSpawning = 15,
+    /// `doTraderSpawning`.
+    TraderSpawning = 16,
+    /// `doWardenSpawning`.
+    WardenSpawning = 17,
+}
+
 /// Immutable, detached block identity and state value returned by [`block_states`].
 #[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -279,6 +322,30 @@ struct DaylightCycleSnapshot {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
+struct WorldGameRuleQuery {
+    world: WorldHandle,
+    rule_id: u32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct WorldGameRuleMutation {
+    world: WorldHandle,
+    rule_id: u32,
+    enabled: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct WorldGameRuleSnapshot {
+    enabled: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
 struct WorldRaycastQuery {
     world: WorldHandle,
     start_x: f64,
@@ -331,6 +398,8 @@ extern "C" {
     #[link_name = "daylight_cycle_enabled"]
     fn imported_daylight_cycle_enabled(handle: i32, length: i32, output: i32, capacity: i32)
         -> i32;
+    #[link_name = "game_rule"]
+    fn imported_game_rule(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "biome_at"]
     fn imported_biome_at(
         handle: i32,
@@ -386,6 +455,8 @@ extern "C" {
     fn imported_set_time(handle: i32, length: i32, day_time_low: i32, day_time_high: i32) -> i32;
     #[link_name = "set_daylight_cycle_enabled"]
     fn imported_set_daylight_cycle_enabled(handle: i32, length: i32, enabled: i32) -> i32;
+    #[link_name = "set_game_rule"]
+    fn imported_set_game_rule(query: i32, query_length: i32) -> i32;
     #[link_name = "block_states"]
     fn imported_block_states(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "block_properties"]
@@ -556,6 +627,37 @@ pub fn daylight_cycle_enabled(handle: WorldHandle) -> SjmlResult<bool> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads one allowlisted boolean vanilla gamerule for a loaded logical-server world.
+///
+/// Requires `world.read`. The read is server-thread-only, applies to the selected dimension, and
+/// never loads a world or chunk. The [`WorldGameRule`] enum intentionally excludes integer rules.
+pub fn game_rule(handle: WorldHandle, rule: WorldGameRule) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldGameRuleQuery {
+            world: handle,
+            rule_id: rule as u32,
+        })?;
+        let snapshot: WorldGameRuleSnapshot = read_output(5, |output, capacity| {
+            // SAFETY: the stable request and fixed-size destination stay live for the sync host call.
+            unsafe {
+                imported_game_rule(
+                    query.as_ptr() as usize as u32 as i32,
+                    query.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        Ok(snapshot.enabled)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, rule);
         Err(unsupported_target())
     }
 }
@@ -1008,6 +1110,42 @@ pub fn set_daylight_cycle_enabled(handle: WorldHandle, enabled: bool) -> SjmlRes
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (handle, enabled);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets one allowlisted boolean vanilla gamerule on a loaded world.
+///
+/// Requires both `world.read` (to validate the handle) and `world.write`. The update runs on the
+/// logical server thread and uses Minecraft's persisted `GameRules` state. It never loads a world
+/// or chunk. Integer gamerules are intentionally outside this API.
+pub fn set_game_rule(handle: WorldHandle, rule: WorldGameRule, enabled: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mutation = to_bytes(&WorldGameRuleMutation {
+            world: handle,
+            rule_id: rule as u32,
+            enabled,
+        })?;
+        // SAFETY: the complete stable mutation stays live for the synchronous host call.
+        let status = unsafe {
+            imported_set_game_rule(
+                mutation.as_ptr() as usize as u32 as i32,
+                mutation.len() as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the world gamerule update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, rule, enabled);
         Err(unsupported_target())
     }
 }
@@ -1642,13 +1780,14 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        block_properties, collides, day_time, daylight_cycle_enabled, play_sound, raycast, set_block,
-        set_daylight_cycle_enabled, set_time, spawn_entity, spawn_particle, Aabb, BlockStateBatch,
-        BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateQuery,
-        BlockStateSnapshot, DaylightCycleSnapshot, RaycastBlockMode,
+        block_properties, collides, day_time, daylight_cycle_enabled, play_sound, raycast,
+        set_block, set_daylight_cycle_enabled, set_time, spawn_entity, spawn_particle, Aabb,
+        BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateBatch,
+        BlockStateQuery, BlockStateSnapshot, DaylightCycleSnapshot, RaycastBlockMode,
         RaycastFluidMode, RaycastHit, RaycastPoint, WeatherCondition, WeatherSnapshot,
-        WorldCollisionQuery, WorldEntitySpawnRequest, WorldRaycastQuery,
-        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_DAY_TIME_TICKS,
+        WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation,
+        WorldGameRuleQuery, WorldGameRuleSnapshot, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
+        MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_DAY_TIME_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -1676,6 +1815,40 @@ mod tests {
             WeatherSnapshot::decode(&mut crate::Decoder::new(&encoded).unwrap()).unwrap(),
             snapshot
         );
+    }
+
+    #[test]
+    fn boolean_game_rule_request_and_snapshot_match_host_wire_schema() {
+        assert_eq!(WorldGameRule::DaylightCycle as u32, 0);
+        assert_eq!(WorldGameRule::WeatherCycle as u32, 1);
+        assert_eq!(WorldGameRule::KeepInventory as u32, 4);
+        assert_eq!(WorldGameRule::WardenSpawning as u32, 17);
+
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let query = crate::to_bytes(&WorldGameRuleQuery {
+            world,
+            rule_id: WorldGameRule::KeepInventory as u32,
+        })
+        .unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&4_u32.to_le_bytes());
+        assert_eq!(query, expected);
+        assert_eq!(query.len(), 32);
+
+        let mutation = crate::to_bytes(&WorldGameRuleMutation {
+            world,
+            rule_id: WorldGameRule::KeepInventory as u32,
+            enabled: false,
+        })
+        .unwrap();
+        assert_eq!(mutation.len(), 33);
+        assert_eq!(mutation.last(), Some(&0));
+        let snapshot = crate::from_bytes::<WorldGameRuleSnapshot>(&[1, 0, 0, 0, 1]).unwrap();
+        assert!(snapshot.enabled);
     }
 
     #[test]
@@ -2157,8 +2330,14 @@ mod tests {
         );
         assert_eq!(
             super::validate_block_properties(Some(vec![
-                BlockProperty { name: "axis".to_owned(), value: "x".to_owned() },
-                BlockProperty { name: "axis".to_owned(), value: "y".to_owned() },
+                BlockProperty {
+                    name: "axis".to_owned(),
+                    value: "x".to_owned()
+                },
+                BlockProperty {
+                    name: "axis".to_owned(),
+                    value: "y".to_owned()
+                },
             ]))
             .unwrap_err()
             .code(),
@@ -2182,9 +2361,16 @@ mod tests {
     fn block_property_queries_reject_out_of_range_coordinates_before_host_access() {
         let world = WorldHandle::new(1, 2, 3, 4).unwrap();
         assert_eq!(
-            block_properties(world, BlockPos { x: i32::MIN, y: 0, z: 0 })
-                .unwrap_err()
-                .code(),
+            block_properties(
+                world,
+                BlockPos {
+                    x: i32::MIN,
+                    y: 0,
+                    z: 0
+                }
+            )
+            .unwrap_err()
+            .code(),
             ErrorCode::InvalidArgument
         );
     }

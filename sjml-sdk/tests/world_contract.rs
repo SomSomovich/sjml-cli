@@ -41,6 +41,18 @@ fn native_world_api_reports_unsupported_imports() {
         world::daylight_cycle_enabled(handle).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );
+    assert_eq!(
+        world::game_rule(handle, world::WorldGameRule::KeepInventory)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        world::set_game_rule(handle, world::WorldGameRule::KeepInventory, true)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
     for enabled in [false, true] {
         assert_eq!(
             world::set_daylight_cycle_enabled(handle, enabled)

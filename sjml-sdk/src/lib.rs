@@ -93,11 +93,12 @@ compile_error!("SJML guest modules require wasm32-unknown-unknown; WASI targets 
 pub mod abi;
 pub mod batch;
 pub mod block_entity;
+pub mod chat_messages;
+pub mod client_audio;
 pub mod client_chat;
 pub mod client_input;
-pub mod chat_messages;
+pub mod client_keybindings;
 pub mod client_notifications;
-pub mod client_audio;
 pub mod entity;
 pub mod entity_attributes;
 pub mod entity_data;
@@ -129,16 +130,21 @@ pub use abi::{
 };
 pub use batch::{Batch, BatchValue, CallResult};
 pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
+pub use chat_messages::{
+    ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
+};
+pub use client_audio::SoundCategory;
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{
     ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle, MouseScrollEvent,
     MouseScrollSubscriptionHandle,
 };
-pub use client_notifications::NotificationKind;
-pub use client_audio::SoundCategory;
-pub use chat_messages::{
-    ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
+pub use client_keybindings::{
+    Context as KeybindingContext, Key as KeybindingKey, KeybindingDefinition,
+    KeybindingSubscriptionHandle, Modifier as KeybindingModifier,
+    MAX_CLIENT_KEYBINDING_SUBSCRIPTIONS,
 };
+pub use client_notifications::NotificationKind;
 pub use entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
@@ -157,45 +163,45 @@ pub use network::{
     NetworkSubscriptionHandle, Player as NetworkPlayer, Uuid,
 };
 pub use player::{
-    MAX_PLAYER_VELOCITY_COMPONENT, PlayerAbilities, PlayerEquipment, PlayerEquipmentStack,
-    PlayerGameMode, PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
+    PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
+    PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_VELOCITY_COMPONENT,
 };
 pub use player_inventory::MAX_PLAYER_INVENTORY_SLOTS;
 pub use recipe::{
-    CraftingSlot, RECIPE_CALLBACK_SCHEMA_VERSION, RecipeEvaluation, RecipeMatchInput,
+    CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
 };
 pub use registry::{
-    BlockEntityModelDefinition, EntityModelDefinition, MAX_BOUND_MODEL_CUBOIDS, ModelAnimation,
-    ModelAnimationAxis, ModelCuboid,
+    BlockEntityModelDefinition, EntityModelDefinition, ModelAnimation, ModelAnimationAxis,
+    ModelCuboid, MAX_BOUND_MODEL_CUBOIDS,
 };
 pub use render::{
-    MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS, MAX_WORLD_MODEL_VERTICES, RenderContext,
-    RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle, WorldModelBuilder,
-    WorldRenderFrame,
+    RenderContext, RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle,
+    WorldModelBuilder, WorldRenderFrame, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
+    MAX_WORLD_MODEL_VERTICES,
 };
-pub use screen_input::{ScreenInputEvent, ScreenInputSubscriptionHandle};
+pub use screen_input::{ScreenInputEvent, ScreenInputSubscriptionHandle, MAX_SCREEN_SCROLL_DELTA};
 pub use serialization::{
-    Decoder, Encoder, MAX_COLLECTION_ITEMS, MAX_PAYLOAD_BYTES, MAX_STRING_BYTES, StableDecode,
-    StableEncode, from_bytes, to_bytes,
+    from_bytes, to_bytes, Decoder, Encoder, StableDecode, StableEncode, MAX_COLLECTION_ITEMS,
+    MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
 };
-pub use sjml_macros::{StableDecode, StableEncode};
 pub use sjml_macros::{
     command, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe, service,
 };
+pub use sjml_macros::{StableDecode, StableEncode};
 pub use storage::{
     MigrationFailure, MigrationMode, MigrationReport, StableRecord, StorageError, StorageResult,
     StorageScope,
 };
 pub use task::GuestTaskId;
 pub use widgets::{
-    Button, MAX_TEXT_FIELD_BYTES, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect,
+    Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
 };
 pub use world::{
-    BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot,
+    BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot, WorldGameRule,
     MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BORDER_CENTER,
-    MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
-    MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS,
-    MAX_WORLD_BORDER_WARNING_BLOCKS, MAX_WORLD_BORDER_WARNING_SECONDS,
+    MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
+    MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
+    MAX_WORLD_BORDER_WARNING_SECONDS,
 };
 
 /// Common imports for an SJML guest module.
@@ -207,21 +213,27 @@ pub mod prelude {
     };
     pub use crate::batch::{self, Batch, BatchValue, CallResult};
     pub use crate::block_entity::{self, BlockEntity, BlockEntitySnapshot, NbtValue};
-    pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
-    pub use crate::client_input;
-    pub use crate::client_input::{
-        ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle, MouseScrollEvent,
-        MouseScrollSubscriptionHandle, MAX_CLIENT_INPUT_SUBSCRIPTIONS, subscribe_scroll,
-        unsubscribe_scroll,
-    };
     pub use crate::chat_messages;
     pub use crate::chat_messages::{
         ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
     };
-    pub use crate::client_notifications;
-    pub use crate::client_notifications::NotificationKind;
     pub use crate::client_audio;
     pub use crate::client_audio::SoundCategory;
+    pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
+    pub use crate::client_input;
+    pub use crate::client_input::{
+        subscribe_scroll, unsubscribe_scroll, ClientInputAction, ClientInputEvent,
+        ClientInputSubscriptionHandle, MouseScrollEvent, MouseScrollSubscriptionHandle,
+        MAX_CLIENT_INPUT_SUBSCRIPTIONS,
+    };
+    pub use crate::client_keybindings;
+    pub use crate::client_keybindings::{
+        Context as KeybindingContext, Key as KeybindingKey, KeybindingDefinition,
+        KeybindingSubscriptionHandle, Modifier as KeybindingModifier,
+        MAX_CLIENT_KEYBINDING_SUBSCRIPTIONS,
+    };
+    pub use crate::client_notifications;
+    pub use crate::client_notifications::NotificationKind;
     pub use crate::entity;
     pub use crate::entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
     pub use crate::entity_attributes;
@@ -233,11 +245,11 @@ pub mod prelude {
     pub use crate::error::{ErrorCode, SjmlError, SjmlResult};
     pub use crate::events;
     pub use crate::events::{
-        BlockBreak, BlockPlace, DEFAULT_SERVER_TICK_INTERVAL, EffectTickEvent, EntityDamaged,
-        EntityDeath, EntitySpawned, EventPriority, InventoryChanged, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL, PlayerInteracted, PlayerJoined,
-        PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle, subscribe,
-        subscribe_with_interval, unsubscribe,
+        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
+        EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
+        PlayerInteracted, PlayerJoined, PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick,
+        WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -255,75 +267,73 @@ pub mod prelude {
     pub use crate::menu::{MenuAction, MenuDefinition, MenuItem};
     pub use crate::network;
     pub use crate::network::{
-        ChannelRef, LogicalSide, NetworkContext, NetworkContextSnapshot, NetworkDirection,
-        NetworkSubscriptionHandle, Player, Uuid, broadcast, send_to, send_to_server,
-        subscribe as subscribe_network, unsubscribe as unsubscribe_network,
+        broadcast, send_to, send_to_server, subscribe as subscribe_network,
+        unsubscribe as unsubscribe_network, ChannelRef, LogicalSide, NetworkContext,
+        NetworkContextSnapshot, NetworkDirection, NetworkSubscriptionHandle, Player, Uuid,
     };
     pub use crate::player;
     pub use crate::player::{
-        MAX_PLAYER_VELOCITY_COMPONENT, PlayerAbilities, PlayerEquipment, PlayerEquipmentStack,
-        PlayerGameMode, PlayerMotion, PlayerSnapshot, PlayerVelocity, PlayerVitals,
+        PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
+        PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_VELOCITY_COMPONENT,
     };
     pub use crate::player_inventory;
     pub use crate::player_inventory::MAX_PLAYER_INVENTORY_SLOTS;
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
     pub use crate::registry::{
-        AttributeModifierOperation, BlockDefinition, BlockEntityModelDefinition,
-        CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
-        EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
-        FluidVisualDefinition, ItemDefinition, MAX_BOUND_MODEL_CUBOIDS, ModelAnimation,
-        ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey,
-        ShapelessRecipeDefinition, SmithingTransformRecipeDefinition, StringComponentDefinition,
-        add_to_creative_tab,
-        custom_registry_value, register_attribute_effect, register_block, register_block_entity,
-        register_block_entity_model, register_cooking_recipe, register_creative_tab,
-        register_custom_registry, register_custom_value, register_effect_tick, register_entity,
-        register_entity_ai_goal, register_entity_model, register_fluid,
-        register_fluid_with_visuals, register_item, register_particle, register_recipe_serializer,
-        register_shaped_recipe, register_shapeless_recipe, register_smithing_transform_recipe,
-        register_sound,
-        register_string_component, set_entity_attribute, set_item_string_component,
+        add_to_creative_tab, custom_registry_value, register_attribute_effect, register_block,
+        register_block_entity, register_block_entity_model, register_cooking_recipe,
+        register_creative_tab, register_custom_registry, register_custom_value,
+        register_effect_tick, register_entity, register_entity_ai_goal, register_entity_model,
+        register_fluid, register_fluid_with_visuals, register_item, register_particle,
+        register_recipe_serializer, register_shaped_recipe, register_shapeless_recipe,
+        register_smithing_transform_recipe, register_sound, register_string_component,
+        set_entity_attribute, set_item_string_component, AttributeModifierOperation,
+        BlockDefinition, BlockEntityModelDefinition, CookingRecipeDefinition, CookingRecipeKind,
+        CreativeTabDefinition, EffectCategory, EntityAiGoal, EntityAttribute, EntityDefinition,
+        EntityModelDefinition, FluidDefinition, FluidVisualDefinition, ItemDefinition,
+        ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition,
+        ShapedRecipeKey, ShapelessRecipeDefinition, SmithingTransformRecipeDefinition,
+        StringComponentDefinition, MAX_BOUND_MODEL_CUBOIDS,
     };
     pub use crate::render;
     pub use crate::render::{
-        MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS, MAX_WORLD_MODEL_VERTICES,
         RenderContext, RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle,
-        WorldModelBuilder, WorldRenderFrame,
+        WorldModelBuilder, WorldRenderFrame, MAX_RENDER_RESOURCE_PATH_BYTES, MAX_WORLD_MODEL_QUADS,
+        MAX_WORLD_MODEL_VERTICES,
     };
     pub use crate::screen_input;
     pub use crate::screen_input::{
-        MAX_SCREEN_INPUT_COORDINATE, MAX_SCREEN_INPUT_SUBSCRIPTIONS, ScreenInputEvent,
-        ScreenInputSubscriptionHandle,
+        ScreenInputEvent, ScreenInputSubscriptionHandle, MAX_SCREEN_INPUT_COORDINATE,
+        MAX_SCREEN_INPUT_SUBSCRIPTIONS, MAX_SCREEN_SCROLL_DELTA,
     };
     pub use crate::serialization::{
-        MAX_COLLECTION_ITEMS, MAX_PAYLOAD_BYTES, MAX_STRING_BYTES, from_bytes, to_bytes,
+        from_bytes, to_bytes, MAX_COLLECTION_ITEMS, MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
     };
     pub use crate::storage;
     pub use crate::storage::{
-        MigrationFailure, MigrationMode, MigrationReport, StableRecord, StorageError,
-        StorageResult, StorageScope, clear_migration_mode, migrate_record, migrate_scope,
-        register_migration, register_migration_with_mode, set_migration_mode,
+        clear_migration_mode, migrate_record, migrate_scope, register_migration,
+        register_migration_with_mode, set_migration_mode, MigrationFailure, MigrationMode,
+        MigrationReport, StableRecord, StorageError, StorageResult, StorageScope,
     };
-    pub use crate::task::{self, GuestTaskId, spawn_compute};
+    pub use crate::task::{self, spawn_compute, GuestTaskId};
     pub use crate::widgets;
     pub use crate::widgets::{
-        Button, MAX_TEXT_FIELD_BYTES, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect,
+        Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
     };
     pub use crate::world;
     pub use crate::world::{
-        BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot,
-        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BORDER_CENTER,
-        MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
-        MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS,
+        BlockStateSnapshot, HeightmapType, LightSnapshot, RaycastBlockMode, RaycastFluidMode,
+        RaycastHit, RaycastPoint, WorldBorderSnapshot, WorldGameRule, MAX_WORLD_BLOCK_COORDINATE,
+        MAX_WORLD_BLOCK_STATES, MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER,
+        MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS,
         MAX_WORLD_BORDER_WARNING_BLOCKS, MAX_WORLD_BORDER_WARNING_SECONDS,
-        MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE, MAX_WORLD_RAYCAST_RESPONSE_BYTES,
-        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
+        MAX_WORLD_RAYCAST_RESPONSE_BYTES, MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
     };
-    pub use crate::{StableDecode, StableEncode};
     pub use crate::{
         command, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe, service,
     };
+    pub use crate::{StableDecode, StableEncode};
 }
 
 /// Internal helpers referenced by macro expansions.

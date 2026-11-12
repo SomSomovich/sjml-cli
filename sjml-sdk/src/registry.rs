@@ -2392,36 +2392,26 @@ mod tests {
             .add_cuboid([-0.5, 0.0, -0.5], [0.5, 1.0, 0.5], 0xFFFF_0080)
             .unwrap();
         assert_eq!(entity.cuboid_count(), 1);
-        assert!(
-            entity
-                .add_cuboid([0.0; 3], [f32::INFINITY, 1.0, 1.0], 0)
-                .is_err()
-        );
-        assert!(
-            entity
-                .add_cuboid([0.5, 0.0, 0.0], [-0.5, 1.0, 1.0], 0)
-                .is_err()
-        );
-        assert!(
-            entity
-                .add_cuboid([-4.1, 0.0, 0.0], [0.0, 1.0, 1.0], 0)
-                .is_err()
-        );
+        assert!(entity
+            .add_cuboid([0.0; 3], [f32::INFINITY, 1.0, 1.0], 0)
+            .is_err());
+        assert!(entity
+            .add_cuboid([0.5, 0.0, 0.0], [-0.5, 1.0, 1.0], 0)
+            .is_err());
+        assert!(entity
+            .add_cuboid([-4.1, 0.0, 0.0], [0.0, 1.0, 1.0], 0)
+            .is_err());
 
         let mut block_entity = BlockEntityModelDefinition::new();
         block_entity
             .add_cuboid([0.0; 3], [1.0; 3], 0xFF20_C0FF)
             .unwrap();
-        assert!(
-            block_entity
-                .add_cuboid([-0.01, 0.0, 0.0], [0.5; 3], 0)
-                .is_err()
-        );
-        assert!(
-            block_entity
-                .add_cuboid([0.0; 3], [1.01, 1.0, 1.0], 0)
-                .is_err()
-        );
+        assert!(block_entity
+            .add_cuboid([-0.01, 0.0, 0.0], [0.5; 3], 0)
+            .is_err());
+        assert!(block_entity
+            .add_cuboid([0.0; 3], [1.01, 1.0, 1.0], 0)
+            .is_err());
 
         let mut full = EntityModelDefinition::new();
         for _ in 0..MAX_BOUND_MODEL_CUBOIDS {
@@ -2546,17 +2536,15 @@ mod tests {
         assert_eq!(model.cuboid_animations, [None, Some(child)]);
         assert!(model.set_cuboid_animation(2, child).is_err());
         assert!(model.clear_cuboid_animation(2).is_err());
-        assert!(
-            model
-                .set_cuboid_animation(
-                    0,
-                    ModelAnimation {
-                        pivot: [4.01, 0.0, 0.0],
-                        ..child
-                    }
-                )
-                .is_err()
-        );
+        assert!(model
+            .set_cuboid_animation(
+                0,
+                ModelAnimation {
+                    pivot: [4.01, 0.0, 0.0],
+                    ..child
+                }
+            )
+            .is_err());
         model.clear_cuboid_animation(1).unwrap();
         assert_eq!(model.cuboid_animations, [None, None]);
 
@@ -2564,17 +2552,15 @@ mod tests {
         block_model
             .add_cuboid([0.0, 0.0, 0.0], [0.5, 0.5, 0.5], 0)
             .unwrap();
-        assert!(
-            block_model
-                .set_cuboid_animation(
-                    0,
-                    ModelAnimation {
-                        pivot: [-0.01, 0.5, 0.5],
-                        ..child
-                    }
-                )
-                .is_err()
-        );
+        assert!(block_model
+            .set_cuboid_animation(
+                0,
+                ModelAnimation {
+                    pivot: [-0.01, 0.5, 0.5],
+                    ..child
+                }
+            )
+            .is_err());
     }
 
     #[test]
@@ -2583,27 +2569,21 @@ mod tests {
             ModelAnimation::sine_rotation(ModelAnimationAxis::X, [0.0, 0.5, 0.0], 12.0, 20, 19)
                 .unwrap();
         assert!(EntityModelDefinition::new().set_animation(valid).is_ok());
-        assert!(
-            BlockEntityModelDefinition::new()
-                .set_animation(valid)
-                .is_ok()
-        );
-        assert!(
-            BlockEntityModelDefinition::new()
-                .set_animation(ModelAnimation {
-                    pivot: [-0.01, 0.5, 0.5],
-                    ..valid
-                })
-                .is_err()
-        );
-        assert!(
-            EntityModelDefinition::new()
-                .set_animation(ModelAnimation {
-                    pivot: [4.01, 0.0, 0.0],
-                    ..valid
-                })
-                .is_err()
-        );
+        assert!(BlockEntityModelDefinition::new()
+            .set_animation(valid)
+            .is_ok());
+        assert!(BlockEntityModelDefinition::new()
+            .set_animation(ModelAnimation {
+                pivot: [-0.01, 0.5, 0.5],
+                ..valid
+            })
+            .is_err());
+        assert!(EntityModelDefinition::new()
+            .set_animation(ModelAnimation {
+                pivot: [4.01, 0.0, 0.0],
+                ..valid
+            })
+            .is_err());
         for invalid in [
             ModelAnimation {
                 amplitude_degrees: f32::NAN,
@@ -3302,8 +3282,14 @@ mod tests {
             ErrorCode::UnknownErrorCode,
         );
         for definition in [
-            SmithingTransformRecipeDefinition { output_count: 0, ..valid.clone() },
-            SmithingTransformRecipeDefinition { output_count: 65, ..valid.clone() },
+            SmithingTransformRecipeDefinition {
+                output_count: 0,
+                ..valid.clone()
+            },
+            SmithingTransformRecipeDefinition {
+                output_count: 65,
+                ..valid.clone()
+            },
             SmithingTransformRecipeDefinition {
                 template: RecipeIngredient::tag("invalid tag"),
                 ..valid.clone()

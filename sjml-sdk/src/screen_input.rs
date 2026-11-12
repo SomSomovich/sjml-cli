@@ -1,18 +1,20 @@
-//! Bounded active-screen mouse, keyboard, and character callbacks for client guest modules.
+//! Bounded active-screen mouse, wheel, keyboard, and character callbacks for client guest modules.
 
-#[cfg(target_arch = "wasm32")]
-use crate::StableDecode;
 use crate::abi::EventSubscriptionHandle;
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
-use crate::{ErrorCode, SjmlError, SjmlResult};
+#[cfg(target_arch = "wasm32")]
+use crate::StableDecode;
 #[cfg(target_arch = "wasm32")]
 use crate::{from_bytes, to_bytes};
+use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// Maximum number of active-screen input callbacks owned by one guest module.
 pub const MAX_SCREEN_INPUT_SUBSCRIPTIONS: usize = 256;
 /// Maximum absolute scaled GUI coordinate accepted in an input event.
 pub const MAX_SCREEN_INPUT_COORDINATE: f32 = 1_048_576.0;
+/// Maximum absolute axis delta accepted for active-screen mouse-wheel input.
+pub const MAX_SCREEN_SCROLL_DELTA: f64 = 64.0;
 #[cfg(target_arch = "wasm32")]
 const SCREEN_INPUT_SCHEMA_VERSION: u32 = 1;
 #[cfg(target_arch = "wasm32")]
@@ -43,6 +45,13 @@ pub enum ScreenInputEvent {
     /// scalar is delivered as a high-surrogate and low-surrogate pair; use the `TextField` widget
     /// to combine and edit those units safely.
     CharacterTyped { code_unit: u16, modifiers: u8 },
+    /// Fractional mouse-wheel movement over the active screen, in scaled GUI units.
+    MouseScrolled {
+        mouse_x: f32,
+        mouse_y: f32,
+        delta_x: f64,
+        delta_y: f64,
+    },
 }
 
 impl ScreenInputEvent {
@@ -73,6 +82,25 @@ impl ScreenInputEvent {
                 validate_modifiers(modifiers)?;
             }
             Self::CharacterTyped { modifiers, .. } => validate_modifiers(modifiers)?,
+            Self::MouseScrolled {
+                mouse_x,
+                mouse_y,
+                delta_x,
+                delta_y,
+            } => {
+                validate_coordinate(mouse_x)?;
+                validate_coordinate(mouse_y)?;
+                if !delta_x.is_finite()
+                    || !delta_y.is_finite()
+                    || delta_x.abs() > MAX_SCREEN_SCROLL_DELTA
+                    || delta_y.abs() > MAX_SCREEN_SCROLL_DELTA
+                    || (delta_x == 0.0 && delta_y == 0.0)
+                {
+                    return Err(invalid(
+                        "screen scroll deltas must be finite, bounded, and non-zero",
+                    ));
+                }
+            }
         }
         Ok(self)
     }
@@ -147,7 +175,7 @@ thread_local! {
     static DISPATCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Subscribes a typed callback. Return `true` to consume the mouse, key, or character event.
+/// Subscribes a typed callback. Return `true` to consume the mouse, key, character, or scroll event.
 pub fn subscribe<F>(callback: F) -> SjmlResult<ScreenInputSubscriptionHandle>
 where
     F: FnMut(ScreenInputEvent) -> SjmlResult<bool> + 'static,
@@ -277,6 +305,12 @@ impl StableDecode for ScreenInputDelivery {
                 code_unit: decoder.read_u16()?,
                 modifiers: decoder.read_u8()?,
             },
+            3 => ScreenInputEvent::MouseScrolled {
+                mouse_x: decoder.read_f32()?,
+                mouse_y: decoder.read_f32()?,
+                delta_x: decoder.read_f64()?,
+                delta_y: decoder.read_f64()?,
+            },
             _ => return Err(invalid("unknown screen input event type")),
         }
         .validate()?;
@@ -351,7 +385,7 @@ fn unsupported() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_SCREEN_INPUT_COORDINATE, ScreenInputEvent};
+    use super::{ScreenInputEvent, MAX_SCREEN_INPUT_COORDINATE, MAX_SCREEN_SCROLL_DELTA};
 
     #[test]
     fn validates_bounded_click_and_key_events() {
@@ -373,48 +407,65 @@ mod tests {
 
     #[test]
     fn rejects_non_finite_coordinates_and_unknown_modifiers() {
-        assert!(
-            ScreenInputEvent::MouseButtonPressed {
-                mouse_x: f32::NAN,
-                mouse_y: 0.0,
-                button: 0,
-                modifiers: 0,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            ScreenInputEvent::KeyPressed {
-                key_code: 65_536,
-                scan_code: 1,
-                modifiers: 0,
-                repeat: false,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            ScreenInputEvent::KeyPressed {
-                key_code: 1,
-                scan_code: 1,
-                modifiers: 0x40,
-                repeat: false,
-            }
-            .validate()
-            .is_err()
-        );
+        assert!(ScreenInputEvent::MouseButtonPressed {
+            mouse_x: f32::NAN,
+            mouse_y: 0.0,
+            button: 0,
+            modifiers: 0,
+        }
+        .validate()
+        .is_err());
+        assert!(ScreenInputEvent::KeyPressed {
+            key_code: 65_536,
+            scan_code: 1,
+            modifiers: 0,
+            repeat: false,
+        }
+        .validate()
+        .is_err());
+        assert!(ScreenInputEvent::KeyPressed {
+            key_code: 1,
+            scan_code: 1,
+            modifiers: 0x40,
+            repeat: false,
+        }
+        .validate()
+        .is_err());
         let typed = ScreenInputEvent::CharacterTyped {
             code_unit: 0xd83d,
             modifiers: 0x01,
         };
         assert_eq!(typed.validate().unwrap(), typed);
-        assert!(
-            ScreenInputEvent::CharacterTyped {
-                code_unit: b'a' as u16,
-                modifiers: 0x40,
+        assert!(ScreenInputEvent::CharacterTyped {
+            code_unit: b'a' as u16,
+            modifiers: 0x40,
+        }
+        .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn validates_fractional_bounded_screen_scroll_events() {
+        let event = ScreenInputEvent::MouseScrolled {
+            mouse_x: 10.5,
+            mouse_y: 20.0,
+            delta_x: -0.25,
+            delta_y: MAX_SCREEN_SCROLL_DELTA,
+        };
+        assert_eq!(event.validate().unwrap(), event);
+        for (delta_x, delta_y) in [
+            (f64::NAN, 1.0),
+            (0.0, 0.0),
+            (MAX_SCREEN_SCROLL_DELTA + 0.1, 0.0),
+        ] {
+            assert!(ScreenInputEvent::MouseScrolled {
+                mouse_x: 0.0,
+                mouse_y: 0.0,
+                delta_x,
+                delta_y,
             }
             .validate()
-            .is_err()
-        );
+            .is_err());
+        }
     }
 }

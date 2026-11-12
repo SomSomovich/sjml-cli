@@ -6,10 +6,18 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.39.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.40.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.39.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.40.0 adds
+allowlisted boolean world-gamerule reads and writes, bounded generic damage for
+loaded living non-player entities, literal player action-bar messages,
+declarative client keybindings, and opt-in active-screen scroll events. Screen
+scroll delivery requires the new `client.input.screen_scroll` capability so
+older ABI 1.39 guests never receive an unknown callback event tag. These
+features use `world.read`/`world.write`, `entity.read`/`entity.damage`,
+`entity.read`/`player.ui.actionbar`, or `client.input` as documented below.
+ABI 1.39.0 adds
 global client mouse-wheel notifications, read-only player inventory snapshots,
 bounded reads and base-value writes for six vanilla living-entity attributes,
 and loaded block-state property snapshots. These use `client.input`,
@@ -776,8 +784,9 @@ render and OpenGL import tables are maintained in that companion ABI document.
 
 ## Active-screen input imports
 
-Client-screen click and key callbacks use `client.input`, requested separately
-from `client.render`. The `sjml_screen_input_v1` import functions are
+Client-screen click, key, and character callbacks use `client.input`, requested
+separately from `client.render`. Mouse-wheel delivery also requires the
+separate `client.input.screen_scroll` opt-in. The `sjml_screen_input_v1` import functions are
 client-main-thread-only, module-scoped, and recheck the current grant. Static
 registration and dedicated-server module instances fail closed.
 
@@ -795,8 +804,13 @@ repeat `u8` (21 bytes total). The callback result is stable bool `u8`: `1`
 consumes the event, while `0` leaves it available. Coordinates are finite and
 bounded to ±1,048,576; buttons are 0–31; key codes are -1–65,535; scan codes
 are 0–65,535; key modifier bits are limited to the six standard GLFW flags.
-Mouse events report Shift, Control, and Alt. A
-module may hold 256 active input subscriptions.
+Tag `2` is a typed UTF-16 character unit and modifiers `u8` (16 bytes total).
+Tag `3` is a scroll event with cursor X/Y as `f32` and horizontal/vertical
+scroll deltas as `f64` (37 bytes total); this tag is sent only to modules that
+request and receive `client.input.screen_scroll`. Scroll deltas are finite,
+each within ±64, and cannot both be zero; fractional touchpad values are preserved. Mouse
+events report Shift, Control, and Alt. A module may hold 256 active input
+subscriptions. See [active-screen scrolling](SCREEN_INPUT_SCROLL.md).
 
 ## Native client chat imports
 
@@ -937,6 +951,29 @@ the `client.input` permission and 256-subscription per-module limit; static
 registration and dedicated servers fail closed. See
 [mouse-wheel input](CLIENT_INPUT_SCROLL.md).
 
+## Declarative client keybindings
+
+The `sjml_client_keybinding_v1.register` import is available only during the
+module's `mod_register` callback and requires a client-capable module plus
+`client.input`. Its signature is
+`(path_ptr, path_len, key_type, code, modifier, context) -> i32`. It stages a
+bounded named key mapping before NeoForge registry freeze. `key_type` is `0`
+for keyboard and `1` for mouse; keyboard codes are -1 through 65,535 and mouse
+buttons 0 through 31. Modifier values are `0=None`, `1=Shift`, `2=Control`,
+`3=Alt`; context values are `0=InGame`, `1=Gui`, `2=Universal`. Paths are
+lowercase ASCII resource paths of at most 48 bytes, with at most 32 mappings
+per module and 1,024 staged mappings total.
+
+At runtime, `subscribe(callback_id, path_ptr, path_len, handle_out_ptr) -> i32`
+attaches a typed key-down callback to a declared path, and
+`unsubscribe(handle_ptr, handle_len) -> i32` revokes its 24-byte handle. The
+guest callback is `sjml_v1_client_keybinding_dispatch(pointer, length) -> i64`
+with a schema-u32 `1` and callback-ID u64 payload; it returns unit. Up to 128
+subscriptions are allowed per module. NeoForge's Controls screen and conflict
+handling own rebinding. The mapping bridge is loaded only on `Dist.CLIENT`; the
+common static-registration code has no client Minecraft references. See
+[client keybindings](KEYBINDINGS.md).
+
 ## Logical-server worlds
 
 ABI v1 provides the following synchronous `sjml_world_v1` imports. All parameters
@@ -955,6 +992,8 @@ registration binds the signatures but every call during `mod_register` returns
 | `game_time` | `handle_ptr, handle_len, out_ptr` | Little-endian signed i64 |
 | `day_time` | `handle_ptr, handle_len, out_ptr` | Little-endian signed i64 |
 | `daylight_cycle_enabled` | `handle_ptr, handle_len, out_ptr, out_capacity` | Stable bool record: schema-v1 u32, bool u8 |
+| `game_rule` | `query_ptr, query_len, out_ptr, out_capacity` | Read an allowlisted boolean gamerule using a 32-byte schema-v1 query and exact 5-byte response; requires `world.read` |
+| `set_game_rule` | `mutation_ptr, mutation_len` | Set an allowlisted boolean gamerule from a 33-byte schema-v1 mutation; requires `world.read` and `world.write` |
 | `biome_at` | `handle_ptr, handle_len, x, y, z, out_ptr, out_capacity` | Stable `Option<String>`: u32 UTF-8 length (`0` means unavailable), then canonical biome ID bytes |
 | `set_time` | `handle_ptr, handle_len, day_time_low, day_time_high` | Set absolute daylight-cycle time; status only |
 | `set_daylight_cycle_enabled` | `handle_ptr, handle_len, enabled` | Set vanilla `doDaylightCycle`; `enabled` must be 0 or 1 |
@@ -973,6 +1012,14 @@ registration binds the signatures but every call during `mod_register` returns
 | `set_border_size` | `handle_ptr, handle_len, values_ptr, values_len` | Set size immediately or begin bounded transition; status only |
 | `set_border_warnings` | `handle_ptr, handle_len, values_ptr, values_len` | Set warning lead time and distance; status only |
 | `set_border_damage` | `handle_ptr, handle_len, values_ptr, values_len` | Set safe buffer and damage rate; status only |
+
+The gamerule IDs are stable values 0–17 from
+[`WorldGameRule`](../sjml-sdk/src/world.rs), covering the boolean
+vanilla rules listed in [world gamerules](WORLD_GAME_RULES.md).
+Reads and writes apply only to the selected already-loaded dimension; integer
+rules are intentionally excluded. The exact request and response layouts are
+schema `u32(1)`, 24-byte world handle, `u32` rule ID, and strict boolean byte
+for writes.
 
 `handle_len` must be 24. `get` takes raw UTF-8, limited to 65,536 bytes,
 and requires a canonical `namespace:path` (no implicit `minecraft:` namespace).
@@ -1155,6 +1202,7 @@ signatures but calls return `PERMISSION_DENIED`.
 | `set_velocity` | `handle_ptr, handle_len, velocity_ptr, velocity_len` | Set three bounded f64 velocity components from a 28-byte schema-v1 record; status only |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to the current player for that login session; status only |
 | `teleport` | `(handle_ptr: i32, handle_len: i32, destination_ptr: i32, destination_len: i32) -> i32` | Teleport the current player session within its current dimension; status only |
+| `action_bar` | `(handle_ptr: i32, handle_len: i32, text_ptr: i32, text_len: i32) -> i32` | Send literal action-bar text; requires `entity.read` and `player.ui.actionbar` |
 
 `handle_len` must be 24. UUIDs are canonical lowercase UUID text, and
 dimension IDs are canonical `namespace:path`. Each stable string is limited to
@@ -1223,6 +1271,12 @@ accepts only 0 or 1, and cannot enable flight unless the player's existing
 permission flags. The host updates the player's ability packet only after a
 real change. Static registration and client calls fail closed. See
 [player abilities](PLAYER_ABILITIES.md).
+`action_bar` additionally requires the separately requested and granted
+`player.ui.actionbar` capability alongside `entity.read`. Text is literal,
+nonblank, control-free UTF-8 limited to 1,024 bytes and 256 Unicode scalar
+values. Calls are server-only, validate the live player login session and
+server thread, and are limited to ten per module per five seconds. See
+[player action-bar messages](PLAYER_ACTIONBAR.md).
 
 ## Loaded non-player entities
 
@@ -1240,6 +1294,7 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `EntitySnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `entity_type_id`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to a loaded living non-player entity; status only |
 | `discard` | `(handle_ptr: i32, handle_len: i32) -> i32` | Discard one loaded non-player entity and revoke its handle; status only |
+| `damage` | `(handle_ptr: i32, handle_len: i32, amount_bits: i32) -> i32` | Apply bounded generic damage to a loaded living non-player entity; requires `entity.read` and `entity.damage` |
 
 `handle_len` must be 24. `uuid` is canonical lowercase UUID text;
 `entity_type_id` and `dimension_id` are canonical `namespace:path` IDs. Each
@@ -1253,6 +1308,11 @@ most 256 bytes. Duration is 1–72,000 ticks and amplifier is 0–255. The host
 revalidates the handle and resolves the effect from the active registry on the
 owning server thread. Non-living targets and unknown IDs return
 `INVALID_ARGUMENT`; this operation cannot target players.
+`damage` accepts a finite amount in `(0, 64]` encoded as raw `f32` bits. It
+uses Minecraft's generic damage source and normal `LivingEntity.hurt` path;
+the guest cannot choose an attacker or damage type, and vanilla mitigation
+and cancellation remain in effect. See
+[generic entity damage](ENTITY_DAMAGE.md).
 
 Each module owns a 1,024-live-handle quota. Enumeration returns loaded
 non-player entities from every loaded server dimension, including modded

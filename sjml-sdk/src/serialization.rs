@@ -469,7 +469,7 @@ impl StableDecode for SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Decoder, MAX_COLLECTION_ITEMS, StableDecode};
+    use super::{Decoder, StableDecode, MAX_COLLECTION_ITEMS};
     use crate::{ErrorCode, SjmlError, SjmlResult};
     use std::sync::atomic::{AtomicBool, Ordering};
 

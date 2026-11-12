@@ -4,7 +4,7 @@
 //! only includes imports whose adapter opted into batching; every imported operation still runs
 //! its ordinary capability, owner, context, and thread checks.
 
-use crate::{ErrorCode, MAX_PAYLOAD_BYTES, SjmlError, SjmlResult};
+use crate::{ErrorCode, SjmlError, SjmlResult, MAX_PAYLOAD_BYTES};
 
 const REQUEST_SCHEMA: u32 = 1;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -380,7 +380,7 @@ extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::{Batch, BatchValue, Call, CallResult, decode_response, encode_request};
+    use super::{decode_response, encode_request, Batch, BatchValue, Call, CallResult};
     use crate::ErrorCode;
 
     #[test]

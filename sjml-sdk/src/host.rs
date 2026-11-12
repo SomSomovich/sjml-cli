@@ -1,4 +1,4 @@
-use crate::{ErrorCode, MAX_STRING_BYTES, SjmlError, SjmlResult};
+use crate::{ErrorCode, SjmlError, SjmlResult, MAX_STRING_BYTES};
 
 /// Stable log level values passed to the `sjml.log` host import.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
