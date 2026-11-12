@@ -159,6 +159,14 @@ other external closure sends no callback. The form callback must be exported bef
 is called; otherwise the host returns `INVALID_ARGUMENT`. Neither callback requires
 `events::subscribe`.
 
+## Body scrolling
+
+If the body text is taller than its visible area, the mouse wheel scrolls only that body viewport.
+The scroll offset is clamped to the available text range. Scrolling is local screen behavior: it
+does not invoke module callbacks or send network traffic. Wheel input is not consumed over text
+fields, buttons, or outside the body viewport, so those controls keep their normal input behavior.
+Visible layout and wheel handling still need verification in a display-backed Minecraft client.
+
 ## Bounds
 
 Each screen has a 1–64 byte ID, a title of at most 128 UTF-8 bytes, up to six body lines of at most

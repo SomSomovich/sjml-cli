@@ -1247,6 +1247,12 @@ field values. Escape and external closure send no callback. The form callback
 must be exported before the form is opened; it is not routed via
 `events.subscribe`.
 
+If the body exceeds its visible viewport, the client screen clamps wheel
+scrolling to the available body text. This is local UI behavior and generates
+no callback or network traffic. The screen does not consume wheel input over
+form fields, buttons, or outside the body viewport. The visual result and live
+wheel behavior still require display-backed client verification.
+
 ## Client toast notifications
 
 ABI 1.37.0 adds `sjml_client_ui_v1.notify(title_ptr, title_len, body_ptr,

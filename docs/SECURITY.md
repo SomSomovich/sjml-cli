@@ -69,6 +69,9 @@ limits. The host rejects control characters and returns values only to the
 owning client module after a button click; it does not send form values to the
 server. A module must explicitly use a separate authorized networking API to
 transmit any value elsewhere.
+The body viewport's wheel scrolling is local-only and clamped; it produces no
+callback or network traffic. Wheel input over form fields, buttons, or outside
+the body viewport is left for the active control or Minecraft to handle.
 
 Task groups bound the number of queued and running operations per module and
 bound each requested timeout. A timeout completes the operation with a timeout

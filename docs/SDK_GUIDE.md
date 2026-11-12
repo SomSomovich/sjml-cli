@@ -41,8 +41,11 @@ screen and dispatch `ClientScreenAction { screen_id, button_id }` through
 dispatched directly to the owning module without `events::subscribe`. Form
 screens can use `open_form` with up to four bounded text fields and receive
 their values in `ClientScreenFormSubmit` through `client.screen.form_submit`.
-See
-[interactive client screens](CLIENT_SCREEN.md) for a complete command-driven example.
+Long bodies scroll locally under the mouse wheel when the pointer is in the
+body viewport; this emits no callback or network traffic. Wheel input over
+fields, buttons, and outside the viewport is not consumed.
+See [interactive client screens](CLIENT_SCREEN.md) for a complete command-driven
+example.
 
 SDK 0.43.0 includes `client_chat::{subscribe, layout, set_layout, theme, set_theme,
 unsubscribe}` with typed `ChatLayout`, `ChatLayoutHandle`, `ChatScreenEvent`,
