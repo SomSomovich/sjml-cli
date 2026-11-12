@@ -13,6 +13,13 @@ pub const MAX_INVENTORY_SLOTS: usize = 4096;
 pub const MAX_STRING_COMPONENT_BYTES: usize = 4096;
 /// Maximum UTF-8 size for a module-local string component path.
 pub const MAX_STRING_COMPONENT_PATH_BYTES: usize = 256;
+/// Maximum plain-text bytes returned for an item's custom name.
+pub const MAX_CUSTOM_ITEM_NAME_BYTES: usize = 1024;
+/// Maximum UTF-8 bytes returned for one item registry ID.
+pub const MAX_ITEM_ID_BYTES: usize = 256;
+/// Maximum encoded bytes returned for one optional item stack snapshot.
+pub const MAX_ITEM_STACK_SNAPSHOT_BYTES: usize =
+    1 + 4 + 4 + MAX_ITEM_ID_BYTES + 3 * 4 + 2 * (1 + 4) + 1 + 4 + MAX_CUSTOM_ITEM_NAME_BYTES;
 /// Maximum item count one [`transfer`] call may move.
 pub const MAX_ITEM_TRANSFER_COUNT: u32 = 64;
 
@@ -74,6 +81,58 @@ pub struct ItemStackDescriptor {
     pub slot_limit: u32,
 }
 
+/// Bounded detached values for one non-empty block-inventory slot.
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ItemStackSnapshot {
+    /// Canonical lowercase namespace:path item registry ID.
+    pub item_id: String,
+    /// Current stack count.
+    pub count: u32,
+    /// Stack-specific maximum count.
+    pub max_stack_size: u32,
+    /// This handler's limit for the particular slot.
+    pub slot_limit: u32,
+    /// Current durability damage, when this item is damageable.
+    pub damage: Option<u32>,
+    /// Maximum durability damage, when this item is damageable.
+    pub max_damage: Option<u32>,
+    /// Optional normalized plain custom name, with styles and click/hover data removed.
+    pub custom_name: Option<String>,
+}
+
+impl ItemStackSnapshot {
+    /// Validates the detached values and limits returned by the host for one slot.
+    pub fn validate(&self) -> SjmlResult<()> {
+        if !valid_item_id(&self.item_id) || self.count == 0 || self.max_stack_size == 0 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "item stack snapshot contains an invalid item ID or size",
+            ));
+        }
+        if self.damage.is_some() != self.max_damage.is_some()
+            || self
+                .damage
+                .zip(self.max_damage)
+                .is_some_and(|(damage, maximum)| maximum == 0 || damage > maximum)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "item stack snapshot damage values are inconsistent",
+            ));
+        }
+        if self.custom_name.as_ref().is_some_and(|name| {
+            name.len() > MAX_CUSTOM_ITEM_NAME_BYTES || name.chars().count() > 1024
+        }) {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "custom item name exceeds its 1024-byte or character limit",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Stable value snapshot of every handler slot. Empty slots are `None`.
 #[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -100,6 +159,19 @@ extern "C" {
         position_length: i32,
         side: i32,
         side_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "read_stack"]
+    fn imported_read_stack(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        side: i32,
+        side_length: i32,
+        slot: i32,
         output: i32,
         capacity: i32,
     ) -> i32;
@@ -254,6 +326,55 @@ pub fn read(
     }
 }
 
+/// Reads one detached item stack from the block's loaded item-handler capability.
+///
+/// Both `world.read` and `inventory.read` are required. `None` selects the
+/// unsided handler; a direction performs the normal sided capability query.
+/// An absent capability, unloaded position, or empty slot returns `Ok(None)`.
+/// The host returns only item ID, bounded stack/durability values, and a plain
+/// custom name; it never exposes NBT or arbitrary data components. Chunks are
+/// never loaded, and the operation runs synchronously on the server thread.
+pub fn read_stack(
+    world: WorldHandle,
+    position: BlockPos,
+    side: Option<Direction>,
+    slot: u32,
+) -> SjmlResult<Option<ItemStackSnapshot>> {
+    validate_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        let side = to_bytes(&side)?;
+        let snapshot: Option<ItemStackSnapshot> =
+            read_output_with_capacity(MAX_ITEM_STACK_SNAPSHOT_BYTES as u32, |output, capacity| {
+                // SAFETY: stable input buffers and output allocation remain live through this call.
+                unsafe {
+                    imported_read_stack(
+                        world.as_ptr() as usize as u32 as i32,
+                        world.len() as i32,
+                        position.as_ptr() as usize as u32 as i32,
+                        position.len() as i32,
+                        side.as_ptr() as usize as u32 as i32,
+                        side.len() as i32,
+                        slot as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            })?;
+        if let Some(snapshot) = &snapshot {
+            snapshot.validate()?;
+        }
+        Ok(snapshot)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, side);
+        Err(unsupported_target())
+    }
+}
+
 /// Reads one string component declared by this module from a non-empty loaded inventory slot.
 /// An absent inventory, empty slot, or unset component returns `Ok(None)`. The supplied path is
 /// module-local, like the path passed to [`crate::registry::register_string_component`].
@@ -377,6 +498,21 @@ fn validate_slot(slot: u32) -> SjmlResult<()> {
     Ok(())
 }
 
+fn valid_item_id(id: &str) -> bool {
+    let Some((namespace, path)) = id.split_once(':') else {
+        return false;
+    };
+    !namespace.is_empty()
+        && !path.is_empty()
+        && id.len() <= MAX_ITEM_ID_BYTES
+        && namespace.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+        })
+        && path.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_./-".contains(&byte)
+        })
+}
+
 fn validate_transfer_count(count: u32) -> SjmlResult<()> {
     if count == 0 || count > MAX_ITEM_TRANSFER_COUNT {
         return Err(SjmlError::new(
@@ -398,7 +534,14 @@ fn status_result(status: i32, message: &str) -> SjmlResult<()> {
 
 #[cfg(target_arch = "wasm32")]
 fn read_output<T: StableDecode>(invoke: impl FnOnce(i32, i32) -> i32) -> SjmlResult<T> {
-    let capacity = crate::MAX_PAYLOAD_BYTES as u32;
+    read_output_with_capacity(crate::MAX_PAYLOAD_BYTES as u32, invoke)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_output_with_capacity<T: StableDecode>(
+    capacity: u32,
+    invoke: impl FnOnce(i32, i32) -> i32,
+) -> SjmlResult<T> {
     let pointer = allocate_host_input(capacity);
     if pointer == 0 {
         return Err(SjmlError::new(
@@ -436,7 +579,8 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         transfer, validate_slot, validate_transfer_count, BlockPos, Direction, InventoryEndpoint,
-        MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
+        ItemStackSnapshot, MAX_CUSTOM_ITEM_NAME_BYTES, MAX_INVENTORY_SLOTS,
+        MAX_ITEM_TRANSFER_COUNT,
     };
     use crate::{ErrorCode, WorldHandle};
 
@@ -465,6 +609,45 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_stack_snapshot_rejects_invalid_identity_damage_and_custom_name_bounds() {
+        let snapshot = ItemStackSnapshot {
+            item_id: "minecraft:iron_sword".to_owned(),
+            count: 1,
+            max_stack_size: 1,
+            slot_limit: 64,
+            damage: Some(3),
+            max_damage: Some(250),
+            custom_name: Some("Sword".to_owned()),
+        };
+        assert_eq!(snapshot.validate(), Ok(()));
+
+        let invalid_id = ItemStackSnapshot {
+            item_id: "Minecraft:iron_sword".to_owned(),
+            ..snapshot.clone()
+        };
+        assert_eq!(
+            invalid_id.validate().unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let invalid_damage = ItemStackSnapshot {
+            damage: Some(251),
+            ..snapshot.clone()
+        };
+        assert_eq!(
+            invalid_damage.validate().unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let unbounded_name = ItemStackSnapshot {
+            custom_name: Some("x".repeat(MAX_CUSTOM_ITEM_NAME_BYTES + 1)),
+            ..snapshot
+        };
+        assert_eq!(
+            unbounded_name.validate().unwrap_err().code(),
+            ErrorCode::PayloadTooLarge
         );
     }
 

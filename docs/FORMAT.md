@@ -22,7 +22,7 @@ distribution = "server_only"
 [runtime]
 abi = "^1.0"
 minecraft = "~1.21.1"
-sjml = "^0.51.0"
+sjml = "^0.52.0"
 
 [[modules]]
 id = "core"

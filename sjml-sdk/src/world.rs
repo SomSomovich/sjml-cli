@@ -20,6 +20,10 @@ const MAX_RESOURCE_ID_BYTES: usize = 256;
 pub const MAX_WORLD_BLOCK_STATES: usize = 1024;
 /// Maximum number of properties returned for a single loaded block state.
 pub const MAX_WORLD_BLOCK_PROPERTIES: usize = 64;
+/// Maximum number of explicitly named block-state properties changed by one call.
+pub const MAX_WORLD_BLOCK_PROPERTY_UPDATES: usize = 32;
+/// Maximum encoded bytes in one block-property mutation request.
+pub const MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES: usize = 10_932;
 /// Maximum output bytes reserved for one block-property snapshot.
 pub const MAX_WORLD_BLOCK_PROPERTIES_RESPONSE_BYTES: usize = 21_257;
 /// Maximum length of one raycast segment in blocks.
@@ -200,6 +204,38 @@ pub enum WorldGameRule {
     WardenSpawning = 17,
 }
 
+/// Stable allowlist of vanilla integer gamerules available through [`integer_game_rule`].
+/// The IDs are separate from [`WorldGameRule`] and are not Minecraft implementation ordinals.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u32)]
+pub enum WorldIntegerGameRule {
+    /// `maxEntityCramming`; write values are 0 through 128.
+    MaxEntityCramming = 0,
+    /// `playersSleepingPercentage`; write values are 0 through 100.
+    PlayersSleepingPercentage = 1,
+    /// `randomTickSpeed`; write values are 0 through 4,096.
+    RandomTickSpeed = 2,
+    /// `spawnRadius`; write values are 0 through 64.
+    SpawnRadius = 3,
+}
+
+impl WorldIntegerGameRule {
+    /// Inclusive lower bound accepted by [`set_integer_game_rule`].
+    pub const fn min_value(self) -> i32 {
+        0
+    }
+
+    /// Inclusive upper bound accepted by [`set_integer_game_rule`].
+    pub const fn max_value(self) -> i32 {
+        match self {
+            Self::MaxEntityCramming => 128,
+            Self::PlayersSleepingPercentage => 100,
+            Self::RandomTickSpeed => 4096,
+            Self::SpawnRadius => 64,
+        }
+    }
+}
+
 /// Immutable, detached block identity and state value returned by [`block_states`].
 #[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -315,6 +351,16 @@ struct BlockPropertiesResponse {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct BlockPropertiesMutation {
+    world: WorldHandle,
+    position: BlockPos,
+    expected_block_id: String,
+    properties: Vec<BlockProperty>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode, StableDecode)]
 #[sjml(version = 1)]
 struct DaylightCycleSnapshot {
@@ -343,6 +389,30 @@ struct WorldGameRuleMutation {
 #[sjml(version = 1)]
 struct WorldGameRuleSnapshot {
     enabled: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct WorldIntegerGameRuleQuery {
+    world: WorldHandle,
+    rule_id: u32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct WorldIntegerGameRuleMutation {
+    world: WorldHandle,
+    rule_id: u32,
+    value: i32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct WorldIntegerGameRuleSnapshot {
+    value: i32,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -402,6 +472,9 @@ extern "C" {
         -> i32;
     #[link_name = "game_rule"]
     fn imported_game_rule(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "integer_game_rule"]
+    fn imported_integer_game_rule(query: i32, query_length: i32, output: i32, capacity: i32)
+        -> i32;
     #[link_name = "biome_at"]
     fn imported_biome_at(
         handle: i32,
@@ -459,6 +532,8 @@ extern "C" {
     fn imported_set_daylight_cycle_enabled(handle: i32, length: i32, enabled: i32) -> i32;
     #[link_name = "set_game_rule"]
     fn imported_set_game_rule(query: i32, query_length: i32) -> i32;
+    #[link_name = "set_integer_game_rule"]
+    fn imported_set_integer_game_rule(query: i32, query_length: i32) -> i32;
     #[link_name = "block_states"]
     fn imported_block_states(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "block_properties"]
@@ -479,6 +554,8 @@ extern "C" {
         block_id: i32,
         block_id_length: i32,
     ) -> i32;
+    #[link_name = "set_block_properties"]
+    fn imported_set_block_properties(request: i32, request_length: i32) -> i32;
     #[link_name = "schedule_block_tick"]
     fn imported_schedule_block_tick(
         handle: i32,
@@ -667,6 +744,38 @@ pub fn game_rule(handle: WorldHandle, rule: WorldGameRule) -> SjmlResult<bool> {
             }
         })?;
         Ok(snapshot.enabled)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, rule);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the exact integer value of one allowlisted vanilla gamerule on a loaded dimension.
+///
+/// Requires `world.read`. Reads report the value currently stored by Minecraft, including values
+/// changed outside SJML; the documented per-rule range is enforced when this SDK writes a value.
+/// The call is server-thread-only and never loads a world or chunk.
+pub fn integer_game_rule(handle: WorldHandle, rule: WorldIntegerGameRule) -> SjmlResult<i32> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldIntegerGameRuleQuery {
+            world: handle,
+            rule_id: rule as u32,
+        })?;
+        let snapshot: WorldIntegerGameRuleSnapshot = read_output(8, |output, capacity| {
+            // SAFETY: the stable request and fixed-size destination stay live for the sync host call.
+            unsafe {
+                imported_integer_game_rule(
+                    query.as_ptr() as usize as u32 as i32,
+                    query.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        Ok(snapshot.value)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1163,6 +1272,52 @@ pub fn set_game_rule(handle: WorldHandle, rule: WorldGameRule, enabled: bool) ->
     }
 }
 
+/// Sets one allowlisted vanilla integer gamerule on a loaded world.
+///
+/// Requires both `world.read` (to validate the handle) and `world.write`. Values must be within
+/// the inclusive range for the selected [`WorldIntegerGameRule`]. Writes use Minecraft's persisted
+/// `GameRules` state and run on the logical server thread.
+pub fn set_integer_game_rule(
+    handle: WorldHandle,
+    rule: WorldIntegerGameRule,
+    value: i32,
+) -> SjmlResult<()> {
+    if value < rule.min_value() || value > rule.max_value() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "integer gamerule value is outside the allowed range for this rule",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mutation = to_bytes(&WorldIntegerGameRuleMutation {
+            world: handle,
+            rule_id: rule as u32,
+            value,
+        })?;
+        // SAFETY: the complete stable mutation stays live for the synchronous host call.
+        let status = unsafe {
+            imported_set_integer_game_rule(
+                mutation.as_ptr() as usize as u32 as i32,
+                mutation.len() as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the integer world gamerule update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, rule);
+        Err(unsupported_target())
+    }
+}
+
 /// Reads up to 1,024 block positions in one `world.read` host call. Unloaded chunks and positions
 /// outside the world's build height are returned as `None`; the host never loads a chunk. Results
 /// preserve input order, including duplicate positions.
@@ -1571,6 +1726,98 @@ pub fn set_block(world: WorldHandle, position: BlockPos, block_id: &str) -> Sjml
     }
 }
 
+/// Changes only the explicitly named properties of the block currently at `position`.
+///
+/// The expected block ID must still match when the server applies the update. Property names and
+/// values should come from [`block_properties`]; the host checks each against the block's
+/// registered Minecraft property and its enum or numeric range. The call requires `world.read`
+/// and `world.write`, runs synchronously on the server thread, and never loads a chunk. It rejects
+/// unloaded positions and accepts 1 through [`MAX_WORLD_BLOCK_PROPERTY_UPDATES`] unique properties.
+/// Neighbor and client updates use fixed Minecraft flags selected by the host.
+pub fn set_block_properties(
+    world: WorldHandle,
+    position: BlockPos,
+    expected_block_id: &str,
+    properties: &[BlockProperty],
+) -> SjmlResult<()> {
+    validate_block_id(expected_block_id)?;
+    if position.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block x/z coordinates must be within ±30000000",
+        ));
+    }
+    validate_block_property_updates(properties)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut ordered = properties.to_vec();
+        ordered.sort_by(|left, right| left.name.cmp(&right.name));
+        let mutation = to_bytes(&BlockPropertiesMutation {
+            world,
+            position,
+            expected_block_id: expected_block_id.to_owned(),
+            properties: ordered,
+        })?;
+        if mutation.len() > MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "block-property mutation exceeds its bounded request size",
+            ));
+        }
+        // SAFETY: the encoded mutation remains live for this synchronous host call.
+        let status = unsafe {
+            imported_set_block_properties(
+                mutation.as_ptr() as usize as u32 as i32,
+                mutation.len() as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the block-property update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, expected_block_id, properties);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_block_property_updates(properties: &[BlockProperty]) -> SjmlResult<()> {
+    if properties.is_empty() || properties.len() > MAX_WORLD_BLOCK_PROPERTY_UPDATES {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block-property update count must be within 1..=32",
+        ));
+    }
+    let mut names = std::collections::HashSet::with_capacity(properties.len());
+    for property in properties {
+        if property.name.is_empty()
+            || property.name.len() > 64
+            || !property
+                .name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+            || property.value.is_empty()
+            || property.value.len() > 256
+            || property.value.chars().any(char::is_control)
+            || !names.insert(property.name.as_str())
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "block-property updates must use unique canonical names and printable bounded values",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Schedules one ordinary Minecraft block tick for an expected block at a loaded position.
 ///
 /// The module must request and receive `world.read` and `world.write`. The host rejects
@@ -1845,15 +2092,19 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        block_properties, collides, day_time, daylight_cycle_enabled, play_sound, raycast,
-        schedule_block_tick, set_block, set_daylight_cycle_enabled, set_time, spawn_entity,
-        spawn_particle, Aabb, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
-        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, DaylightCycleSnapshot,
-        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, WeatherCondition,
-        WeatherSnapshot, WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule,
-        WorldGameRuleMutation, WorldGameRuleQuery, WorldGameRuleSnapshot, WorldRaycastQuery,
-        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
-        MAX_WORLD_DAY_TIME_TICKS,
+        block_properties, collides, day_time, daylight_cycle_enabled, integer_game_rule,
+        play_sound, raycast, schedule_block_tick, set_block, set_block_properties,
+        set_daylight_cycle_enabled, set_integer_game_rule, set_time, spawn_entity, spawn_particle,
+        validate_block_property_updates, Aabb, BlockPropertiesMutation, BlockPropertiesQuery,
+        BlockPropertiesResponse, BlockProperty, BlockStateBatch, BlockStateQuery,
+        BlockStateSnapshot, DaylightCycleSnapshot, RaycastBlockMode, RaycastFluidMode, RaycastHit,
+        RaycastPoint, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
+        WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery,
+        WorldGameRuleSnapshot, WorldIntegerGameRule, WorldIntegerGameRuleMutation,
+        WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot, WorldRaycastQuery,
+        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BLOCK_PROPERTIES,
+        MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
+        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -1915,6 +2166,69 @@ mod tests {
         assert_eq!(mutation.last(), Some(&0));
         let snapshot = crate::from_bytes::<WorldGameRuleSnapshot>(&[1, 0, 0, 0, 1]).unwrap();
         assert!(snapshot.enabled);
+    }
+
+    #[test]
+    fn integer_game_rule_request_mutation_and_range_match_host_contract() {
+        assert_eq!(WorldIntegerGameRule::MaxEntityCramming as u32, 0);
+        assert_eq!(WorldIntegerGameRule::PlayersSleepingPercentage as u32, 1);
+        assert_eq!(WorldIntegerGameRule::RandomTickSpeed as u32, 2);
+        assert_eq!(WorldIntegerGameRule::SpawnRadius as u32, 3);
+        assert_eq!(WorldIntegerGameRule::RandomTickSpeed.min_value(), 0);
+        assert_eq!(WorldIntegerGameRule::RandomTickSpeed.max_value(), 4096);
+
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let query = crate::to_bytes(&WorldIntegerGameRuleQuery {
+            world,
+            rule_id: WorldIntegerGameRule::RandomTickSpeed as u32,
+        })
+        .unwrap();
+        assert_eq!(query.len(), 32);
+        assert_eq!(&query[28..32], &2_u32.to_le_bytes());
+
+        let mutation = crate::to_bytes(&WorldIntegerGameRuleMutation {
+            world,
+            rule_id: WorldIntegerGameRule::SpawnRadius as u32,
+            value: 64,
+        })
+        .unwrap();
+        assert_eq!(mutation.len(), 36);
+        assert_eq!(&mutation[28..32], &3_u32.to_le_bytes());
+        assert_eq!(&mutation[32..36], &64_i32.to_le_bytes());
+
+        let snapshot = crate::from_bytes::<WorldIntegerGameRuleSnapshot>(&[
+            1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff,
+        ])
+        .unwrap();
+        assert_eq!(
+            snapshot.value, -1,
+            "reads preserve Minecraft values set outside SDK bounds"
+        );
+
+        assert_eq!(
+            integer_game_rule(world, WorldIntegerGameRule::RandomTickSpeed)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_integer_game_rule(world, WorldIntegerGameRule::RandomTickSpeed, -1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_integer_game_rule(world, WorldIntegerGameRule::RandomTickSpeed, 4097)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_integer_game_rule(world, WorldIntegerGameRule::RandomTickSpeed, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
     }
 
     #[test]
@@ -2219,6 +2533,124 @@ mod tests {
                 .code(),
             ErrorCode::UnknownErrorCode
         );
+    }
+
+    #[test]
+    fn block_property_mutation_matches_java_schema_and_is_explicit() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let mutation = BlockPropertiesMutation {
+            world,
+            position: BlockPos { x: 4, y: 64, z: -3 },
+            expected_block_id: "minecraft:oak_stairs".to_owned(),
+            properties: vec![
+                BlockProperty {
+                    name: "facing".to_owned(),
+                    value: "east".to_owned(),
+                },
+                BlockProperty {
+                    name: "waterlogged".to_owned(),
+                    value: "true".to_owned(),
+                },
+            ],
+        };
+        let encoded = crate::to_bytes(&mutation).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        for coordinate in [4_i32, 64, -3] {
+            expected.extend_from_slice(&coordinate.to_le_bytes());
+        }
+        put_test_string(&mut expected, "minecraft:oak_stairs");
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        for (name, value) in [("facing", "east"), ("waterlogged", "true")] {
+            expected.extend_from_slice(&1_u32.to_le_bytes());
+            put_test_string(&mut expected, name);
+            put_test_string(&mut expected, value);
+        }
+        assert_eq!(encoded, expected);
+        assert!(encoded.len() <= MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES);
+    }
+
+    #[test]
+    fn block_property_writes_reject_invalid_input_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        let property = |name: &str, value: &str| BlockProperty {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        };
+        assert_eq!(
+            set_block_properties(world, position, "stone", &[property("axis", "x")])
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_block_properties(
+                world,
+                BlockPos {
+                    x: i32::MAX,
+                    ..position
+                },
+                "minecraft:oak_log",
+                &[property("axis", "x")]
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_block_properties(world, position, "minecraft:oak_log", &[])
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_block_property_updates(&[property("axis", "x"), property("axis", "y")])
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_block_property_updates(&[property("Axis", "x")])
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_block_property_updates(&[property("axis", "")])
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let too_many: Vec<_> = (0..=MAX_WORLD_BLOCK_PROPERTY_UPDATES)
+            .map(|index| property(&format!("p{index:02}"), "x"))
+            .collect();
+        assert_eq!(
+            validate_block_property_updates(&too_many)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_block_properties(
+                world,
+                position,
+                "minecraft:oak_log",
+                &[property("axis", "x")]
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    fn put_test_string(output: &mut Vec<u8>, value: &str) {
+        output.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        output.extend_from_slice(value.as_bytes());
     }
 
     #[test]

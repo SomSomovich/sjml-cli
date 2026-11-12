@@ -70,7 +70,7 @@ impl KeybindingDefinition {
         let (kind, code) = match self.key {
             Key::Keyboard(code) if (-1..=65_535).contains(&code) => (0, code),
             Key::Keyboard(_) => {
-                return Err(invalid("keyboard key code must be between -1 and 65535"))
+                return Err(invalid("keyboard key code must be between -1 and 65535"));
             }
             Key::Mouse(button) if button <= 31 => (1, i32::from(button)),
             Key::Mouse(_) => return Err(invalid("mouse button must be between 0 and 31")),

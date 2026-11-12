@@ -209,6 +209,28 @@ pub struct BlockPlace {
     pub z: i32,
 }
 
+/// Synchronous cancellable snapshot for a logical-server block-placement attempt.
+///
+/// Return `Ok(true)` from the `block.place_attempt` handler to veto the placement.
+/// For a multi-place event, the payload describes NeoForge's event position and a veto
+/// rejects the full placement operation.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockPlaceAttempt {
+    /// UUID of the entity that attempted placement, if the event had an entity actor.
+    pub placer_id: Option<String>,
+    /// Resource location of the owning dimension.
+    pub dimension_id: String,
+    /// Registry ID of the block state that was proposed for placement.
+    pub block_id: String,
+    /// Signed block X coordinate for the NeoForge placement event.
+    pub x: i32,
+    /// Signed block Y coordinate for the NeoForge placement event.
+    pub y: i32,
+    /// Signed block Z coordinate for the NeoForge placement event.
+    pub z: i32,
+}
+
 /// Player identity delivered by the synchronous, non-cancellable `player.joined` event.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -482,9 +504,9 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
-        EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerMoved, PlayerRespawned,
+        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
+        EffectTickEvent, EntityDamaged, EntityDeath, EntitySpawned, EventPriority,
+        InventoryChanged, PlayerInteracted, PlayerInteractionAttempt, PlayerMoved, PlayerRespawned,
         ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
@@ -560,6 +582,30 @@ mod tests {
         };
         let encoded = to_bytes(&no_placer).unwrap();
         assert_eq!(from_bytes::<BlockPlace>(&encoded).unwrap(), no_placer);
+    }
+
+    #[test]
+    fn cancellable_block_place_attempt_round_trips_optional_placer_and_coordinates() {
+        let attempt = BlockPlaceAttempt {
+            placer_id: Some("00000000-0000-0000-0000-000000000001".to_owned()),
+            dimension_id: "minecraft:overworld".to_owned(),
+            block_id: "minecraft:diamond_block".to_owned(),
+            x: -3,
+            y: 64,
+            z: i32::MIN,
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        assert_eq!(from_bytes::<BlockPlaceAttempt>(&encoded).unwrap(), attempt);
+
+        let no_placer = BlockPlaceAttempt {
+            placer_id: None,
+            ..attempt
+        };
+        let encoded = to_bytes(&no_placer).unwrap();
+        assert_eq!(
+            from_bytes::<BlockPlaceAttempt>(&encoded).unwrap(),
+            no_placer
+        );
     }
 
     #[test]

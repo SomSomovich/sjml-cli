@@ -16,11 +16,11 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.51.0` with ABI `1.41.0`. ABI compatibility is major-version based:
+The current host is `0.52.0` with ABI `1.42.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.41.0` therefore accepts
-`1.0.x` through `1.41.0` (including earlier ABI 1.32–1.40 guests), but rejects a
-later contract it does not know.
+minor/patch version is equal or newer. A host at ABI `1.42.0` therefore accepts
+`1.0.x` through `1.42.0` (including earlier ABI 1.32–1.41 guests), but rejects
+a later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
 
@@ -147,3 +147,15 @@ client main thread and return bounded values rather than Minecraft objects.
 The new scheduled-tick GameTest and Java/Rust boundary tests cover the
 server-backed contracts; cursor positions and interaction vetoes still need a
 visible-client and interactive-client run, respectively.
+
+Host 0.52.0 / ABI 1.42.0 adds loaded non-player spatial queries, allowlisted
+integer gamerule reads and writes, expected-block-guarded block-state property
+updates, detached item-stack snapshots, player inventory slot writes, and
+server-player attribute access. It also adds synchronous cancellation for
+block placement attempts before the placed state is committed. These operations
+use their existing narrow `world.read`, `world.write`, `entity.read`,
+`entity.attributes.write`, `inventory.read`, `inventory.write`, and
+`events.cancel` capabilities. A dedicated-server GameTest verifies the block
+placement veto, inventory slot mutation, and the end-to-end paths for spatial
+queries, integer gamerules, item snapshots, player attributes, and block-state
+properties.

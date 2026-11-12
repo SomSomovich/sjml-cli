@@ -1,4 +1,5 @@
-//! Bounded reads and base-value updates for selected vanilla living-entity attributes.
+//! Bounded reads and base-value updates for selected vanilla living-entity attributes on loaded
+//! non-player entities and live server players.
 //!
 //! Dynamic attribute access is deliberately narrower than registry-time attribute declarations:
 //! only six vanilla IDs are exposed, reads require `entity.read`, and writes also require
@@ -6,7 +7,7 @@
 
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
-use crate::{EntityHandle, ErrorCode, SjmlError, SjmlResult};
+use crate::{EntityHandle, ErrorCode, PlayerHandle, SjmlError, SjmlResult};
 
 #[cfg(any(target_arch = "wasm32", test))]
 const SNAPSHOT_BYTES: usize = 20;
@@ -100,6 +101,29 @@ extern "C" {
     ) -> i32;
 }
 
+#[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "sjml_player_v1")]
+extern "C" {
+    #[link_name = "attribute"]
+    fn imported_player_attribute(
+        handle: i32,
+        handle_length: i32,
+        attribute_id: i32,
+        attribute_id_length: i32,
+        output: i32,
+        output_capacity: i32,
+    ) -> i32;
+    #[link_name = "set_attribute_base"]
+    fn imported_set_player_attribute_base(
+        handle: i32,
+        handle_length: i32,
+        attribute_id: i32,
+        attribute_id_length: i32,
+        value: i32,
+        value_length: i32,
+    ) -> i32;
+}
+
 /// Reads base and effective values for one loaded living non-player entity.
 ///
 /// The host validates the entity session, owning server thread, and `entity.read`. The attribute
@@ -157,6 +181,75 @@ pub fn set_base_value(
             )
         };
         status_result(status, "host rejected the entity attribute mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads base and effective values for one live server player.
+///
+/// Requires `entity.read` and a logical-server module context. The host validates the active
+/// player session and server thread for every call; client and static-registration contexts are
+/// denied. The supported attribute IDs and value bounds are the same as [`LivingAttribute`].
+pub fn read_player(
+    handle: PlayerHandle,
+    attribute: LivingAttribute,
+) -> SjmlResult<AttributeValues> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let mut output = [0_u8; SNAPSHOT_BYTES];
+        // SAFETY: pointers reference live fixed-size local buffers for this synchronous host call.
+        let status = unsafe {
+            imported_player_attribute(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                attribute.id().as_ptr() as usize as u32 as i32,
+                attribute.id().len() as u32 as i32,
+                output.as_mut_ptr() as usize as u32 as i32,
+                output.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the player attribute read")?;
+        decode_values(&output)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, attribute);
+        Err(unsupported_target())
+    }
+}
+
+/// Replaces an allowlisted attribute's base value on one live server player.
+///
+/// The module must request and receive both `entity.read` and `entity.attributes.write`. The host
+/// rechecks the live login session and server thread for every call. This updates only the base
+/// value; active effects and other attribute modifiers remain in effect.
+pub fn set_player_base_value(
+    handle: PlayerHandle,
+    attribute: LivingAttribute,
+    base_value: f64,
+) -> SjmlResult<()> {
+    attribute.validate_base(base_value)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let encoded_value = encode_base_value(base_value);
+        // SAFETY: both buffers stay live during the synchronous call; the host copies them before returning.
+        let status = unsafe {
+            imported_set_player_attribute_base(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                attribute.id().as_ptr() as usize as u32 as i32,
+                attribute.id().len() as u32 as i32,
+                encoded_value.as_ptr() as usize as u32 as i32,
+                encoded_value.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the player attribute mutation")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

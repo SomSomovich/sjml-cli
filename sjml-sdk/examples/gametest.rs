@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static SAW_PIG_DEATH: AtomicBool = AtomicBool::new(false);
 static SAW_EFFECT_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_BLOCK_PLACE: AtomicBool = AtomicBool::new(false);
+static SAW_BLOCK_PLACE_VETO: AtomicBool = AtomicBool::new(false);
 static SAW_ENTITY_SPAWNED: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_INTERACTED: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_INTERACTION_VETO: AtomicBool = AtomicBool::new(false);
@@ -162,6 +163,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("entity.spawned", EventPriority::Normal)?;
     events::subscribe("entity.effect.tick", EventPriority::Normal)?;
     events::subscribe("block.place", EventPriority::Normal)?;
+    events::subscribe("block.place_attempt", EventPriority::Normal)?;
     events::subscribe("player.interacted", EventPriority::Normal)?;
     events::subscribe("player.interaction", EventPriority::Normal)?;
     events::subscribe("entity.damaged", EventPriority::Normal)?;
@@ -193,6 +195,15 @@ fn observe_block_place(event: BlockPlace) -> SjmlResult<()> {
         SAW_BLOCK_PLACE.store(true, Ordering::Relaxed);
     }
     Ok(())
+}
+
+#[event(name = "block.place_attempt")]
+fn veto_gold_block_placement(event: BlockPlaceAttempt) -> SjmlResult<bool> {
+    let veto = event.block_id == "minecraft:gold_block";
+    if veto {
+        SAW_BLOCK_PLACE_VETO.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
 }
 
 #[event(name = "entity.spawned")]
@@ -334,6 +345,18 @@ fn check_block_place(_: EntityDeathCheckArguments) -> SjmlResult<String> {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "block.place callback did not observe a placed diamond block",
+        ))
+    }
+}
+
+#[command(name = "block.place_attempt.check")]
+fn check_block_place_veto(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    if SAW_BLOCK_PLACE_VETO.swap(false, Ordering::Relaxed) {
+        Ok("guest vetoed gold-block placement".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block.place_attempt callback did not veto the gold block",
         ))
     }
 }
@@ -561,6 +584,28 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
     );
     let changed_keep_inventory = changed_keep_inventory?;
     restored_keep_inventory?;
+    let original_random_tick_speed =
+        world::integer_game_rule(overworld, world::WorldIntegerGameRule::RandomTickSpeed)?;
+    let changed_random_tick_speed = if original_random_tick_speed < 4096 {
+        original_random_tick_speed + 1
+    } else {
+        original_random_tick_speed - 1
+    };
+    let observed_random_tick_speed = world::set_integer_game_rule(
+        overworld,
+        world::WorldIntegerGameRule::RandomTickSpeed,
+        changed_random_tick_speed,
+    )
+    .and_then(|()| {
+        world::integer_game_rule(overworld, world::WorldIntegerGameRule::RandomTickSpeed)
+    });
+    let restored_random_tick_speed = world::set_integer_game_rule(
+        overworld,
+        world::WorldIntegerGameRule::RandomTickSpeed,
+        original_random_tick_speed,
+    );
+    let observed_random_tick_speed = observed_random_tick_speed?;
+    restored_random_tick_speed?;
     let border_mutation_observed = if original_border.remaining_lerp_millis == 0 {
         let changed_center_x = if original_border.center_x > world::MAX_WORLD_BORDER_CENTER - 1.0 {
             original_border.center_x - 1.0
@@ -664,6 +709,9 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         || changed_keep_inventory != !original_keep_inventory
         || world::game_rule(overworld, world::WorldGameRule::KeepInventory)?
             != original_keep_inventory
+        || observed_random_tick_speed != changed_random_tick_speed
+        || world::integer_game_rule(overworld, world::WorldIntegerGameRule::RandomTickSpeed)?
+            != original_random_tick_speed
         || !border_mutation_observed
         || biome_id
             .as_deref()
@@ -715,6 +763,28 @@ fn inspect_block_batch(arguments: BlockBatchArguments) -> SjmlResult<String> {
         ],
     )?;
     let properties = world::block_properties(world, position)?;
+    let changed_properties = world::set_block_properties(
+        world,
+        position,
+        "minecraft:oak_log",
+        &[world::BlockProperty {
+            name: "axis".to_owned(),
+            value: "x".to_owned(),
+        }],
+    )
+    .and_then(|()| world::block_properties(world, position));
+    let restore_properties = world::set_block_properties(
+        world,
+        position,
+        "minecraft:oak_log",
+        &[world::BlockProperty {
+            name: "axis".to_owned(),
+            value: "y".to_owned(),
+        }],
+    );
+    let changed_properties = changed_properties?;
+    restore_properties?;
+    let restored_properties = world::block_properties(world, position)?;
     if states.len() != 3
         || states[0]
             .as_ref()
@@ -722,6 +792,16 @@ fn inspect_block_batch(arguments: BlockBatchArguments) -> SjmlResult<String> {
         || states[1].is_some()
         || states[0] != states[2]
         || properties.as_ref().is_none_or(|properties| {
+            !properties
+                .iter()
+                .any(|property| property.name == "axis" && property.value == "y")
+        })
+        || changed_properties.as_ref().is_none_or(|properties| {
+            !properties
+                .iter()
+                .any(|property| property.name == "axis" && property.value == "x")
+        })
+        || restored_properties.as_ref().is_none_or(|properties| {
             !properties
                 .iter()
                 .any(|property| property.name == "axis" && property.value == "y")
@@ -997,6 +1077,37 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
             "player inventory snapshot did not match the GameTest hotbar fixture",
         ));
     }
+    let original_attack_damage = sjml::entity_attributes::read_player(
+        target_player,
+        sjml::entity_attributes::LivingAttribute::AttackDamage,
+    )?;
+    let temporary_attack_damage = if original_attack_damage.base_value < 1024.0 {
+        original_attack_damage.base_value + 0.25
+    } else {
+        original_attack_damage.base_value - 0.25
+    };
+    let changed_attack_damage = (|| {
+        sjml::entity_attributes::set_player_base_value(
+            target_player,
+            sjml::entity_attributes::LivingAttribute::AttackDamage,
+            temporary_attack_damage,
+        )?;
+        sjml::entity_attributes::read_player(
+            target_player,
+            sjml::entity_attributes::LivingAttribute::AttackDamage,
+        )
+    })();
+    let restore_attack_damage = sjml::entity_attributes::set_player_base_value(
+        target_player,
+        sjml::entity_attributes::LivingAttribute::AttackDamage,
+        original_attack_damage.base_value,
+    );
+    let changed_attack_damage = changed_attack_damage?;
+    restore_attack_damage?;
+    let restored_attack_damage = sjml::entity_attributes::read_player(
+        target_player,
+        sjml::entity_attributes::LivingAttribute::AttackDamage,
+    )?;
     let original_abilities = player::abilities(target_player)?;
     if !original_abilities.may_fly {
         return Err(SjmlError::new(
@@ -1088,6 +1199,8 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         || temporary_abilities.invulnerable != original_abilities.invulnerable
         || temporary_abilities.may_build != original_abilities.may_build
         || restored_abilities != original_abilities
+        || (changed_attack_damage.base_value - temporary_attack_damage).abs() > 0.0001
+        || (restored_attack_damage.base_value - original_attack_damage.base_value).abs() > 0.0001
         || observed_game_mode != temporary_game_mode
         || (temporary_motion.velocity_x - temporary_velocity.x).abs() > 0.0001
         || (temporary_motion.velocity_y - temporary_velocity.y).abs() > 0.0001
@@ -1139,6 +1252,58 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     ))
 }
 
+#[command(name = "player.inventory.write")]
+fn write_player_inventory(arguments: PlayerArguments) -> SjmlResult<String> {
+    let target_player = player::online()?
+        .into_iter()
+        .find(|handle| {
+            player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.player_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "the requested player is not online",
+            )
+        })?;
+    let before = sjml::player_inventory::read(target_player)?;
+    if before.slots.get(1).is_none_or(Option::is_some) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory write fixture expects an empty hotbar slot",
+        ));
+    }
+    let write_and_read = (|| {
+        sjml::player_inventory::set_slot(
+            target_player,
+            1,
+            PlayerInventorySlotUpdate::Set {
+                item_id: "minecraft:emerald",
+                count: 3,
+            },
+        )?;
+        let written = sjml::player_inventory::read(target_player)?;
+        Ok::<_, SjmlError>(
+            written
+                .slots
+                .get(1)
+                .and_then(Option::as_ref)
+                .is_some_and(|stack| stack.item_id == "minecraft:emerald" && stack.count == 3),
+        )
+    })();
+    let clear_result =
+        sjml::player_inventory::set_slot(target_player, 1, PlayerInventorySlotUpdate::Clear);
+    let cleared = clear_result.and_then(|()| sjml::player_inventory::read(target_player));
+    let wrote_expected = write_and_read?;
+    let cleared = cleared?;
+    if !wrote_expected || cleared.slots.get(1).is_none_or(Option::is_some) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory slot write/clear did not match the requested values",
+        ));
+    }
+    Ok("player inventory slot write and clear succeeded".to_owned())
+}
+
 #[derive(StableDecode)]
 #[sjml(version = 1)]
 struct EntityArguments {}
@@ -1151,18 +1316,35 @@ fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
         .copied()
         .map(entity::snapshot)
         .collect::<SjmlResult<Vec<_>>>()?;
-    let pig_handle = handles
+    let (pig_handle, pig_snapshot) = handles
         .iter()
         .copied()
         .zip(&snapshots)
         .find(|(_, snapshot)| snapshot.entity_type_id == "minecraft:pig")
-        .map(|(handle, _)| handle)
         .ok_or_else(|| {
             SjmlError::new(
                 ErrorCode::InvalidArgument,
                 "the entity velocity GameTest pig is missing",
             )
         })?;
+    let pig_world = world::get(&pig_snapshot.dimension_id)?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the GameTest pig's loaded world is missing",
+        )
+    })?;
+    let pig_position = BlockPos {
+        x: pig_snapshot.x.floor() as i32,
+        y: pig_snapshot.y.floor() as i32,
+        z: pig_snapshot.z.floor() as i32,
+    };
+    let nearby_pigs = entity::within(pig_world, pig_position, 4.0, 4.0, Some("minecraft:pig"))?;
+    if !nearby_pigs.contains(&pig_handle) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "loaded-entity spatial query omitted its center pig",
+        ));
+    }
     entity::remove_effect(pig_handle, "minecraft:slowness")?;
     let original_max_health = sjml::entity_attributes::read(
         pig_handle,
@@ -1335,6 +1517,13 @@ fn inspect_inventory(arguments: InventoryArguments) -> SjmlResult<String> {
                 "sided chest inventory is missing",
             )
         })?;
+    let detailed_stack =
+        inventory::read_stack(world, chest_position, None, 0)?.ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "detailed chest stack snapshot is missing",
+            )
+        })?;
     let empty_block = inventory::read(
         world,
         BlockPos {
@@ -1360,6 +1549,18 @@ fn inspect_inventory(arguments: InventoryArguments) -> SjmlResult<String> {
                 "sided inventory snapshot did not contain the expected stack: {:?}",
                 sided_chest.slots
             ),
+        ));
+    }
+    if detailed_stack.item_id != "minecraft:diamond"
+        || detailed_stack.count != 7
+        || detailed_stack.max_stack_size != 64
+        || detailed_stack.damage.is_some()
+        || detailed_stack.max_damage.is_some()
+        || detailed_stack.custom_name.as_deref() != Some("SJML Test Diamond")
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            format!("detailed inventory stack snapshot was unexpected: {detailed_stack:?}"),
         ));
     }
     if let Some(snapshot) = empty_block {

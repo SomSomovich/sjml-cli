@@ -160,6 +160,13 @@ list or an error, never a partial list. Snapshots contain only UUID, registry
 entity type ID, dimension ID, and coordinates; they expose no entity object,
 NBT, or components.
 
+`entity::within` requires both `entity.read` and `world.read`, a live
+module-owned world handle, and the logical-server thread. The provider scans
+only loaded entities in the selected level, excludes players, bounds the
+radius to 64 blocks and results to 256 handles, and sorts by UUID. If the
+result would exceed the limit, the query fails without allocating partial
+handles. It never loads a chunk or dimension.
+
 Mutating a living entity with a status effect additionally requires
 `entity.effect.apply`. The host verifies both capabilities, the exact live
 handle, server-thread ownership, a canonical registered effect ID, and bounded
@@ -182,6 +189,12 @@ per server tick; it never forces chunk loading.
 action. It requires both `events.subscribe` and `events.cancel`. Callbacks run
 on the owning server thread and receive only detached identifiers/coordinates;
 `events.cancel` also gates the existing `block.break` veto path.
+
+`block.place_attempt` is another synchronous veto path and requires both event
+capabilities. It receives detached placement identifiers and coordinates.
+NeoForge restores the block snapshots when a handler vetoes; the successful
+`block.place` notification remains unchanged. Any matching authorized veto
+cancels the full placement, including a multi-place operation.
 
 Discarding a loaded non-player entity requires both `entity.read` and the
 separate `entity.remove` request/grant. The host performs the discard on the
@@ -226,3 +239,25 @@ the server thread. Neither loads chunks or exposes a live `ItemStack` or item
 handler to guest code. `inventory.write` has no per-block or per-item ACL, so
 grant it only to modules trusted to mutate containers reachable through their
 `world.read` handle.
+
+`inventory::read_stack` exposes only bounded detached fields for one slot in
+an already-loaded item handler: registry ID, counts, slot limit, optional
+durability, and a sanitized plain-text custom name. It requires
+`world.read` plus `inventory.read`, runs on the owning server thread, and never
+exposes NBT or arbitrary data components. `player_inventory::set_slot` instead
+requires `entity.read` plus `inventory.write` and a live player session. It
+accepts only a canonical registered item ID and a count valid for both the
+item and target slot, creates a fresh default stack, and synchronizes through
+the active menu. Guest code cannot set item components or arbitrary NBT.
+
+Player attribute reads and writes accept a live server-player handle and the
+existing attribute allowlist. Reads require `entity.read`; writes additionally
+require `entity.attributes.write`. Every call checks the login session and
+server thread, and base-value writes enforce the same per-attribute ranges as
+non-player entities.
+
+Integer game-rule writes use a fixed four-rule allowlist with narrow ranges;
+they require both `world.read` and `world.write`. `world::set_block_properties`
+also requires both capabilities, an already-loaded block position, the exact
+expected current block ID, and registered property values. It changes only
+those properties and never loads chunks or replaces the block type.

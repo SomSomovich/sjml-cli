@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.49.0"
+sjml-sdk = "0.50.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -79,6 +79,17 @@ scaled GUI cursor coordinates on the physical client. See
 [player interaction vetoes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_INTERACTIONS.md),
 and [cursor position](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CURSOR_POSITION.md).
 
+SDK 0.50.0 adds loaded-entity spatial queries, allowlisted integer game-rule
+access, expected-state-guarded block-property writes, item-stack snapshots,
+server-player attribute access, player inventory slot writes, and synchronous
+block-placement vetoes. See
+[spatial entity queries](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_SPATIAL_QUERY.md),
+[integer game rules](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_INTEGER_GAME_RULES.md),
+[block property writes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_BLOCK_PROPERTIES_WRITE.md),
+[item-stack snapshots](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ITEM_STACK_SNAPSHOT.md),
+[player inventory writes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_INVENTORY_WRITES.md),
+and [block placement vetoes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/BLOCK_PLACE_ATTEMPTS.md).
+
 ```rust
 use sjml::prelude::*;
 
@@ -91,7 +102,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.49.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.50.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

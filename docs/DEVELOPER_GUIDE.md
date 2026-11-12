@@ -20,7 +20,7 @@ sjml-cli inspect ./hello/dist/hello-0.1.0.sjml
 
 `--offline` requires cached Rust dependencies; `rustup target add` requires the
 standard library target to be installed separately. Without `--sdk-path`, the
-generated Cargo manifest declares `sjml-sdk = "0.49.0"` and Cargo must resolve
+generated Cargo manifest declares `sjml-sdk = "0.50.0"` and Cargo must resolve
 that dependency through the user's configured registry. Use the local path
 shown above when developing against this checkout. `--sdk-path` identifies the
 `sjml-sdk` package directory, not the SDK workspace directory.

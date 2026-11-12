@@ -145,7 +145,10 @@ pub use client_keybindings::{
     MAX_CLIENT_KEYBINDING_SUBSCRIPTIONS,
 };
 pub use client_notifications::NotificationKind;
-pub use entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
+pub use entity::{
+    EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
+    MAX_SPATIAL_QUERY_RESULTS,
+};
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use gl::{
@@ -155,7 +158,7 @@ pub use gl::{
 };
 pub use inventory::{
     BlockPos, Direction, InventoryEndpoint, InventorySnapshot, ItemStackDescriptor,
-    MAX_ITEM_TRANSFER_COUNT,
+    ItemStackSnapshot, MAX_ITEM_TRANSFER_COUNT,
 };
 pub use menu::{MenuAction, MenuDefinition, MenuItem};
 pub use network::{
@@ -166,7 +169,10 @@ pub use player::{
     PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
     PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_VELOCITY_COMPONENT,
 };
-pub use player_inventory::MAX_PLAYER_INVENTORY_SLOTS;
+pub use player_inventory::{
+    PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
+    MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+};
 pub use recipe::{
     CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
 };
@@ -197,10 +203,12 @@ pub use widgets::{
     Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
 };
 pub use world::{
-    BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot, WorldGameRule,
-    MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
-    MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
-    MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
+    BlockProperty, BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot,
+    WorldGameRule, WorldIntegerGameRule, MAX_WORLD_BLOCK_COORDINATE,
+    MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
+    MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
+    MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
+    MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
     MAX_WORLD_BORDER_WARNING_SECONDS,
 };
 
@@ -235,7 +243,10 @@ pub mod prelude {
     pub use crate::client_notifications;
     pub use crate::client_notifications::NotificationKind;
     pub use crate::entity;
-    pub use crate::entity::{EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT};
+    pub use crate::entity::{
+        EntitySnapshot, EntityVelocity, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
+        MAX_SPATIAL_QUERY_RESULTS,
+    };
     pub use crate::entity_attributes;
     pub use crate::entity_attributes::{AttributeValues, LivingAttribute};
     pub use crate::entity_data;
@@ -245,10 +256,10 @@ pub mod prelude {
     pub use crate::error::{ErrorCode, SjmlError, SjmlResult};
     pub use crate::events;
     pub use crate::events::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
-        EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft, PlayerMoved,
-        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
+        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
+        EffectTickEvent, EntityDamaged, EntityDeath, EntitySpawned, EventPriority,
+        InventoryChanged, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft,
+        PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
         MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
@@ -261,7 +272,7 @@ pub mod prelude {
     pub use crate::inventory;
     pub use crate::inventory::{
         BlockPos, Direction, InventoryEndpoint, InventorySnapshot, ItemStackDescriptor,
-        MAX_ITEM_TRANSFER_COUNT,
+        ItemStackSnapshot, MAX_ITEM_TRANSFER_COUNT,
     };
     pub use crate::menu;
     pub use crate::menu::{MenuAction, MenuDefinition, MenuItem};
@@ -277,7 +288,10 @@ pub mod prelude {
         PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_VELOCITY_COMPONENT,
     };
     pub use crate::player_inventory;
-    pub use crate::player_inventory::MAX_PLAYER_INVENTORY_SLOTS;
+    pub use crate::player_inventory::{
+        PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
+        MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+    };
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
     pub use crate::registry::{
@@ -323,10 +337,11 @@ pub mod prelude {
     };
     pub use crate::world;
     pub use crate::world::{
-        BlockStateSnapshot, HeightmapType, LightSnapshot, RaycastBlockMode, RaycastFluidMode,
-        RaycastHit, RaycastPoint, WorldBorderSnapshot, WorldGameRule, MAX_WORLD_BLOCK_COORDINATE,
-        MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
-        MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+        BlockProperty, BlockStateSnapshot, HeightmapType, LightSnapshot, RaycastBlockMode,
+        RaycastFluidMode, RaycastHit, RaycastPoint, WorldBorderSnapshot, WorldGameRule,
+        WorldIntegerGameRule, MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
+        MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
+        MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
         MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
         MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_RAYCAST_RESPONSE_BYTES,
         MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,

@@ -18,7 +18,10 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
         Ok(name) => name,
         Err(error) => return error.to_compile_error(),
     };
-    if matches!(name.as_str(), "block.break" | "player.interaction") {
+    if matches!(
+        name.as_str(),
+        "block.break" | "block.place_attempt" | "player.interaction"
+    ) {
         return error(
             Span::call_site(),
             format!("{name} is cancellable and must use a synchronous #[event] handler"),
@@ -262,6 +265,13 @@ mod tests {
                 quote! { async fn broken(_: BlockBreak) -> SjmlResult<()> { Ok(()) } },
             ),
             "block.break is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "block.place_attempt"),
+                quote! { async fn place_attempt(_: BlockPlaceAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.place_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

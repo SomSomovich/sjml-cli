@@ -1,11 +1,13 @@
-//! Read-only snapshots of a live player's inventory.
+//! Bounded reads and single-slot writes for a live player's inventory.
 //!
-//! `read` requires both `entity.read` and `inventory.read` and is available only to
-//! logical-server modules. It returns detached item IDs, counts, and slot bounds; it
-//! never exposes Minecraft objects or allows inventory mutation.
+//! `read` requires both `entity.read` and `inventory.read`. `set_slot` requires both
+//! `entity.read` and `inventory.write`. Both operations are available only to logical-server
+//! modules, use the owning server thread, and resolve a live login session on every call.
 
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
+#[cfg(target_arch = "wasm32")]
+use crate::entity::status_result;
 use crate::inventory::InventorySnapshot;
 #[cfg(any(target_arch = "wasm32", test))]
 use crate::inventory::{ItemStackDescriptor, MAX_INVENTORY_SLOTS};
@@ -17,12 +19,37 @@ use crate::{ErrorCode, PlayerHandle, SjmlError, SjmlResult};
 
 /// Maximum number of slots returned by one player inventory query.
 pub const MAX_PLAYER_INVENTORY_SLOTS: usize = 128;
+/// Highest writable Minecraft player inventory index (hotbar through offhand).
+pub const MAX_PLAYER_INVENTORY_SLOT_INDEX: u32 = 40;
+/// Maximum item count accepted by the host before applying the registered item's and slot's limits.
+pub const MAX_PLAYER_INVENTORY_SLOT_COUNT: u32 = 4096;
+/// Maximum UTF-8 item registry ID length accepted by the player inventory writer.
+pub const MAX_PLAYER_INVENTORY_ITEM_ID_BYTES: usize = 256;
+
+/// The only two updates accepted by [`set_slot`]. New stacks use registered items' default components.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum PlayerInventorySlotUpdate<'a> {
+    /// Clear the selected slot.
+    Clear,
+    /// Replace the selected slot with the requested number of a registered item.
+    Set { item_id: &'a str, count: u32 },
+}
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_inventory_v1")]
 extern "C" {
     #[link_name = "read_player"]
     fn imported_read_player(player: i32, player_length: i32, output: i32, capacity: i32) -> i32;
+
+    #[link_name = "set_player_slot"]
+    fn imported_set_player_slot(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        item_id: i32,
+        item_id_length: i32,
+        count: i32,
+    ) -> i32;
 }
 
 /// Reads all slots in the current live player's inventory as a bounded detached snapshot.
@@ -66,6 +93,89 @@ pub fn read(player: PlayerHandle) -> SjmlResult<InventorySnapshot> {
     }
 }
 
+/// Replaces or clears one slot in a live player's inventory.
+///
+/// Slot indices are `0..=8` hotbar, `9..=35` main storage, `36..=39` armor (feet through head),
+/// and `40` offhand. `Clear` sends an empty item ID and zero count. `Set` accepts only a canonical
+/// registered item ID and a count from 1 through 4,096; the host additionally checks the actual
+/// registered item's maximum and the target slot's limit before making any change. Armor slots
+/// accept one item. New stacks use the item's registered default components; guest code cannot
+/// supply or change components or NBT. The active player menu is synchronized after the write.
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`. It runs only
+/// in a logical-server context on the owning server thread and fails for stale or foreign handles.
+pub fn set_slot(
+    player: PlayerHandle,
+    slot: u32,
+    update: PlayerInventorySlotUpdate<'_>,
+) -> SjmlResult<()> {
+    validate_slot_update(slot, update)?;
+    let (item_id, count) = match update {
+        PlayerInventorySlotUpdate::Clear => ("", 0),
+        PlayerInventorySlotUpdate::Set { item_id, count } => (item_id, count),
+    };
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle bytes and borrowed UTF-8 item ID stay live through the synchronous import.
+        let status = unsafe {
+            imported_set_player_slot(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                item_id.as_ptr() as usize as u32 as i32,
+                item_id.len() as i32,
+                count as i32,
+            )
+        };
+        status_result(status, "host rejected the player inventory slot update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, item_id, count);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_slot_update(slot: u32, update: PlayerInventorySlotUpdate<'_>) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory slot must be between 0 and 40",
+        ));
+    }
+    if let PlayerInventorySlotUpdate::Set { item_id, count } = update {
+        if count == 0
+            || count > MAX_PLAYER_INVENTORY_SLOT_COUNT
+            || !valid_item_id(item_id)
+            || item_id == "minecraft:air"
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "player inventory writes require a canonical non-air item ID and count in 1..=4096",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn valid_item_id(item_id: &str) -> bool {
+    if item_id.is_empty() || item_id.len() > MAX_PLAYER_INVENTORY_ITEM_ID_BYTES {
+        return false;
+    }
+    let Some((namespace, path)) = item_id.split_once(':') else {
+        return false;
+    };
+    !namespace.is_empty()
+        && !path.is_empty()
+        && namespace.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+        })
+        && path.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
+        })
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn validate_inventory(snapshot: &InventorySnapshot) -> SjmlResult<()> {
     if snapshot.slots.len() > MAX_PLAYER_INVENTORY_SLOTS
@@ -98,17 +208,7 @@ fn valid_item_stack(stack: &ItemStackDescriptor) -> bool {
     {
         return false;
     }
-    let Some((namespace, path)) = stack.item_id.split_once(':') else {
-        return false;
-    };
-    !namespace.is_empty()
-        && !path.is_empty()
-        && namespace.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
-        })
-        && path.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
-        })
+    valid_item_id(&stack.item_id)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -143,7 +243,7 @@ fn read_output<T: StableDecode>(invoke: impl FnOnce(i32, i32) -> i32) -> SjmlRes
 fn unsupported_target() -> SjmlError {
     SjmlError::new(
         ErrorCode::UnknownErrorCode,
-        "player inventory reads require the wasm32-unknown-unknown target",
+        "player inventory operations require the wasm32-unknown-unknown target",
     )
 }
 
@@ -151,7 +251,10 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use super::read;
-    use super::{validate_inventory, MAX_PLAYER_INVENTORY_SLOTS};
+    use super::{
+        set_slot, validate_inventory, PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_SLOTS,
+        MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+    };
     use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
     use crate::ErrorCode;
     #[cfg(not(target_arch = "wasm32"))]
@@ -226,5 +329,40 @@ mod tests {
             read(player).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn player_slot_writes_validate_slot_clear_and_stack_shape_before_host_access() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        for slot in [0, 8, 9, 35, 36, 39, MAX_PLAYER_INVENTORY_SLOT_INDEX] {
+            assert_eq!(
+                set_slot(player, slot, PlayerInventorySlotUpdate::Clear)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::UnknownErrorCode,
+                "valid slot {slot} reaches the wasm-only host"
+            );
+        }
+        assert_eq!(
+            set_slot(player, 41, PlayerInventorySlotUpdate::Clear)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        for (item_id, count) in [
+            ("", 1),
+            ("Minecraft:stone", 1),
+            ("minecraft:air", 1),
+            ("minecraft:stone", 0),
+            ("minecraft:stone", MAX_PLAYER_INVENTORY_SLOT_COUNT + 1),
+        ] {
+            assert_eq!(
+                set_slot(player, 0, PlayerInventorySlotUpdate::Set { item_id, count },)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
     }
 }

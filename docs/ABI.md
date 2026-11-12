@@ -6,10 +6,20 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.41.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.42.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.41.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.42.0 adds
+bounded player attribute reads and base-value writes, detached item-stack
+snapshots, player inventory slot writes, allowlisted integer game-rule access,
+property-based block-state updates, loaded-entity spatial queries, and the
+synchronous cancellable `block.place_attempt` event. Player attributes require
+`entity.read`, with `entity.attributes.write` for writes; item snapshots require
+`world.read` and `inventory.read`; player slot writes require `entity.read` and
+`inventory.write`; world reads and mutations require `world.read`, with
+mutations also requiring `world.write`; spatial queries require `entity.read`
+and `world.read`; placement vetoes require `events.subscribe` and
+`events.cancel`. ABI 1.41.0 adds
 `sjml_world_v1.schedule_block_tick` for guarded one-shot ticks on already-loaded
 blocks, `sjml_entity_v1.remove_effect` for removing registered effects from
 loaded living entities, a synchronous cancellable `player.interaction` event

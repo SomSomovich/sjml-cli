@@ -5,9 +5,12 @@
 
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
+use crate::inventory::BlockPos;
 #[cfg(target_arch = "wasm32")]
 use crate::{to_bytes, Decoder, MAX_STRING_BYTES};
-use crate::{EntityHandle, ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode};
+use crate::{
+    EntityHandle, ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
+};
 
 const MAX_EFFECT_ID_BYTES: usize = 256;
 pub(crate) const MAX_EFFECT_DURATION_TICKS: u32 = 72_000;
@@ -76,6 +79,8 @@ impl EntityVelocity {
 extern "C" {
     #[link_name = "loaded"]
     fn imported_loaded(output: i32, capacity: i32) -> i32;
+    #[link_name = "within"]
+    fn imported_within(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "snapshot"]
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "apply_effect"]
@@ -107,6 +112,139 @@ extern "C" {
     ) -> i32;
     #[link_name = "damage"]
     fn imported_damage(handle: i32, handle_length: i32, amount_bits: i32) -> i32;
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct SpatialQuery {
+    world: WorldHandle,
+    center: BlockPos,
+    horizontal_radius: f64,
+    vertical_radius: f64,
+    entity_type_id: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct SpatialResults {
+    handles: Vec<EntityHandle>,
+}
+
+/// Maximum number of loaded non-player entities returned by [`within`].
+pub const MAX_SPATIAL_QUERY_RESULTS: usize = 256;
+/// Maximum horizontal or vertical extent for a loaded-entity spatial query.
+pub const MAX_SPATIAL_QUERY_RADIUS: f64 = 64.0;
+
+/// Returns loaded non-player entity handles inside a horizontal cylinder and vertical range.
+///
+/// Requires both `entity.read` and `world.read`; the world handle must belong to this module and
+/// active logical server. Horizontal distance is measured in the X/Z plane from `center`, and the
+/// vertical distance is an absolute Y difference. Each radius must be finite and in `0..=64`.
+/// `entity_type_id` optionally filters by canonical entity registry ID, for example
+/// `Some("minecraft:zombie")`. The host examines only entities already tracked in loaded chunks,
+/// never requests chunk loads, returns results sorted by UUID, and fails the whole query if more
+/// than 256 entities match. Returned handles retain the usual module, server, generation, and
+/// live-instance checks used by the other `entity` APIs.
+pub fn within(
+    world: WorldHandle,
+    center: BlockPos,
+    horizontal_radius: f64,
+    vertical_radius: f64,
+    entity_type_id: Option<&str>,
+) -> SjmlResult<Vec<EntityHandle>> {
+    validate_spatial_query(center, horizontal_radius, vertical_radius, entity_type_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let request = SpatialQuery {
+            world,
+            center,
+            horizontal_radius,
+            vertical_radius,
+            entity_type_id: entity_type_id.map(str::to_owned),
+        };
+        let request = to_bytes(&request)?;
+        let mut results: SpatialResults = read_output(
+            (8 + MAX_SPATIAL_QUERY_RESULTS * 24) as u32,
+            |output, capacity| {
+                // SAFETY: the serialized request remains live for the synchronous import and
+                // read_output owns the exact destination allocation through decoding.
+                unsafe {
+                    imported_within(
+                        request.as_ptr() as usize as u32 as i32,
+                        request.len() as u32 as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        if results.handles.len() > MAX_SPATIAL_QUERY_RESULTS {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "host returned more than 256 spatial query results",
+            ));
+        }
+        Ok(std::mem::take(&mut results.handles))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_spatial_query(
+    center: BlockPos,
+    horizontal_radius: f64,
+    vertical_radius: f64,
+    entity_type_id: Option<&str>,
+) -> SjmlResult<()> {
+    if center.x < -30_000_000
+        || center.x > 30_000_000
+        || center.z < -30_000_000
+        || center.z > 30_000_000
+        || !horizontal_radius.is_finite()
+        || !(0.0..=MAX_SPATIAL_QUERY_RADIUS).contains(&horizontal_radius)
+        || !vertical_radius.is_finite()
+        || !(0.0..=MAX_SPATIAL_QUERY_RADIUS).contains(&vertical_radius)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity query center or radii are outside their supported bounds",
+        ));
+    }
+    if let Some(entity_type_id) = entity_type_id {
+        let Some((namespace, path)) = entity_type_id.split_once(':') else {
+            return Err(invalid_entity_type_id());
+        };
+        if entity_type_id.len() > 256
+            || namespace.is_empty()
+            || path.is_empty()
+            || path.contains(':')
+            || !namespace.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'_' | b'.' | b'-')
+            })
+            || !path.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'_' | b'.' | b'-' | b'/')
+            })
+        {
+            return Err(invalid_entity_type_id());
+        }
+    }
+    Ok(())
+}
+
+fn invalid_entity_type_id() -> SjmlError {
+    SjmlError::new(
+        ErrorCode::InvalidArgument,
+        "entity type ID must be a lowercase namespace:path value of at most 256 bytes",
+    )
 }
 
 /// Returns all loaded non-player entities across the server's loaded dimensions, including modded
@@ -428,10 +566,103 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, damage, remove_effect, set_velocity, EntityVelocity, MAX_ENTITY_DAMAGE,
-        MAX_ENTITY_VELOCITY_COMPONENT,
+        apply_effect, damage, remove_effect, set_velocity, validate_spatial_query, within,
+        EntityVelocity, SpatialQuery, SpatialResults, MAX_ENTITY_DAMAGE,
+        MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
     };
-    use crate::{EntityHandle, ErrorCode};
+    use crate::{inventory::BlockPos, EntityHandle, ErrorCode, WorldHandle};
+
+    #[test]
+    fn spatial_query_bounds_are_checked_before_host_access() {
+        let center = BlockPos {
+            x: 10,
+            y: 64,
+            z: -5,
+        };
+        assert_eq!(MAX_SPATIAL_QUERY_RESULTS, 256);
+        assert_eq!(MAX_SPATIAL_QUERY_RADIUS, 64.0);
+        assert!(validate_spatial_query(center, 64.0, 0.0, Some("minecraft:zombie")).is_ok());
+        assert_eq!(
+            validate_spatial_query(center, 64.01, 1.0, None)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_spatial_query(center, f64::INFINITY, 1.0, None)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_spatial_query(center, 1.0, 1.0, Some("Minecraft:Zombie"))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_spatial_query(
+                BlockPos {
+                    x: 30_000_001,
+                    y: 0,
+                    z: 0
+                },
+                1.0,
+                1.0,
+                None
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            within(
+                WorldHandle::new(1, 2, 3, 4).unwrap(),
+                center,
+                1.0,
+                1.0,
+                None
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn spatial_query_and_results_match_the_versioned_host_layout() {
+        let query = SpatialQuery {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            center: BlockPos {
+                x: -12,
+                y: 64,
+                z: 33,
+            },
+            horizontal_radius: 8.5,
+            vertical_radius: 4.0,
+            entity_type_id: Some("minecraft:zombie".to_owned()),
+        };
+        let encoded = crate::to_bytes(&query).unwrap();
+        assert_eq!(encoded.len(), 61 + 4 + "minecraft:zombie".len());
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(encoded[28..32].try_into().unwrap()), 1);
+        assert_eq!(crate::from_bytes::<SpatialQuery>(&encoded).unwrap(), query);
+
+        let results = SpatialResults {
+            handles: vec![EntityHandle::new(1, 2, 3, 4).unwrap()],
+        };
+        let encoded_results = crate::to_bytes(&results).unwrap();
+        assert_eq!(encoded_results.len(), 8 + 24);
+        assert_eq!(
+            u32::from_le_bytes(encoded_results[4..8].try_into().unwrap()),
+            1
+        );
+        assert_eq!(
+            crate::from_bytes::<SpatialResults>(&encoded_results).unwrap(),
+            results
+        );
+    }
 
     #[test]
     fn effect_application_validates_the_identifier_and_duration_before_host_access() {
