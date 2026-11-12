@@ -129,6 +129,38 @@ pub struct EntityDamaged {
     pub applied_damage: f32,
 }
 
+/// Synchronous cancellable damage attempt for a loaded living entity on the logical server.
+///
+/// This snapshot is delivered from NeoForge 21.1.265's `LivingIncomingDamageEvent`, after
+/// invulnerability checks and before damage reductions such as armor are applied. Return
+/// `Ok(true)` from the `entity.damage_attempt` handler to veto the entire incoming damage
+/// sequence. The callback runs synchronously on the owning server thread and receives only
+/// detached values.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityDamageAttempt {
+    /// Canonical UUID string of the living entity that would receive damage.
+    pub entity_id: String,
+    /// Registry ID of the damaged entity type.
+    pub entity_type_id: String,
+    /// Resource location of the entity's level.
+    pub dimension_id: String,
+    /// Registry ID of the incoming damage type.
+    pub damage_type_id: String,
+    /// UUID of the responsible source entity, when the damage had one.
+    pub source_entity_id: Option<String>,
+    /// Entity X coordinate at the time the attempt was dispatched.
+    pub x: f64,
+    /// Entity Y coordinate at the time the attempt was dispatched.
+    pub y: f64,
+    /// Entity Z coordinate at the time the attempt was dispatched.
+    pub z: f64,
+    /// Damage value passed into the damage sequence before modifications.
+    pub original_damage: f32,
+    /// Current damage value before armor and other mitigation.
+    pub amount: f32,
+}
+
 /// Synchronous lifecycle notification for one logical-server level.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -528,9 +560,10 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
-        EffectTickEvent, EntityDamaged, EntityDeath, EntityDeathAttempt, EntitySpawned,
-        EventPriority, InventoryChanged, PlayerInteracted, PlayerInteractionAttempt, PlayerMoved,
-        PlayerRespawned, ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntitySpawned, EventPriority, InventoryChanged, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerMoved, PlayerRespawned, ResourcesReloaded, ServerTick, WorldLifecycle,
+        MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -696,6 +729,71 @@ mod tests {
         assert_eq!(
             from_bytes::<EntityDeathAttempt>(&encoded).unwrap(),
             non_player
+        );
+    }
+
+    #[test]
+    fn cancellable_entity_damage_attempt_matches_host_schema_v1_bytes() {
+        let event = EntityDamageAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            damage_type_id: "minecraft:player_attack".to_owned(),
+            source_entity_id: Some("00000000-0000-0000-0000-000000000002".to_owned()),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            original_damage: 8.0,
+            amount: 8.0,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.entity_id);
+        append_test_string(&mut expected, &event.entity_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        append_test_string(&mut expected, &event.damage_type_id);
+        expected.push(1);
+        append_test_string(&mut expected, event.source_entity_id.as_deref().unwrap());
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        expected.extend_from_slice(&(8.0_f32).to_le_bytes());
+        expected.extend_from_slice(&(8.0_f32).to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<EntityDamageAttempt>(&encoded).unwrap(), event);
+
+        let environment_damage = EntityDamageAttempt {
+            source_entity_id: None,
+            damage_type_id: "minecraft:generic".to_owned(),
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+            original_damage: 2.0,
+            amount: 1.5,
+            ..event
+        };
+        let encoded = to_bytes(&environment_damage).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &environment_damage.entity_id);
+        append_test_string(&mut expected, &environment_damage.entity_type_id);
+        append_test_string(&mut expected, &environment_damage.dimension_id);
+        append_test_string(&mut expected, &environment_damage.damage_type_id);
+        expected.push(0);
+        expected.extend_from_slice(&(1.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(3.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.0_f32).to_le_bytes());
+        expected.extend_from_slice(&(1.5_f32).to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "None source entity uses the stable option tag"
+        );
+        assert_eq!(
+            from_bytes::<EntityDamageAttempt>(&encoded).unwrap(),
+            environment_damage
         );
     }
 

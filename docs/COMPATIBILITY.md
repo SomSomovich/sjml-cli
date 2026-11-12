@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.53.0` with ABI `1.43.0`. ABI compatibility is major-version based:
+The current host is `0.54.0` with ABI `1.44.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.43.0` therefore accepts
-`1.0.x` through `1.43.0` (including earlier ABI 1.32–1.42 guests), but rejects
+minor/patch version is equal or newer. A host at ABI `1.44.0` therefore accepts
+`1.0.x` through `1.44.0` (including earlier ABI 1.32–1.43 guests), but rejects
 a later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -169,3 +169,12 @@ death cancellation requires `events.subscribe` and `events.cancel`; local
 commands require a requested and locally granted `client.command`. The host
 GameTests now exercise these server-backed APIs; client command display and
 execution still need a display-backed Minecraft client check.
+
+Host 0.54.0 / ABI 1.44.0 / SDK 0.52.0 adds bounded static villager trade offers,
+pre-mitigation cancellable `entity.damage_attempt`, cross-dimension server-player
+teleport into an already-loaded chunk, and shared elapsed `game_time` writes.
+These require `content.register`, `events.subscribe` plus `events.cancel`,
+`entity.read` plus `player.teleport` plus `world.read`, and `world.read` plus
+`world.write`, respectively. Dedicated-server GameTests exercise damage veto,
+dimension transfer, game-time mutation, and insertion into the live villager
+trade table.

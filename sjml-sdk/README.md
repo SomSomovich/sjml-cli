@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.51.0"
+sjml-sdk = "0.52.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -95,6 +95,13 @@ entity-death vetoes, and manifest-declared local client commands. See
 [player inventory writes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_INVENTORY_WRITES.md),
 and [block placement vetoes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/BLOCK_PLACE_ATTEMPTS.md).
 
+SDK 0.52.0 adds bounded static villager trade offers, cancellable pre-mitigation
+entity damage attempts, cross-dimension teleportation into an already-loaded
+chunk, and shared elapsed game-time writes. See [villager trades](https://github.com/SomSomovich/sjml-cli/blob/master/docs/VILLAGER_TRADES.md),
+[damage attempts](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_DAMAGE_ATTEMPTS.md),
+[cross-dimension teleport](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_DIMENSION_TELEPORT.md),
+and [shared game time](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_GAME_TIME.md).
+
 ```rust
 use sjml::prelude::*;
 
@@ -107,7 +114,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.51.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.52.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

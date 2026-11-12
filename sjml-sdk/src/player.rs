@@ -14,7 +14,9 @@ use crate::entity::{validate_effect_id, MAX_EFFECT_DURATION_TICKS};
 use crate::MAX_STRING_BYTES;
 #[cfg(target_arch = "wasm32")]
 use crate::{to_bytes, Decoder};
-use crate::{ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, StableEncode};
+use crate::{
+    ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
+};
 
 /// Current identity, dimension, and coordinates of one online player.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -423,6 +425,15 @@ extern "C" {
         destination: i32,
         destination_length: i32,
     ) -> i32;
+    #[link_name = "teleport_to_world"]
+    fn imported_teleport_to_world(
+        player: i32,
+        player_length: i32,
+        world: i32,
+        world_length: i32,
+        destination: i32,
+        destination_length: i32,
+    ) -> i32;
     #[link_name = "motion"]
     fn imported_motion(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_velocity"]
@@ -804,6 +815,44 @@ pub fn teleport(handle: PlayerHandle, destination: PlayerTeleport) -> SjmlResult
     }
 }
 
+/// Teleports an online player into a selected, already-loaded server world.
+///
+/// The module must request and receive `entity.read`, `player.teleport`, and `world.read`.
+/// The target world handle must belong to this module and active logical server. Destination
+/// coordinates must pass the same bounds as [`teleport`]; the host additionally checks the target
+/// world's build height and border and requires the destination chunk to already be loaded. This
+/// operation never requests a chunk load. Server dimension-travel hooks may cancel the move.
+pub fn teleport_to_world(
+    handle: PlayerHandle,
+    target_world: WorldHandle,
+    destination: PlayerTeleport,
+) -> SjmlResult<()> {
+    destination.validate()?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_player = to_bytes(&handle)?;
+        let encoded_world = to_bytes(&target_world)?;
+        let encoded_destination = to_bytes(&destination)?;
+        // SAFETY: all three stable buffers remain live through this synchronous host import.
+        let status = unsafe {
+            imported_teleport_to_world(
+                encoded_player.as_ptr() as usize as u32 as i32,
+                encoded_player.len() as u32 as i32,
+                encoded_world.as_ptr() as usize as u32 as i32,
+                encoded_world.len() as u32 as i32,
+                encoded_destination.as_ptr() as usize as u32 as i32,
+                encoded_destination.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the cross-dimension player teleport")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, target_world);
+        Err(unsupported_target())
+    }
+}
+
 /// Reads the velocity and rotation of the live server player identified by this login-session handle.
 ///
 /// Requires `entity.read`. Client instances, static registration, and stale login sessions are denied.
@@ -993,9 +1042,10 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, teleport, vitals, PlayerTeleport, PlayerVitals, MAX_TELEPORT_COORDINATE,
+        apply_effect, teleport, teleport_to_world, vitals, PlayerTeleport, PlayerVitals,
+        MAX_TELEPORT_COORDINATE,
     };
-    use crate::{ErrorCode, PlayerHandle};
+    use crate::{ErrorCode, PlayerHandle, WorldHandle};
 
     #[test]
     fn player_effect_application_validates_before_host_access() {
@@ -1072,6 +1122,39 @@ mod tests {
         assert_eq!(
             teleport(
                 PlayerHandle::new(1, 2, 3, 4).unwrap(),
+                PlayerTeleport::new(1.0, 64.0, -2.0, 180.0, 20.0).unwrap(),
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn cross_dimension_teleport_validates_before_host_access() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        let world = WorldHandle::new(5, 6, 7, 8).unwrap();
+        assert_eq!(
+            teleport_to_world(
+                player,
+                world,
+                PlayerTeleport {
+                    x: f64::INFINITY,
+                    y: 64.0,
+                    z: 0.0,
+                    yaw: 0.0,
+                    pitch: 0.0,
+                }
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            teleport_to_world(
+                player,
+                world,
                 PlayerTeleport::new(1.0, 64.0, -2.0, 180.0, 20.0).unwrap(),
             )
             .unwrap_err()

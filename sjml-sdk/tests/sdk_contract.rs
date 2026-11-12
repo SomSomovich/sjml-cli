@@ -4,10 +4,11 @@ use sjml::events::{
 };
 use sjml::player::PlayerTeleport;
 use sjml::prelude::PlayerMoved;
+use sjml::registry::{register_villager_trade, VillagerTradeItem, VillagerTradeOffer};
 use sjml::{
-    client_command, command, event, from_bytes, mod_init, mod_shutdown, service, to_bytes,
-    EntityHandle, ErrorCode, PlayerHandle, PlayerSnapshot, SjmlError, SjmlResult, StableDecode,
-    StableEncode, WorldHandle,
+    client_command, command, event, from_bytes, mod_init, mod_register, mod_shutdown, service,
+    to_bytes, EntityHandle, ErrorCode, PlayerHandle, PlayerSnapshot, SjmlError, SjmlResult,
+    StableDecode, StableEncode, WorldHandle,
 };
 
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -26,6 +27,17 @@ fn initialize() -> SjmlResult<()> {
 #[mod_shutdown]
 fn shutdown() -> SjmlResult<()> {
     Ok(())
+}
+
+#[mod_register]
+fn register_demo_trade() -> SjmlResult<()> {
+    let offer = VillagerTradeOffer::new(
+        "minecraft:farmer",
+        1,
+        VillagerTradeItem::new("minecraft:emerald", 18)?,
+        VillagerTradeItem::new("minecraft:bread", 4)?,
+    )?;
+    register_villager_trade("emerald_for_bread", offer)
 }
 
 #[event(name = "player.joined")]
@@ -126,6 +138,12 @@ fn client_command_callback_uses_the_typed_sdk_contract() {
         local_echo("hello locally".to_owned()),
         Ok("hello locally".to_owned())
     );
+}
+
+#[test]
+fn mod_register_can_declare_a_bounded_villager_trade() {
+    let error = register_demo_trade().unwrap_err();
+    assert_eq!(error.code(), ErrorCode::UnknownErrorCode);
 }
 
 #[test]

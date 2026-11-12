@@ -15,6 +15,7 @@ static SAW_ENTITY_SPAWNED: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_INTERACTED: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_INTERACTION_VETO: AtomicBool = AtomicBool::new(false);
 static SAW_ENTITY_DAMAGED: AtomicBool = AtomicBool::new(false);
+static SAW_ENTITY_DAMAGE_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_WORLD_LOADED: AtomicBool = AtomicBool::new(false);
 static SAW_SERVER_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_INVENTORY_PICKUP: AtomicBool = AtomicBool::new(false);
@@ -135,6 +136,15 @@ fn register_test_content() -> SjmlResult<()> {
             },
         )?;
     }
+    registry::register_villager_trade(
+        "gametest_librarian_trade",
+        VillagerTradeOffer::new(
+            "minecraft:librarian",
+            1,
+            VillagerTradeItem::new("minecraft:emerald", 2)?,
+            VillagerTradeItem::new("minecraft:diamond", 1)?,
+        )?,
+    )?;
     Ok(())
 }
 
@@ -169,6 +179,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("player.interacted", EventPriority::Normal)?;
     events::subscribe("player.interaction", EventPriority::Normal)?;
     events::subscribe("entity.damaged", EventPriority::Normal)?;
+    events::subscribe("entity.damage_attempt", EventPriority::Normal)?;
     events::subscribe("world.loaded", EventPriority::Normal)?;
     events::subscribe("world.unloaded", EventPriority::Normal)?;
     events::subscribe_with_interval("server.tick", EventPriority::Normal, 20)?;
@@ -198,6 +209,18 @@ fn veto_cow_death_attempt(event: EntityDeathAttempt) -> SjmlResult<bool> {
     let veto = event.entity_type_id == "minecraft:cow";
     if veto {
         SAW_PIG_DEATH_ATTEMPT.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
+}
+
+#[event(name = "entity.damage_attempt")]
+fn veto_goat_damage_attempt(event: EntityDamageAttempt) -> SjmlResult<bool> {
+    let veto = event.entity_type_id == "minecraft:goat"
+        && event.damage_type_id == "minecraft:generic"
+        && event.original_damage >= 4.0
+        && event.amount >= 4.0;
+    if veto {
+        SAW_ENTITY_DAMAGE_ATTEMPT.store(true, Ordering::Relaxed);
     }
     Ok(veto)
 }
@@ -358,6 +381,18 @@ fn check_cow_death_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "entity.death_attempt callback did not veto the cow",
+        ))
+    }
+}
+
+#[command(name = "entity.damage_attempt.check")]
+fn check_entity_damage_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    if SAW_ENTITY_DAMAGE_ATTEMPT.swap(false, Ordering::Relaxed) {
+        Ok("guest vetoed the goat damage attempt".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity.damage_attempt callback did not veto the goat",
         ))
     }
 }
@@ -610,6 +645,23 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         player_position.z,
     )?;
     let light = world::light_at(player_world, player_position)?;
+    let original_game_time = world::game_time(overworld)?;
+    if !(0..=world::MAX_WORLD_GAME_TIME_TICKS).contains(&original_game_time) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the overworld game time was outside the supported range",
+        ));
+    }
+    let changed_game_time = if original_game_time > world::MAX_WORLD_GAME_TIME_TICKS - 1200 {
+        original_game_time - 1200
+    } else {
+        original_game_time + 1200
+    };
+    world::set_game_time(overworld, changed_game_time)?;
+    let observed_game_time = world::game_time(overworld);
+    let restored_game_time = world::set_game_time(overworld, original_game_time);
+    let observed_game_time = observed_game_time?;
+    restored_game_time?;
     if !(0..=world::MAX_WORLD_DAY_TIME_TICKS).contains(&original_day_time) {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
@@ -765,6 +817,8 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         || world::dimension_id(overworld)? != "minecraft:overworld"
         || !ids.windows(2).all(|pair| pair[0] < pair[1])
         || world::game_time(overworld)? < 0
+        || observed_game_time != changed_game_time
+        || world::game_time(overworld)? != original_game_time
         || observed_day_time != changed_day_time
         || observed_daylight_cycle == original_daylight_cycle
         || world::daylight_cycle_enabled(overworld)? != original_daylight_cycle
@@ -1312,6 +1366,33 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         "read {} online player snapshot(s)",
         snapshots.len()
     ))
+}
+
+#[command(name = "player.teleport.dimension")]
+fn teleport_player_to_nether(arguments: PlayerArguments) -> SjmlResult<String> {
+    let target_player = player::online()?
+        .into_iter()
+        .find(|handle| {
+            player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.player_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "the requested player is not online",
+            )
+        })?;
+    let target_world = world::get("minecraft:the_nether")?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the Nether world must already be loaded",
+        )
+    })?;
+    player::teleport_to_world(
+        target_player,
+        target_world,
+        player::PlayerTeleport::new(0.5, 64.0, 0.5, 0.0, 0.0)?,
+    )?;
+    Ok("player transferred to the already-loaded Nether chunk".to_owned())
 }
 
 #[command(name = "player.inventory.write")]

@@ -6,10 +6,10 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.43.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.44.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.43.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.44.0 adds `sjml_world_v1.set_game_time` for the shared elapsed clock, `sjml_player_v1.teleport_to_world` to an already-loaded destination chunk, bounded static villager trade declarations, and the synchronous cancellable `entity.damage_attempt` callback before damage mitigation. Game-time writes require `world.read` and `world.write`; cross-dimension teleport requires `entity.read`, `player.teleport`, and `world.read`; trade declarations require `content.register` on a server-capable module; damage vetoes require `events.subscribe` and `events.cancel`. ABI 1.43.0 adds
 bounded player-inventory durability writes, already-loaded chunk enumeration,
 nearest loaded-entity raycasts, the synchronous cancellable
 `entity.death_attempt` event, and manifest-declared physical-client commands.

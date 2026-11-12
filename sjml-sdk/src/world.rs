@@ -56,6 +56,8 @@ pub const MAX_WORLD_BORDER_DAMAGE_BUFFER: f64 = 1_024.0;
 pub const MAX_WORLD_BORDER_DAMAGE_PER_BLOCK: f64 = 100.0;
 /// Maximum day-time value accepted by [`set_time`].
 pub const MAX_WORLD_DAY_TIME_TICKS: i64 = 1_000_000_000_000;
+/// Maximum absolute game-time value accepted by [`set_game_time`].
+pub const MAX_WORLD_GAME_TIME_TICKS: i64 = 1_000_000_000_000;
 /// Maximum delay accepted for a guest-scheduled vanilla block tick, in ticks.
 pub const MAX_WORLD_BLOCK_TICK_DELAY_TICKS: u32 = 72_000;
 /// Maximum chunk-radius requested by [`loaded_chunks`], in chunks.
@@ -587,6 +589,13 @@ extern "C" {
         -> i32;
     #[link_name = "set_time"]
     fn imported_set_time(handle: i32, length: i32, day_time_low: i32, day_time_high: i32) -> i32;
+    #[link_name = "set_game_time"]
+    fn imported_set_game_time(
+        handle: i32,
+        length: i32,
+        game_time_low: i32,
+        game_time_high: i32,
+    ) -> i32;
     #[link_name = "set_daylight_cycle_enabled"]
     fn imported_set_daylight_cycle_enabled(handle: i32, length: i32, enabled: i32) -> i32;
     #[link_name = "set_game_rule"]
@@ -1359,6 +1368,46 @@ pub fn set_time(handle: WorldHandle, day_time: i64) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (handle, day_time);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the absolute elapsed game-time clock shared by dimensions on this loaded world’s server.
+///
+/// Requires both `world.read` (for the scoped handle) and `world.write`. Values from zero through
+/// [`MAX_WORLD_GAME_TIME_TICKS`] are accepted. This changes `game_time`, not `day_time`; it runs on
+/// the owning server thread and never loads a dimension or chunk.
+pub fn set_game_time(handle: WorldHandle, game_time: i64) -> SjmlResult<()> {
+    if !(0..=MAX_WORLD_GAME_TIME_TICKS).contains(&game_time) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "game time must be within 0..=1000000000000 ticks",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the stable handle and split i64 argument remain valid for this synchronous call.
+        let status = unsafe {
+            imported_set_game_time(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                game_time as u32 as i32,
+                (game_time >> 32) as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the world game-time update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, game_time);
         Err(unsupported_target())
     }
 }
@@ -2255,8 +2304,8 @@ mod tests {
     use super::{
         block_properties, collides, day_time, daylight_cycle_enabled, integer_game_rule,
         loaded_chunks, play_sound, raycast, schedule_block_tick, set_block, set_block_properties,
-        set_daylight_cycle_enabled, set_integer_game_rule, set_time, spawn_entity, spawn_particle,
-        validate_block_property_updates, validate_loaded_chunk_query,
+        set_daylight_cycle_enabled, set_game_time, set_integer_game_rule, set_time, spawn_entity,
+        spawn_particle, validate_block_property_updates, validate_loaded_chunk_query,
         validate_loaded_chunk_results, Aabb, BlockPropertiesMutation, BlockPropertiesQuery,
         BlockPropertiesResponse, BlockProperty, BlockStateBatch, BlockStateQuery,
         BlockStateSnapshot, ChunkPos, DaylightCycleSnapshot, LoadedChunksQuery,
@@ -2267,7 +2316,7 @@ mod tests {
         WorldIntegerGameRuleSnapshot, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
         MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
         MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
-        MAX_WORLD_DAY_TIME_TICKS,
+        MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_GAME_TIME_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -2530,6 +2579,31 @@ mod tests {
         );
         assert_eq!(
             set_time(handle, MAX_WORLD_DAY_TIME_TICKS)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn game_time_read_and_set_game_time_validate_mutation_bound_before_host_access() {
+        let handle = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            super::game_time(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        for game_time in [-1, MAX_WORLD_GAME_TIME_TICKS + 1] {
+            assert_eq!(
+                set_game_time(handle, game_time).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_game_time(handle, 0).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_game_time(handle, MAX_WORLD_GAME_TIME_TICKS)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

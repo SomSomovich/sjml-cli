@@ -178,7 +178,7 @@ pub use recipe::{
 };
 pub use registry::{
     BlockEntityModelDefinition, EntityModelDefinition, ModelAnimation, ModelAnimationAxis,
-    ModelCuboid, MAX_BOUND_MODEL_CUBOIDS,
+    ModelCuboid, VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,
 };
 pub use render::{
     RenderContext, RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle,
@@ -211,7 +211,7 @@ pub use world::{
     MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
     MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
     MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_CHUNKS, MAX_WORLD_CHUNKS_RESPONSE_BYTES,
-    MAX_WORLD_CHUNK_RADIUS,
+    MAX_WORLD_CHUNK_RADIUS, MAX_WORLD_GAME_TIME_TICKS,
 };
 
 /// Common imports for an SJML guest module.
@@ -259,9 +259,9 @@ pub mod prelude {
     pub use crate::events;
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, BlockPlaceAttempt,
-        EffectTickEvent, EntityDamaged, EntityDeath, EntityDeathAttempt, EntitySpawned,
-        EventPriority, InventoryChanged, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined,
-        PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle,
+        EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntitySpawned, EventPriority, InventoryChanged, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerJoined, PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle,
         DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT,
         MAX_SERVER_TICK_INTERVAL,
     };
@@ -305,13 +305,14 @@ pub mod prelude {
         register_fluid, register_fluid_with_visuals, register_item, register_particle,
         register_recipe_serializer, register_shaped_recipe, register_shapeless_recipe,
         register_smithing_transform_recipe, register_sound, register_string_component,
-        set_entity_attribute, set_item_string_component, AttributeModifierOperation,
-        BlockDefinition, BlockEntityModelDefinition, CookingRecipeDefinition, CookingRecipeKind,
-        CreativeTabDefinition, EffectCategory, EntityAiGoal, EntityAttribute, EntityDefinition,
-        EntityModelDefinition, FluidDefinition, FluidVisualDefinition, ItemDefinition,
-        ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition,
-        ShapedRecipeKey, ShapelessRecipeDefinition, SmithingTransformRecipeDefinition,
-        StringComponentDefinition, MAX_BOUND_MODEL_CUBOIDS,
+        register_villager_trade, set_entity_attribute, set_item_string_component,
+        AttributeModifierOperation, BlockDefinition, BlockEntityModelDefinition,
+        CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
+        EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
+        FluidVisualDefinition, ItemDefinition, ModelAnimation, ModelAnimationAxis, ModelCuboid,
+        RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey, ShapelessRecipeDefinition,
+        SmithingTransformRecipeDefinition, StringComponentDefinition, VillagerTradeItem,
+        VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,
     };
     pub use crate::render;
     pub use crate::render::{

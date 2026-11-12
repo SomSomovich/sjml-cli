@@ -2,9 +2,9 @@
 //!
 //! These functions are valid only from `#[mod_register]`. They stage bounded
 //! item, block, block-entity, generic entity and its attributes, creative-tab,
-//! fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipe, particle, sound, bounded attribute
-//! effect and its optional tick callback, and string data component declarations; they do not mutate world
-//! state or registries directly.
+//! fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipe, bounded villager trade, particle,
+//! sound, bounded attribute effect and its optional tick callback, and string data component declarations;
+//! they do not mutate world state or registries directly.
 
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
@@ -19,6 +19,10 @@ const MAX_RECIPE_PATTERN_WIDTH: usize = 3;
 const MAX_RECIPE_KEY_LIST_BYTES: usize = 4096;
 const MAX_RECIPE_COOKING_TIME_TICKS: u32 = 36_000;
 const MAX_RECIPE_EXPERIENCE: f32 = 1_000.0;
+const MAX_VILLAGER_TRADE_ID_BYTES: usize = 256;
+const MAX_VILLAGER_TRADE_USES: u32 = 1_000;
+const MAX_VILLAGER_TRADE_XP: u32 = 1_000;
+const MAX_VILLAGER_TRADE_PRICE_MULTIPLIER: f32 = 100.0;
 const MAX_CUSTOM_REGISTRY_VALUE_BYTES: usize = 65_536;
 const MAX_PARTICLE_TEXTURE_ID_BYTES: usize = 256;
 const MIN_PARTICLE_SCALE: f32 = 0.05;
@@ -92,6 +96,96 @@ pub struct EntityDefinition {
     pub tracking_range: u32,
     pub update_interval: u32,
     pub fire_immune: bool,
+}
+
+/// One bounded item stack used as a villager trade input or result.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VillagerTradeItem {
+    item_id: String,
+    count: u32,
+}
+
+impl VillagerTradeItem {
+    /// Creates an item stack from a fully qualified item registry ID and a count from 1 to 64.
+    pub fn new(item_id: impl Into<String>, count: u32) -> SjmlResult<Self> {
+        let item_id = item_id.into();
+        validate_villager_registry_id(&item_id, "trade item ID")?;
+        if !(1..=64).contains(&count) {
+            return Err(invalid_argument(
+                "villager trade item counts must be between 1 and 64",
+            ));
+        }
+        Ok(Self { item_id, count })
+    }
+
+    pub fn item_id(&self) -> &str {
+        &self.item_id
+    }
+
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+}
+
+/// One static offer added to a vanilla villager profession and level.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VillagerTradeOffer {
+    profession_id: String,
+    level: u32,
+    cost_a: VillagerTradeItem,
+    cost_b: Option<VillagerTradeItem>,
+    result: VillagerTradeItem,
+    max_uses: u32,
+    villager_xp: u32,
+    price_multiplier: f32,
+}
+
+impl VillagerTradeOffer {
+    /// Creates a trade with one cost, 12 uses, one villager XP, and vanilla's 0.05 price multiplier.
+    pub fn new(
+        profession_id: impl Into<String>,
+        level: u32,
+        cost_a: VillagerTradeItem,
+        result: VillagerTradeItem,
+    ) -> SjmlResult<Self> {
+        let profession_id = profession_id.into();
+        validate_villager_registry_id(&profession_id, "villager profession ID")?;
+        if !(1..=5).contains(&level) {
+            return Err(invalid_argument(
+                "villager trade levels must be between 1 and 5",
+            ));
+        }
+        Ok(Self {
+            profession_id,
+            level,
+            cost_a,
+            cost_b: None,
+            result,
+            max_uses: 12,
+            villager_xp: 1,
+            price_multiplier: 0.05,
+        })
+    }
+
+    /// Adds an optional second cost stack, such as a book alongside emeralds.
+    pub fn with_second_cost(mut self, cost_b: VillagerTradeItem) -> Self {
+        self.cost_b = Some(cost_b);
+        self
+    }
+
+    /// Sets bounded offer stock and pricing values.
+    pub fn with_economy(
+        mut self,
+        max_uses: u32,
+        villager_xp: u32,
+        price_multiplier: f32,
+    ) -> SjmlResult<Self> {
+        validate_villager_economy(max_uses, villager_xp, price_multiplier)?;
+        self.max_uses = max_uses;
+        self.villager_xp = villager_xp;
+        self.price_multiplier = price_multiplier;
+        Ok(self)
+    }
 }
 
 /// One local-space colored cuboid used by an entity or block-entity model.
@@ -724,6 +818,26 @@ extern "C" {
         priority: i32,
         value_bits: i32,
         flags: i32,
+    ) -> i32;
+    #[link_name = "register_villager_trade"]
+    fn imported_register_villager_trade(
+        path_pointer: i32,
+        path_length: i32,
+        profession_pointer: i32,
+        profession_length: i32,
+        level: i32,
+        cost_a_pointer: i32,
+        cost_a_length: i32,
+        cost_a_count: i32,
+        cost_b_pointer: i32,
+        cost_b_length: i32,
+        cost_b_count: i32,
+        result_pointer: i32,
+        result_length: i32,
+        result_count: i32,
+        max_uses: i32,
+        villager_xp: i32,
+        price_multiplier_bits: i32,
     ) -> i32;
     #[link_name = "register_entity_model"]
     fn imported_register_entity_model(
@@ -1519,6 +1633,66 @@ pub fn register_entity_ai_goal(path: &str, goal: EntityAiGoal) -> SjmlResult<()>
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = goal;
+        Err(unsupported_target())
+    }
+}
+
+/// Adds a bounded offer for a registered villager profession during `#[mod_register]`.
+///
+/// The host installs the offer when NeoForge fires `VillagerTradesEvent` during server data
+/// loading. The declaring module must request `content.register` and use `side = "server"`
+/// or `side = "both"`.
+pub fn register_villager_trade(path: &str, offer: VillagerTradeOffer) -> SjmlResult<()> {
+    validate_path(path)?;
+    validate_villager_registry_id(&offer.profession_id, "villager profession ID")?;
+    validate_villager_trade_item(&offer.cost_a)?;
+    if let Some(cost_b) = &offer.cost_b {
+        validate_villager_trade_item(cost_b)?;
+    }
+    validate_villager_trade_item(&offer.result)?;
+    if !(1..=5).contains(&offer.level) {
+        return Err(invalid_argument(
+            "villager trade levels must be between 1 and 5",
+        ));
+    }
+    validate_villager_economy(offer.max_uses, offer.villager_xp, offer.price_multiplier)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let (cost_b_pointer, cost_b_length, cost_b_count) =
+            offer.cost_b.as_ref().map_or((0, 0, 0), |item| {
+                (
+                    item.item_id.as_ptr() as usize as u32 as i32,
+                    item.item_id.len() as u32 as i32,
+                    item.count as i32,
+                )
+            });
+        // SAFETY: the host copies these bounded strings and scalar values during mod_register.
+        let status = unsafe {
+            imported_register_villager_trade(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                offer.profession_id.as_ptr() as usize as u32 as i32,
+                offer.profession_id.len() as u32 as i32,
+                offer.level as i32,
+                offer.cost_a.item_id.as_ptr() as usize as u32 as i32,
+                offer.cost_a.item_id.len() as u32 as i32,
+                offer.cost_a.count as i32,
+                cost_b_pointer,
+                cost_b_length,
+                cost_b_count,
+                offer.result.item_id.as_ptr() as usize as u32 as i32,
+                offer.result.item_id.len() as u32 as i32,
+                offer.result.count as i32,
+                offer.max_uses as i32,
+                offer.villager_xp as i32,
+                offer.price_multiplier.to_bits() as i32,
+            )
+        };
+        return status_result(status, "host rejected a villager trade declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = offer;
         Err(unsupported_target())
     }
 }
@@ -2336,6 +2510,58 @@ fn validate_path(path: &str) -> SjmlResult<()> {
     Ok(())
 }
 
+fn validate_villager_registry_id(value: &str, label: &str) -> SjmlResult<()> {
+    let Some((namespace, path)) = value.split_once(':') else {
+        return Err(invalid_argument(&format!(
+            "{label} must be a fully qualified registry ID"
+        )));
+    };
+    let valid_namespace = !namespace.is_empty()
+        && namespace.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+        });
+    let valid_path = !path.is_empty()
+        && path
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+        && path.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_./-".contains(&byte)
+        });
+    if value.len() > MAX_VILLAGER_TRADE_ID_BYTES || !valid_namespace || !valid_path {
+        return Err(invalid_argument(&format!(
+            "{label} must be a valid fully qualified registry ID of at most {MAX_VILLAGER_TRADE_ID_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_villager_trade_item(item: &VillagerTradeItem) -> SjmlResult<()> {
+    validate_villager_registry_id(&item.item_id, "trade item ID")?;
+    if !(1..=64).contains(&item.count) {
+        return Err(invalid_argument(
+            "villager trade item counts must be between 1 and 64",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_villager_economy(
+    max_uses: u32,
+    villager_xp: u32,
+    price_multiplier: f32,
+) -> SjmlResult<()> {
+    if !(1..=MAX_VILLAGER_TRADE_USES).contains(&max_uses)
+        || villager_xp > MAX_VILLAGER_TRADE_XP
+        || !price_multiplier.is_finite()
+        || !(0.0..=MAX_VILLAGER_TRADE_PRICE_MULTIPLIER).contains(&price_multiplier)
+    {
+        return Err(invalid_argument(
+            "villager trade stock or pricing values are outside their supported bounds",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_title(title: &str) -> SjmlResult<()> {
     if title.trim().is_empty()
         || title.len() > MAX_CONTENT_PATH_BYTES
@@ -2491,6 +2717,74 @@ mod tests {
         assert_eq!(&encoded[56..60], &30.0_f32.to_bits().to_le_bytes());
         assert_eq!(&encoded[60..64], &80_u32.to_le_bytes());
         assert_eq!(&encoded[64..68], &20_u32.to_le_bytes());
+    }
+
+    #[test]
+    fn villager_trade_builders_enforce_registry_and_economy_bounds() {
+        let emeralds = VillagerTradeItem::new("minecraft:emerald", 18).unwrap();
+        let book = VillagerTradeItem::new("minecraft:book", 1).unwrap();
+        let enchanted_book = VillagerTradeItem::new("minecraft:enchanted_book", 1).unwrap();
+        let offer = VillagerTradeOffer::new("minecraft:librarian", 3, emeralds, enchanted_book)
+            .unwrap()
+            .with_second_cost(book)
+            .with_economy(8, 12, 0.2)
+            .unwrap();
+        assert_eq!(offer.profession_id, "minecraft:librarian");
+        assert_eq!(offer.level, 3);
+        assert_eq!(offer.cost_a.count(), 18);
+        assert_eq!(offer.cost_b.as_ref().unwrap().item_id(), "minecraft:book");
+        assert_eq!(offer.result.item_id(), "minecraft:enchanted_book");
+        assert_eq!(offer.max_uses, 8);
+        assert_eq!(offer.villager_xp, 12);
+        assert_eq!(offer.price_multiplier, 0.2);
+
+        assert_eq!(
+            VillagerTradeItem::new("minecraft:emerald", 65)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            VillagerTradeItem::new("emerald", 1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            VillagerTradeOffer::new(
+                "minecraft:librarian",
+                6,
+                VillagerTradeItem::new("minecraft:emerald", 1).unwrap(),
+                VillagerTradeItem::new("minecraft:book", 1).unwrap(),
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            VillagerTradeOffer::new(
+                "minecraft:librarian",
+                1,
+                VillagerTradeItem::new("minecraft:emerald", 1).unwrap(),
+                VillagerTradeItem::new("minecraft:book", 1).unwrap(),
+            )
+            .unwrap()
+            .with_economy(0, 0, 0.05)
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            VillagerTradeOffer::new(
+                "minecraft:librarian",
+                1,
+                VillagerTradeItem::new("minecraft:emerald", 1).unwrap(),
+                VillagerTradeItem::new("minecraft:book", 1).unwrap(),
+            )
+            .unwrap()
+            .with_economy(12, 1, f32::NAN)
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
     }
 
     #[test]
@@ -2651,6 +2945,19 @@ mod tests {
         );
         assert_eq!(
             register_entity("ruby_mite", EntityDefinition::default())
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        let trade = VillagerTradeOffer::new(
+            "minecraft:farmer",
+            1,
+            VillagerTradeItem::new("minecraft:emerald", 1).unwrap(),
+            VillagerTradeItem::new("minecraft:bread", 1).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            register_villager_trade("emerald_for_bread", trade)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode
