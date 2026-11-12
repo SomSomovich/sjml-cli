@@ -87,6 +87,13 @@ extern "C" {
         duration_ticks: i32,
         amplifier: i32,
     ) -> i32;
+    #[link_name = "remove_effect"]
+    fn imported_remove_effect(
+        handle: i32,
+        handle_length: i32,
+        effect_id: i32,
+        effect_id_length: i32,
+    ) -> i32;
     #[link_name = "discard"]
     fn imported_discard(handle: i32, handle_length: i32) -> i32;
     #[link_name = "velocity"]
@@ -184,6 +191,37 @@ pub fn apply_effect(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (handle, amplifier);
+        Err(unsupported_target())
+    }
+}
+
+/// Removes one registered status effect from a loaded living non-player entity.
+///
+/// The module must request and receive both `entity.read` and
+/// `entity.effect.remove`. The target is revalidated on the owning server
+/// thread for every call. An effect that is not currently active is a
+/// successful no-op; an unknown effect ID is rejected. Players, nonliving
+/// entities, unloaded targets, client contexts, and static registration calls
+/// are rejected. The guest receives no Minecraft objects.
+pub fn remove_effect(handle: EntityHandle, effect_id: &str) -> SjmlResult<()> {
+    validate_effect_id(effect_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the host copies this bounded ID and handle before returning.
+        let status = unsafe {
+            imported_remove_effect(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                effect_id.as_ptr() as usize as u32 as i32,
+                effect_id.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the entity effect removal")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
         Err(unsupported_target())
     }
 }
@@ -390,7 +428,7 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, damage, set_velocity, EntityVelocity, MAX_ENTITY_DAMAGE,
+        apply_effect, damage, remove_effect, set_velocity, EntityVelocity, MAX_ENTITY_DAMAGE,
         MAX_ENTITY_VELOCITY_COMPONENT,
     };
     use crate::{EntityHandle, ErrorCode};
@@ -424,6 +462,27 @@ mod tests {
         );
         assert_eq!(
             apply_effect(handle, "ruby_pack:content/power", 200, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn effect_removal_validates_the_identifier_before_host_access() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            remove_effect(handle, "RubyPack:power").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            remove_effect(handle, "ruby_pack:content:power")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            remove_effect(handle, "ruby_pack:content/power")
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

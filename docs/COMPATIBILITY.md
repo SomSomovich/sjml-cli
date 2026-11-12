@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.50.0` with ABI `1.40.0`. ABI compatibility is major-version based:
+The current host is `0.51.0` with ABI `1.41.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.40.0` therefore accepts
-`1.0.x` through `1.40.0` (including earlier ABI 1.32–1.39 guests), but rejects a
+minor/patch version is equal or newer. A host at ABI `1.41.0` therefore accepts
+`1.0.x` through `1.41.0` (including earlier ABI 1.32–1.40 guests), but rejects a
 later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -138,3 +138,12 @@ the separate `client.input.screen_scroll` grant to preserve compatibility
 with earlier screen-input callbacks. Rust SDK/macros 0.48.0 supplies the
 guest APIs. See the focused API documents and source-based coverage matrix for
 their capability and runtime boundaries.
+
+Host 0.51.0 / ABI 1.41.0 adds quota-limited scheduled block ticks that never
+load chunks, live status-effect removal under its own capability, synchronous
+vetoes for right-click block/entity/item interactions, and physical-client
+cursor coordinates. These APIs are bound to the logical-server or physical-
+client main thread and return bounded values rather than Minecraft objects.
+The new scheduled-tick GameTest and Java/Rust boundary tests cover the
+server-backed contracts; cursor positions and interaction vetoes still need a
+visible-client and interactive-client run, respectively.

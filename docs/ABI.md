@@ -6,10 +6,19 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.40.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.41.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.40.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.41.0 adds
+`sjml_world_v1.schedule_block_tick` for guarded one-shot ticks on already-loaded
+blocks, `sjml_entity_v1.remove_effect` for removing registered effects from
+loaded living entities, a synchronous cancellable `player.interaction` event
+for right-click block/entity/item actions, and
+`sjml_client_input_v1.cursor_position` for bounded physical-client cursor
+coordinates. These use `world.read` plus `world.write`, `entity.read` plus
+`entity.effect.remove`, `events.subscribe` plus `events.cancel`, or
+`client.input`. The new player interaction callback is synchronous because it
+can veto a live Minecraft action. ABI 1.40.0 adds
 allowlisted boolean world-gamerule reads and writes, bounded generic damage for
 loaded living non-player entities, literal player action-bar messages,
 declarative client keybindings, and opt-in active-screen scroll events. Screen
@@ -164,6 +173,7 @@ plus the non-cancellable `sjml_v1_event_player.joined`,
 `sjml_v1_event_entity.death`, and
 `sjml_v1_event_entity.spawned`, `sjml_v1_event_entity.effect.tick`,
 `sjml_v1_event_block.place`, `sjml_v1_event_player.interacted`,
+`sjml_v1_event_player.interaction`,
 `sjml_v1_event_entity.damaged`, `sjml_v1_event_world.loaded`,
 `sjml_v1_event_world.unloaded`, `sjml_v1_event_server.tick`,
 `sjml_v1_event_inventory.changed`, and `sjml_v1_event_resources.reloaded`
@@ -233,6 +243,15 @@ interaction attempt (for example `right_click_block`,
 `main_hand` or `off_hand`. The target is a registry ID when available, and the
 position and face are present for block interactions. This observation does
 not change or cancel the original action.
+The separate synchronous `player.interaction` callback uses the same
+schema-v1 field order as `PlayerInteracted` and is delivered before a supported
+right-click block, entity, or item-use action is applied. Supported actions
+are `right_click_block`, `entity_interact`, `entity_interact_specific`, and
+`right_click_item`; item-use targets identify the held item. Its callback must
+return exactly one stable boolean byte after the status prefix. `true` vetoes
+the original action, while `false` leaves it available to vanilla and other
+event handlers. It requires both `events.subscribe` and `events.cancel` and
+cannot be asynchronous.
 The `entity.damaged` callback receives schema-v1 `EntityDamaged` data: version
 `1`, stable strings for `entity_id`, `entity_type_id`, `dimension_id`, and
 `damage_type_id`, an optional stable source entity UUID, finite little-endian
@@ -304,10 +323,10 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`,
 `entity.death`, `entity.spawned`, `entity.effect.tick`, `block.break`,
-`block.place`, `player.interacted`, `entity.damaged`, `world.loaded`,
+`block.place`, `player.interacted`, `player.interaction`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`.
-Subscribing to `block.break` additionally
-requires the module to request and receive the separate `events.cancel` capability. Static
+Subscribing to `block.break` or `player.interaction` additionally requires the
+module to request and receive the separate `events.cancel` capability. Static
 registration instances cannot subscribe. A subscription callback runs
 synchronously on the owning logical-server thread. Non-cancellable handlers may
 use the SDK's `#[event_async(name = "...")]` macro: its generated synchronous
@@ -316,7 +335,8 @@ Task-admission and async handler errors are logged; they do not affect the
 already-delivered notification. These tasks use the existing bounded
 `sjml_async_v1.wake`/poll runtime and inherit its task quota, timeout,
 cancellation, and module-shutdown behavior. The async macro rejects
-`block.break`; its cancellation result remains strictly synchronous.
+`block.break` and `player.interaction`; their cancellation results remain
+strictly synchronous.
 
 ## Async task and service imports
 
@@ -951,6 +971,14 @@ the `client.input` permission and 256-subscription per-module limit; static
 registration and dedicated servers fail closed. See
 [mouse-wheel input](CLIENT_INPUT_SCROLL.md).
 
+`sjml_client_input_v1.cursor_position(output_ptr) -> i32` writes a 16-byte
+value containing little-endian IEEE-754 `f64` GUI coordinates (`x`, then `y`).
+The host validates the full writable span and requires a physical-client
+runtime, `client.input`, the client main thread, a live window, and a pointer
+inside the viewport. Non-finite, negative, or excessively large coordinates
+fail closed. This synchronous call does not move the cursor; see
+[cursor position](CURSOR_POSITION.md).
+
 ## Declarative client keybindings
 
 The `sjml_client_keybinding_v1.register` import is available only during the
@@ -979,8 +1007,8 @@ common static-registration code has no client Minecraft references. See
 ABI v1 provides the following synchronous `sjml_world_v1` imports. All parameters
 and statuses are `i32`; zero is success and nonzero values use the error table.
 World reads require the requested and granted `world.read` capability. Block
-and time mutation, weather changes, and particle spawning additionally require
-requested and granted `world.write`. Static
+and time mutation, scheduled block ticks, weather changes, and particle spawning
+additionally require requested and granted `world.write`. Static
 registration binds the signatures but every call during `mod_register` returns
 `PERMISSION_DENIED`.
 
@@ -1002,6 +1030,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `raycast` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<RaycastHit>` for one bounded segment |
 | `collides` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<bool>` for one bounded axis-aligned box |
 | `set_block` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len` | Replace one loaded position with the registered block's default state; status only |
+| `schedule_block_tick` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len, delay_ticks` | Schedule one normal tick for the matching registered block at an already-loaded position; status only |
 | `spawn_entity` | `query_ptr, query_len` | Spawn one registered, non-player entity from a bounded schema-v1 world/type/position record; status only |
 | `spawn_particle` | `handle_ptr, handle_len, x, y, z, particle_id_ptr, particle_id_len` | Spawn one registered simple particle at the center of a loaded block; status only |
 | `play_sound` | `handle_ptr, handle_len, x, y, z, sound_id_ptr, sound_id_len, volume_bits, pitch_bits` | Play one registered sound at the center of a loaded block; status only |
@@ -1019,7 +1048,10 @@ vanilla rules listed in [world gamerules](WORLD_GAME_RULES.md).
 Reads and writes apply only to the selected already-loaded dimension; integer
 rules are intentionally excluded. The exact request and response layouts are
 schema `u32(1)`, 24-byte world handle, `u32` rule ID, and strict boolean byte
-for writes.
+for writes. `schedule_block_tick` requires a delay of 1–72,000 ticks, a
+position inside build height, and the canonical ID of the block currently at
+that position. It never loads chunks and is limited to 16 requests per module
+on each logical-server tick. See [scheduled block ticks](WORLD_SCHEDULED_TICKS.md).
 
 `handle_len` must be 24. `get` takes raw UTF-8, limited to 65,536 bytes,
 and requires a canonical `namespace:path` (no implicit `minecraft:` namespace).
@@ -1293,6 +1325,7 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | `loaded` | `out_ptr, out_capacity` | Stable `Vec<EntityHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `EntitySnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `entity_type_id`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to a loaded living non-player entity; status only |
+| `remove_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len` | Remove one registered active effect from a loaded living non-player entity; status only |
 | `discard` | `(handle_ptr: i32, handle_len: i32) -> i32` | Discard one loaded non-player entity and revoke its handle; status only |
 | `damage` | `(handle_ptr: i32, handle_len: i32, amount_bits: i32) -> i32` | Apply bounded generic damage to a loaded living non-player entity; requires `entity.read` and `entity.damage` |
 
@@ -1302,8 +1335,10 @@ string is limited to 65,536 UTF-8 bytes. The SDK reserves `4 + 24 * 1024` bytes
 for enumeration and `4 + 3 * (4 + 65,536) + 24` bytes for a snapshot. The complete declared output
 capacity is bounds checked; insufficient capacity returns
 `PAYLOAD_TOO_LARGE` before allocating handles. Effect application additionally
-requires both `entity.read` and `entity.effect.apply`; static-registration calls
-are denied. The ID is strict UTF-8 in canonical `namespace:path` form and at
+requires `entity.read` and `entity.effect.apply`; effect removal separately
+requires `entity.read` and `entity.effect.remove`, and an inactive effect is a
+successful no-op. Both operations are denied during static registration. The
+ID is strict UTF-8 in canonical `namespace:path` form and at
 most 256 bytes. Duration is 1–72,000 ticks and amplifier is 0–255. The host
 revalidates the handle and resolves the effect from the active registry on the
 owning server thread. Non-living targets and unknown IDs return
@@ -1313,6 +1348,9 @@ uses Minecraft's generic damage source and normal `LivingEntity.hurt` path;
 the guest cannot choose an attacker or damage type, and vanilla mitigation
 and cancellation remain in effect. See
 [generic entity damage](ENTITY_DAMAGE.md).
+Effect removal applies only to loaded living non-player entities on the owning
+server thread. Stale handles, players, nonliving targets, and unknown IDs are
+rejected. See [effect removal](ENTITY_EFFECT_REMOVAL.md).
 
 Each module owns a 1,024-live-handle quota. Enumeration returns loaded
 non-player entities from every loaded server dimension, including modded

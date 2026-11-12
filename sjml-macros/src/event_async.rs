@@ -18,10 +18,10 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
         Ok(name) => name,
         Err(error) => return error.to_compile_error(),
     };
-    if name == "block.break" {
+    if matches!(name.as_str(), "block.break" | "player.interaction") {
         return error(
             Span::call_site(),
-            "block.break is cancellable and must use a synchronous #[event] handler",
+            format!("{name} is cancellable and must use a synchronous #[event] handler"),
         );
     }
 
@@ -255,13 +255,20 @@ mod tests {
     }
 
     #[test]
-    fn cancellable_block_break_handlers_are_forced_to_remain_synchronous() {
+    fn cancellable_handlers_are_forced_to_remain_synchronous() {
         diagnostic(
             expand_event_async(
                 quote!(name = "block.break"),
                 quote! { async fn broken(_: BlockBreak) -> SjmlResult<()> { Ok(()) } },
             ),
             "block.break is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.interaction"),
+                quote! { async fn interaction(_: PlayerInteractionAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.interaction is cancellable",
         );
     }
 

@@ -31,6 +31,12 @@ fn native_entity_api_reports_unsupported_imports() {
         entity::damage(handle, 1.0).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );
+    assert_eq!(
+        entity::remove_effect(handle, "minecraft:glowing")
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
 }
 
 #[test]

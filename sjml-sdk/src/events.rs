@@ -79,6 +79,30 @@ pub struct PlayerInteracted {
     pub block_position: Option<BlockPos>,
 }
 
+/// Synchronous cancellable logical-server right-click attempt for a block, entity, or item use.
+///
+/// Return `Ok(true)` from the `player.interaction` event handler to veto this attempt.
+/// The host emits this event for right-click block/entity actions and right-click item use;
+/// left-click actions remain outside this contract.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerInteractionAttempt {
+    /// Canonical UUID string of the player who initiated the interaction.
+    pub player_id: String,
+    /// Resource location of the level where the interaction occurred.
+    pub dimension_id: String,
+    /// `right_click_block`, `entity_interact`, `entity_interact_specific`, or `right_click_item`.
+    pub action: String,
+    /// `main_hand` or `off_hand`.
+    pub hand: String,
+    /// Registry ID of the targeted block, entity type, or held item, when available.
+    pub target_id: Option<String>,
+    /// Block face for block interactions, when available.
+    pub face: Option<String>,
+    /// Target block position for block interactions, when available.
+    pub block_position: Option<BlockPos>,
+}
+
 /// Synchronous, non-cancellable snapshot emitted after damage has been applied to a living entity.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -460,8 +484,8 @@ mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
         EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerMoved, PlayerRespawned, ResourcesReloaded, ServerTick,
-        WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerMoved, PlayerRespawned,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -611,6 +635,51 @@ mod tests {
         };
         let encoded = to_bytes(&no_target).unwrap();
         assert_eq!(from_bytes::<PlayerInteracted>(&encoded).unwrap(), no_target);
+    }
+
+    #[test]
+    fn cancellable_player_interaction_attempt_round_trips_optional_target_details() {
+        let attempt = PlayerInteractionAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            action: "right_click_block".to_owned(),
+            hand: "main_hand".to_owned(),
+            target_id: Some("minecraft:lever".to_owned()),
+            face: Some("up".to_owned()),
+            block_position: Some(BlockPos { x: -2, y: 64, z: 7 }),
+        };
+
+        let encoded = to_bytes(&attempt).unwrap();
+        assert_eq!(
+            from_bytes::<PlayerInteractionAttempt>(&encoded).unwrap(),
+            attempt
+        );
+
+        let entity_attempt = PlayerInteractionAttempt {
+            action: "entity_interact".to_owned(),
+            target_id: Some("minecraft:villager".to_owned()),
+            face: None,
+            block_position: None,
+            ..attempt
+        };
+        let encoded = to_bytes(&entity_attempt).unwrap();
+        assert_eq!(
+            from_bytes::<PlayerInteractionAttempt>(&encoded).unwrap(),
+            entity_attempt
+        );
+
+        let item_attempt = PlayerInteractionAttempt {
+            action: "right_click_item".to_owned(),
+            target_id: Some("minecraft:apple".to_owned()),
+            face: None,
+            block_position: None,
+            ..entity_attempt
+        };
+        let encoded = to_bytes(&item_attempt).unwrap();
+        assert_eq!(
+            from_bytes::<PlayerInteractionAttempt>(&encoded).unwrap(),
+            item_attempt
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ static SAW_EFFECT_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_BLOCK_PLACE: AtomicBool = AtomicBool::new(false);
 static SAW_ENTITY_SPAWNED: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_INTERACTED: AtomicBool = AtomicBool::new(false);
+static SAW_PLAYER_INTERACTION_VETO: AtomicBool = AtomicBool::new(false);
 static SAW_ENTITY_DAMAGED: AtomicBool = AtomicBool::new(false);
 static SAW_WORLD_LOADED: AtomicBool = AtomicBool::new(false);
 static SAW_SERVER_TICK: AtomicBool = AtomicBool::new(false);
@@ -162,6 +163,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("entity.effect.tick", EventPriority::Normal)?;
     events::subscribe("block.place", EventPriority::Normal)?;
     events::subscribe("player.interacted", EventPriority::Normal)?;
+    events::subscribe("player.interaction", EventPriority::Normal)?;
     events::subscribe("entity.damaged", EventPriority::Normal)?;
     events::subscribe("world.loaded", EventPriority::Normal)?;
     events::subscribe("world.unloaded", EventPriority::Normal)?;
@@ -231,6 +233,16 @@ fn observe_player_interaction(event: PlayerInteracted) -> SjmlResult<()> {
         SAW_PLAYER_INTERACTED.store(true, Ordering::Relaxed);
     }
     Ok(())
+}
+
+#[event(name = "player.interaction")]
+fn veto_chest_open_interaction(event: PlayerInteractionAttempt) -> SjmlResult<bool> {
+    let veto = event.action == "right_click_block"
+        && event.target_id.as_deref() == Some("minecraft:chest");
+    if veto {
+        SAW_PLAYER_INTERACTION_VETO.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
 }
 
 #[event(name = "entity.damaged")]
@@ -358,6 +370,18 @@ fn check_player_interacted(_: EntityDeathCheckArguments) -> SjmlResult<String> {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "player.interacted callback did not observe a stone block interaction",
+        ))
+    }
+}
+
+#[command(name = "player.interaction.check")]
+fn check_player_interaction_veto(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    if SAW_PLAYER_INTERACTION_VETO.swap(false, Ordering::Relaxed) {
+        Ok("guest vetoed the chest interaction".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player.interaction callback did not veto the chest action",
         ))
     }
 }
@@ -1139,6 +1163,7 @@ fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
                 "the entity velocity GameTest pig is missing",
             )
         })?;
+    entity::remove_effect(pig_handle, "minecraft:slowness")?;
     let original_max_health = sjml::entity_attributes::read(
         pig_handle,
         sjml::entity_attributes::LivingAttribute::MaxHealth,

@@ -116,6 +116,12 @@ registered effect ID and bounded duration/amplifier, and resolves the current
 player for the same login session on the server thread. It does not require
 `world.read` and does not expose inventory or a mutable player reference.
 
+Teleportation additionally requires `player.teleport`. The host bounds every
+coordinate and rotation, revalidates the live player session, and checks the
+current dimension's build height, world border, and loaded chunk before moving
+the player. It cannot transfer dimensions or load/generate chunks. Client and
+static-registration calls are denied.
+
 ## Guest menus and action callbacks
 
 `sjml_menu_v1.open` requires both `entity.read` and `menu.open`, a live
@@ -158,6 +164,30 @@ Mutating a living entity with a status effect additionally requires
 `entity.effect.apply`. The host verifies both capabilities, the exact live
 handle, server-thread ownership, a canonical registered effect ID, and bounded
 duration/amplifier values. The API excludes players and cannot load chunks.
+
+Removing an active effect instead requires `entity.effect.remove` with
+`entity.read`; the grant is independent from `entity.effect.apply`. The host
+uses the exact module-owned live handle, resolves only registered effect IDs,
+and removes effects only from loaded living non-player entities on the server
+thread. An absent effect is a successful no-op; client/static calls, players,
+nonliving entities, and stale handles are rejected.
+
+`world.schedule_block_tick` requires `world.read` plus `world.write`, checks
+that the position is in build height and its chunk is already loaded, and
+requires the requested registered block to match the current state. The host
+queues a normal Minecraft scheduled tick and limits each module to 16 requests
+per server tick; it never forces chunk loading.
+
+`player.interaction` is synchronous and may veto the current right-click
+action. It requires both `events.subscribe` and `events.cancel`. Callbacks run
+on the owning server thread and receive only detached identifiers/coordinates;
+`events.cancel` also gates the existing `block.break` veto path.
+
+Discarding a loaded non-player entity requires both `entity.read` and the
+separate `entity.remove` request/grant. The host performs the discard on the
+logical-server thread and immediately revokes the module's handle. Static
+registration links the authorized import but always returns
+`PERMISSION_DENIED`; removing an entity cannot run during registry setup.
 
 Entity attachments use separate `entity.data.read` and `entity.data.write`
 requests/grants. The write grant covers both setting and removing byte values;

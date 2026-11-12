@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.48.0"
+sjml-sdk = "0.49.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -70,6 +70,15 @@ keybindings, and opt-in active-screen scrolling. See
 [client keybindings](https://github.com/SomSomovich/sjml-cli/blob/master/docs/KEYBINDINGS.md),
 and [active-screen scrolling](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SCREEN_INPUT_SCROLL.md).
 
+SDK 0.49.0 adds quota-limited scheduled ticks for matching blocks in loaded
+chunks, removal of registered effects from loaded non-player entities,
+synchronous vetoes for right-click block/entity/item interactions, and
+scaled GUI cursor coordinates on the physical client. See
+[scheduled block ticks](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_SCHEDULED_TICKS.md),
+[effect removal](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_EFFECT_REMOVAL.md),
+[player interaction vetoes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_INTERACTIONS.md),
+and [cursor position](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CURSOR_POSITION.md).
+
 ```rust
 use sjml::prelude::*;
 
@@ -82,7 +91,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.48.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.49.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

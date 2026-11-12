@@ -15,6 +15,38 @@ pub const MAX_CLIENT_INPUT_SUBSCRIPTIONS: usize = 256;
 const CLIENT_INPUT_SCHEMA_VERSION: u32 = 1;
 #[cfg(target_arch = "wasm32")]
 const HANDLE_BYTES: u32 = 24;
+#[cfg(target_arch = "wasm32")]
+const CURSOR_POSITION_BYTES: u32 = 16;
+/// Largest supported logical GUI coordinate returned by the host.
+pub const MAX_CURSOR_COORDINATE: f64 = 1_000_000.0;
+
+/// Current physical-client mouse position in Minecraft's scaled GUI coordinates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CursorPosition {
+    /// Horizontal coordinate from the left edge of the logical GUI viewport.
+    pub x: f64,
+    /// Vertical coordinate from the top edge of the logical GUI viewport.
+    pub y: f64,
+}
+
+impl CursorPosition {
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn validate(self) -> SjmlResult<Self> {
+        if !self.x.is_finite()
+            || !self.y.is_finite()
+            || self.x < 0.0
+            || self.y < 0.0
+            || self.x > MAX_CURSOR_COORDINATE
+            || self.y > MAX_CURSOR_COORDINATE
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidTransfer,
+                "host cursor coordinates are not finite or exceed the supported GUI bounds",
+            ));
+        }
+        Ok(self)
+    }
+}
 
 /// Module-owned global client-input subscription handle.
 pub type ClientInputSubscriptionHandle = EventSubscriptionHandle;
@@ -166,6 +198,8 @@ extern "C" {
     fn imported_subscribe_scroll(callback_id: i64, handle_output_pointer: i32) -> i32;
     #[link_name = "unsubscribe_scroll"]
     fn imported_unsubscribe_scroll(handle_pointer: i32, handle_length: i32) -> i32;
+    #[link_name = "cursor_position"]
+    fn imported_cursor_position(output_pointer: i32) -> i32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -479,6 +513,59 @@ pub fn unsubscribe_scroll(handle: MouseScrollSubscriptionHandle) -> SjmlResult<(
     }
 }
 
+/// Reads the physical mouse position in scaled GUI coordinates. The origin is the GUI viewport's
+/// upper-left corner and coordinates are measured in logical GUI pixels, matching Minecraft
+/// screen/widget coordinates. Requires a client module granted `client.input` and a live window.
+pub fn cursor_position() -> SjmlResult<CursorPosition> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let output = allocate_host_input(CURSOR_POSITION_BYTES);
+        if output == 0 {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate cursor-position output",
+            ));
+        }
+        // SAFETY: initialize the exact output span before the host writes it.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, CURSOR_POSITION_BYTES as usize) };
+        // SAFETY: the output allocation remains live during the synchronous host import.
+        let status = unsafe { imported_cursor_position(output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful call initialized both output doubles.
+            decode_cursor_position(unsafe {
+                core::slice::from_raw_parts(output as *const u8, CURSOR_POSITION_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host could not read the physical client cursor position",
+            ))
+        };
+        // SAFETY: release the exact allocation passed to the host import.
+        unsafe { deallocate_host_input(output, CURSOR_POSITION_BYTES) };
+        result
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn decode_cursor_position(bytes: &[u8]) -> SjmlResult<CursorPosition> {
+    if bytes.len() != 16 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidTransfer,
+            "cursor-position output must contain exactly two doubles",
+        ));
+    }
+    let position = CursorPosition {
+        x: f64::from_le_bytes(bytes[0..8].try_into().expect("fixed cursor X span")),
+        y: f64::from_le_bytes(bytes[8..16].try_into().expect("fixed cursor Y span")),
+    };
+    position.validate()
+}
+
 #[cfg(target_arch = "wasm32")]
 struct ClientInputDelivery {
     callback_id: u64,
@@ -657,13 +744,16 @@ fn validate_modifiers(modifiers: u8) -> SjmlResult<()> {
 fn unsupported() -> SjmlError {
     SjmlError::new(
         ErrorCode::PermissionDenied,
-        "client input subscriptions are available only in a wasm32 client guest",
+        "client input APIs are available only in a wasm32 client guest",
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ClientInputAction, ClientInputEvent, MouseScrollEvent};
+    use super::{
+        decode_cursor_position, ClientInputAction, ClientInputEvent, CursorPosition,
+        MouseScrollEvent,
+    };
 
     #[test]
     fn validates_key_and_mouse_actions_with_bounded_codes_and_modifiers() {
@@ -725,5 +815,31 @@ mod tests {
         assert!(MouseScrollEvent::new(0.0, f64::INFINITY).is_err());
         assert!(MouseScrollEvent::new(64.01, 0.0).is_err());
         assert!(MouseScrollEvent::new(0.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn cursor_position_decodes_gui_coordinates_and_rejects_invalid_host_values() {
+        let mut encoded = Vec::new();
+        encoded.extend_from_slice(&12.5f64.to_le_bytes());
+        encoded.extend_from_slice(&240.25f64.to_le_bytes());
+        assert_eq!(
+            decode_cursor_position(&encoded).unwrap(),
+            CursorPosition { x: 12.5, y: 240.25 }
+        );
+
+        for (x, y) in [
+            (f64::NAN, 0.0),
+            (0.0, f64::INFINITY),
+            (-0.1, 1.0),
+            (1.0, -0.1),
+            (1_000_000.1, 0.0),
+            (0.0, 1_000_000.1),
+        ] {
+            let mut invalid = Vec::new();
+            invalid.extend_from_slice(&x.to_le_bytes());
+            invalid.extend_from_slice(&y.to_le_bytes());
+            assert!(decode_cursor_position(&invalid).is_err());
+        }
+        assert!(decode_cursor_position(&[0; 15]).is_err());
     }
 }

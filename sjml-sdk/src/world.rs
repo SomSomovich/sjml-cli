@@ -52,6 +52,8 @@ pub const MAX_WORLD_BORDER_DAMAGE_BUFFER: f64 = 1_024.0;
 pub const MAX_WORLD_BORDER_DAMAGE_PER_BLOCK: f64 = 100.0;
 /// Maximum day-time value accepted by [`set_time`].
 pub const MAX_WORLD_DAY_TIME_TICKS: i64 = 1_000_000_000_000;
+/// Maximum delay accepted for a guest-scheduled vanilla block tick, in ticks.
+pub const MAX_WORLD_BLOCK_TICK_DELAY_TICKS: u32 = 72_000;
 
 /// Runtime heightmap used by [`heightmap`]. ABI values are stable for world-v1.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -476,6 +478,17 @@ extern "C" {
         z: i32,
         block_id: i32,
         block_id_length: i32,
+    ) -> i32;
+    #[link_name = "schedule_block_tick"]
+    fn imported_schedule_block_tick(
+        handle: i32,
+        handle_length: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        expected_block_id: i32,
+        expected_block_id_length: i32,
+        delay_ticks: i32,
     ) -> i32;
     #[link_name = "spawn_particle"]
     fn imported_spawn_particle(
@@ -1558,6 +1571,58 @@ pub fn set_block(world: WorldHandle, position: BlockPos, block_id: &str) -> Sjml
     }
 }
 
+/// Schedules one ordinary Minecraft block tick for an expected block at a loaded position.
+///
+/// The module must request and receive `world.read` and `world.write`. The host rejects
+/// unloaded positions and mismatched block IDs without loading a chunk. The delay must be
+/// between 1 and [`MAX_WORLD_BLOCK_TICK_DELAY_TICKS`] ticks. Calls are limited to 16 per
+/// module per server tick. Minecraft de-duplicates matching pending ticks according to its
+/// normal tick scheduler; this API does not invoke a Rust callback.
+pub fn schedule_block_tick(
+    world: WorldHandle,
+    position: BlockPos,
+    expected_block_id: &str,
+    delay_ticks: u32,
+) -> SjmlResult<()> {
+    validate_block_id(expected_block_id)?;
+    if !(1..=MAX_WORLD_BLOCK_TICK_DELAY_TICKS).contains(&delay_ticks) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "scheduled block tick delay must be within 1..=72000 ticks",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        // SAFETY: the host copies the handle and bounded UTF-8 block ID before returning.
+        let status = unsafe {
+            imported_schedule_block_tick(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                position.x,
+                position.y,
+                position.z,
+                expected_block_id.as_ptr() as usize as u32 as i32,
+                expected_block_id.len() as i32,
+                delay_ticks as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the scheduled block tick",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
 /// Spawns one registered simple particle at the center of a loaded block position.
 ///
 /// The module must request and receive `world.read` and `world.write`. The host
@@ -1781,13 +1846,14 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         block_properties, collides, day_time, daylight_cycle_enabled, play_sound, raycast,
-        set_block, set_daylight_cycle_enabled, set_time, spawn_entity, spawn_particle, Aabb,
-        BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateBatch,
-        BlockStateQuery, BlockStateSnapshot, DaylightCycleSnapshot, RaycastBlockMode,
-        RaycastFluidMode, RaycastHit, RaycastPoint, WeatherCondition, WeatherSnapshot,
-        WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation,
-        WorldGameRuleQuery, WorldGameRuleSnapshot, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
-        MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_DAY_TIME_TICKS,
+        schedule_block_tick, set_block, set_daylight_cycle_enabled, set_time, spawn_entity,
+        spawn_particle, Aabb, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
+        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, DaylightCycleSnapshot,
+        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, WeatherCondition,
+        WeatherSnapshot, WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule,
+        WorldGameRuleMutation, WorldGameRuleQuery, WorldGameRuleSnapshot, WorldRaycastQuery,
+        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
+        MAX_WORLD_DAY_TIME_TICKS,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -2149,6 +2215,39 @@ mod tests {
         }
         assert_eq!(
             set_block(world, position, "minecraft:stone")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn scheduled_block_tick_validates_id_and_delay_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        for invalid in [
+            "stone",
+            "Minecraft:stone",
+            "minecraft:Bad",
+            "minecraft:bad path",
+        ] {
+            assert_eq!(
+                schedule_block_tick(world, position, invalid, 20)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for invalid in [0, MAX_WORLD_BLOCK_TICK_DELAY_TICKS + 1] {
+            assert_eq!(
+                schedule_block_tick(world, position, "minecraft:stone", invalid)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            schedule_block_tick(world, position, "minecraft:stone", 20)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

@@ -136,8 +136,8 @@ pub use chat_messages::{
 pub use client_audio::SoundCategory;
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{
-    ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle, MouseScrollEvent,
-    MouseScrollSubscriptionHandle,
+    cursor_position, ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
+    CursorPosition, MouseScrollEvent, MouseScrollSubscriptionHandle, MAX_CURSOR_COORDINATE,
 };
 pub use client_keybindings::{
     Context as KeybindingContext, Key as KeybindingKey, KeybindingDefinition,
@@ -198,9 +198,9 @@ pub use widgets::{
 };
 pub use world::{
     BlockStateSnapshot, HeightmapType, LightSnapshot, WorldBorderSnapshot, WorldGameRule,
-    MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BORDER_CENTER,
-    MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
-    MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
+    MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
+    MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+    MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
     MAX_WORLD_BORDER_WARNING_SECONDS,
 };
 
@@ -222,9 +222,9 @@ pub mod prelude {
     pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
     pub use crate::client_input;
     pub use crate::client_input::{
-        subscribe_scroll, unsubscribe_scroll, ClientInputAction, ClientInputEvent,
-        ClientInputSubscriptionHandle, MouseScrollEvent, MouseScrollSubscriptionHandle,
-        MAX_CLIENT_INPUT_SUBSCRIPTIONS,
+        cursor_position, subscribe_scroll, unsubscribe_scroll, ClientInputAction, ClientInputEvent,
+        ClientInputSubscriptionHandle, CursorPosition, MouseScrollEvent,
+        MouseScrollSubscriptionHandle, MAX_CLIENT_INPUT_SUBSCRIPTIONS, MAX_CURSOR_COORDINATE,
     };
     pub use crate::client_keybindings;
     pub use crate::client_keybindings::{
@@ -247,9 +247,9 @@ pub mod prelude {
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockPlace, EffectTickEvent,
         EntityDamaged, EntityDeath, EntitySpawned, EventPriority, InventoryChanged,
-        PlayerInteracted, PlayerJoined, PlayerLeft, PlayerMoved, ResourcesReloaded, ServerTick,
-        WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft, PlayerMoved,
+        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
+        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -325,10 +325,11 @@ pub mod prelude {
     pub use crate::world::{
         BlockStateSnapshot, HeightmapType, LightSnapshot, RaycastBlockMode, RaycastFluidMode,
         RaycastHit, RaycastPoint, WorldBorderSnapshot, WorldGameRule, MAX_WORLD_BLOCK_COORDINATE,
-        MAX_WORLD_BLOCK_STATES, MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER,
-        MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS,
-        MAX_WORLD_BORDER_WARNING_BLOCKS, MAX_WORLD_BORDER_WARNING_SECONDS,
-        MAX_WORLD_RAYCAST_RESPONSE_BYTES, MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
+        MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
+        MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+        MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
+        MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_RAYCAST_RESPONSE_BYTES,
+        MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
     };
     pub use crate::{
         command, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe, service,

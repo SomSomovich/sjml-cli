@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.48.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.49.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.40.0"
+abi = "^1.41.0"
 minecraft = "~1.21.1"
-sjml = "^0.50.0"
+sjml = "^0.51.0"
 
 [[modules]]
 id = "main"
@@ -106,7 +106,9 @@ server module can run for clients without SJML, but network channels or
 Other `[mod]` fields are `authors`, `description`, `license`, arbitrary bounded
 `metadata`, and `distribution`. `runtime.abi` is required; `runtime.minecraft`
 and `runtime.sjml` are optional compatibility ranges. SemVer ranges such as
-`^1.36.0` and `~1.21.1` are checked by the host.
+`^1.41.0` and `~1.21.1` are checked by the host. Event vetoes use the
+separately granted `events.cancel` capability; effect removal uses
+`entity.effect.remove` in addition to `entity.read`.
 
 Each `[[modules]]` entry can also declare:
 
@@ -176,9 +178,9 @@ module's manifest request and the administrator's list.
 | --- | --- |
 | `content.register` | Static registry declarations and guest commands. |
 | `events.subscribe` | Subscribing to supported host events. |
-| `events.cancel` | Vetoing cancellable `block.break` events; also requires `events.subscribe`. |
-| `world.read`, `world.write` | Reading loaded server-world state; writes include blocks, time, weather, `doDaylightCycle`, and world-border settings, and require both. |
-| `entity.read`, `entity.spawn`, `entity.effect.apply` | Reading player/entity snapshots, spawning registered entities, or applying registered effects. |
+| `events.cancel` | Vetoing cancellable `block.break` and right-click `player.interaction` events; also requires `events.subscribe`. |
+| `world.read`, `world.write` | Reading loaded server-world state; writes include blocks, scheduled block ticks, time, weather, `doDaylightCycle`, and world-border settings, and require both. |
+| `entity.read`, `entity.spawn`, `entity.effect.apply`, `entity.effect.remove` | Reading player/entity snapshots, spawning registered entities, or applying/removing registered effects; effect mutation also requires `entity.read`. |
 | `entity.remove`, `entity.velocity.write`, `entity.attributes.write` | Removing loaded non-player entities, changing bounded velocity, or setting an allowlisted living-entity attribute base value; each also requires `entity.read`. |
 | `player.teleport`, `player.vitals.write`, `player.game_mode.write`, `player.motion.write`, `player.abilities.write` | Teleporting a live player, changing bounded vitals, game mode, velocity, or current flight state; each also requires `entity.read` and logical-server execution. |
 | `entity.data.read`, `entity.data.write` | Reading or changing module-owned data attached to non-player entities. |
@@ -189,7 +191,9 @@ module's manifest request and the administrator's list.
 | `service.call` | Calling versioned server-side guest services; client service calls are unavailable. |
 | `task.compute` | Running bounded server-side worker computations. |
 | `menu.open` | Opening a bounded read-only server menu; action callbacks also need `entity.read` and `events.subscribe`. |
-| `client.input` | Receiving bounded client screen/global input events. |
+| `client.input` | Receiving bounded client screen/global input events, named keybindings, and scaled cursor coordinates. |
+| `client.input.screen_scroll` | Receiving/consuming active-screen scroll callbacks; requires `client.input`. |
+| `player.ui.actionbar` | Sending bounded literal action-bar text to a live player; also requires `entity.read`. |
 | `client.chat.observe`, `client.chat.filter`, `client.chat.send` | Observing bounded local chat text, hiding its display insertion with the separate filter grant, or sending ordinary signed chat through Minecraft's local player connection. |
 | `client.ui.notify` | Showing bounded vanilla toast notifications on the physical client. |
 | `client.audio.play` | Playing a registered sound locally through Minecraft's sound manager. |
