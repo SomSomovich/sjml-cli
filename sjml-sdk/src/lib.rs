@@ -152,7 +152,9 @@ pub use client_keybindings::{
 };
 pub use client_notifications::NotificationKind;
 pub use client_screen::{
-    ClientScreenButton, ClientScreenDefinition, ClientScreenFormDefinition, ClientScreenTextField,
+    ClientScreenButton, ClientScreenDefinition, ClientScreenFormDefinition,
+    ClientScreenListFormDefinition, ClientScreenSelectionList, ClientScreenSelectionOption,
+    ClientScreenTextField,
 };
 pub use entity::{
     ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
@@ -284,6 +286,7 @@ pub mod prelude {
     pub use crate::client_screen;
     pub use crate::client_screen::{
         ClientScreenButton, ClientScreenDefinition, ClientScreenFormDefinition,
+        ClientScreenListFormDefinition, ClientScreenSelectionList, ClientScreenSelectionOption,
         ClientScreenTextField,
     };
     pub use crate::entity;

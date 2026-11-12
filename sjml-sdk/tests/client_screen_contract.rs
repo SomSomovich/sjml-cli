@@ -1,7 +1,8 @@
 use sjml::events::{ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue};
 use sjml::{
     client_screen, event, from_bytes, to_bytes, ClientScreenButton, ClientScreenDefinition,
-    ClientScreenFormDefinition, ClientScreenTextField, ErrorCode, SjmlResult,
+    ClientScreenFormDefinition, ClientScreenListFormDefinition, ClientScreenSelectionList,
+    ClientScreenSelectionOption, ClientScreenTextField, ErrorCode, SjmlResult,
 };
 
 #[event(name = "client.screen.action")]
@@ -274,6 +275,96 @@ fn form_submit_callback_uses_stable_schema_v1_and_preserves_field_values() {
         form
     );
     assert_eq!(on_client_screen_form_submit(form), Ok(()));
+}
+
+#[test]
+fn list_form_accepts_zero_to_four_text_fields_and_fails_closed_on_native_targets() {
+    let screen = || {
+        ClientScreenDefinition::new(
+            "demo:settings",
+            "Settings",
+            Vec::new(),
+            vec![ClientScreenButton::new("apply", "Apply").unwrap()],
+        )
+        .unwrap()
+    };
+    let list = || {
+        ClientScreenSelectionList::new(
+            "mode",
+            "Mode",
+            vec![
+                ClientScreenSelectionOption::new("easy", "Easy").unwrap(),
+                ClientScreenSelectionOption::new("hard", "Hard").unwrap(),
+            ],
+            None,
+        )
+        .unwrap()
+    };
+    let definition = ClientScreenListFormDefinition::new(screen(), Vec::new(), list()).unwrap();
+    #[cfg(not(target_arch = "wasm32"))]
+    assert_eq!(
+        client_screen::open_list_form(&definition)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+
+    assert_eq!(
+        ClientScreenSelectionList::new(
+            "mode",
+            "Mode",
+            vec![ClientScreenSelectionOption::new("easy", "Easy").unwrap()],
+            Some("unknown".to_owned()),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        ClientScreenSelectionList::new(
+            "mode",
+            "Mode",
+            (0..33)
+                .map(|index| {
+                    ClientScreenSelectionOption::new(format!("option{index}"), "Choice").unwrap()
+                })
+                .collect(),
+            None,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        ClientScreenListFormDefinition::new(
+            screen(),
+            (0..5)
+                .map(|index| {
+                    ClientScreenTextField::new(format!("field{index}"), "Field", "", 32).unwrap()
+                })
+                .collect(),
+            list(),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InvalidArgument
+    );
+}
+
+#[test]
+fn form_submit_can_encode_selection_as_a_generic_field_value() {
+    let submit = ClientScreenFormSubmit {
+        screen_id: "demo:settings".to_owned(),
+        button_id: "apply".to_owned(),
+        fields: vec![ClientScreenFormValue {
+            id: "mode".to_owned(),
+            value: String::new(),
+        }],
+    };
+    assert_eq!(
+        from_bytes::<ClientScreenFormSubmit>(&to_bytes(&submit).unwrap()).unwrap(),
+        submit
+    );
 }
 
 fn append_string(target: &mut Vec<u8>, value: &str) {

@@ -16,12 +16,13 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.67.1` with ABI `1.57.0`. ABI compatibility is major-version based:
+The current host is `0.68.0`, the Rust SDK/macros are `0.66.0`, and the ABI is
+`1.58.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.57.0` therefore accepts
-`1.0.x` through `1.57.0` (including earlier ABI 1.32–1.56 guests), but rejects
-a later contract it does not know. ABI `1.57.0` accepts ABI `1.0.x` through
-`1.57.0`, including packages targeting host 0.66.0 / ABI 1.56.0.
+minor/patch version is equal or newer. A host at ABI `1.58.0` therefore accepts
+`1.0.x` through `1.58.0` (including earlier ABI 1.32–1.57 guests), but rejects
+a later contract it does not know. ABI `1.58.0` accepts ABI `1.0.x` through
+`1.58.0`, including packages targeting host 0.67.1 / ABI 1.57.0.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
 
@@ -41,8 +42,12 @@ text-entry forms with `client.ui.screen`; form values return only through the
 owning module's direct callback. Long body text has local, clamped mouse-wheel
 scrolling inside its viewport; it emits no callback or network traffic and
 does not consume wheel input over fields, buttons, or outside the body. This
-does not replace a general widget-tree or custom-render API, and still requires
-a display-backed client check.
+API now also supports one bounded selection list per form. Browsing and changing
+the selection remain local; the chosen ID returns with text values only when a
+form button is clicked. Schema-v3 list forms are additive; schema-v1 button-only
+screens and schema-v2 text-only forms remain compatible. This does not replace
+a general widget-tree or custom-render API, and still requires a display-backed
+client check.
 
 Rust SDK 0.42.0 adds generic native chat panel themes under ABI 1.34.0 and keeps
 the exclusive geometry controller under `client.chat.modify`; local layout and
@@ -229,3 +234,5 @@ Host 0.66.0 / ABI 1.56.0 / SDK 0.64.0 adds bounded interactive client screens. A
 Host 0.67.0 / ABI 1.57.0 / SDK 0.65.0 adds bounded text-entry forms to client screens. A form has up to four labeled fields with per-field UTF-8 byte limits; button clicks close it and send the values only to the owning module through `client.screen.form_submit`. Existing schema-v1 screens and `client.screen.action` callbacks remain compatible. Form codecs, host routing, SDK serialization, and the example are covered by tests; visible layout and keyboard input still need a display-backed client. See [interactive client screens](CLIENT_SCREEN.md).
 
 Host 0.67.1 keeps ABI 1.57.0 and adds local, clamped mouse-wheel scrolling for long body text in client screens. It preserves paragraph breaks, renders only visible wrapped lines, and does not consume wheel input over fields, buttons, or outside the body viewport. It emits no callback or network traffic. Headless viewport tests pass; live visual and wheel behavior still need a display-backed client. See [interactive client screens](CLIENT_SCREEN.md).
+
+Host 0.68.0 / ABI 1.58.0 / SDK 0.66.0 adds schema-v3 client list forms with one bounded selection list of up to 32 options, alongside up to four text fields. List browsing and selection stay local; the selected ID is returned only to the owning module when a form button is clicked. Schema-v1 button-only screens and schema-v2 text-only forms remain compatible. Headless contract tests pass, but visible list layout, selection, and wheel interaction still need verification on a display-backed client. See [interactive client screens](CLIENT_SCREEN.md).

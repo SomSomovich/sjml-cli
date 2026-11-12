@@ -118,20 +118,22 @@ pub struct ClientScreenAction {
     pub button_id: String,
 }
 
-/// One current text value returned by a module-owned client form screen.
+/// One bounded value returned by a module-owned client form screen.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
 pub struct ClientScreenFormValue {
     /// Stable ID of the input field in the form definition.
     pub id: String,
-    /// Literal value entered by the local user, bounded by that field's UTF-8 byte limit.
+    /// Literal text entered by the user, or the selected option ID for a list field.
+    /// An empty value means that a list field has no selection.
     pub value: String,
 }
 
 /// Synchronous, non-cancellable submit notification for a module-owned client form screen.
 ///
 /// The host emits `client.screen.form_submit` directly only to the owner of the form that received
-/// the click. It includes the clicked button and the current bounded values of all its fields.
+/// the click. It includes the clicked button, current bounded text values, and any selected option
+/// IDs from schema-v3 selection lists.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
 pub struct ClientScreenFormSubmit {
@@ -139,7 +141,7 @@ pub struct ClientScreenFormSubmit {
     pub screen_id: String,
     /// ID of the button clicked on that form.
     pub button_id: String,
-    /// Current values in field-definition order.
+    /// Current values in definition order: text fields followed by selection-list fields.
     pub fields: Vec<ClientScreenFormValue>,
 }
 

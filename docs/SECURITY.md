@@ -72,6 +72,10 @@ transmit any value elsewhere.
 The body viewport's wheel scrolling is local-only and clamped; it produces no
 callback or network traffic. Wheel input over form fields, buttons, or outside
 the body viewport is left for the active control or Minecraft to handle.
+Schema-v3 adds a local selection list with at most 32 options. Changing or
+scrolling the list does not call guest code; the selected option ID is returned
+only to the owning module when a form button is submitted. The list itself does
+not send values to a server.
 
 Task groups bound the number of queued and running operations per module and
 bound each requested timeout. A timeout completes the operation with a timeout

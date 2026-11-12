@@ -159,6 +159,85 @@ other external closure sends no callback. The form callback must be exported bef
 is called; otherwise the host returns `INVALID_ARGUMENT`. Neither callback requires
 `events::subscribe`.
 
+## Scrollable selection lists
+
+Use `client_screen::open_list_form` to add one bounded selection list to a screen. A
+`ClientScreenListFormDefinition` contains the base screen, zero to four text fields, and one
+`ClientScreenSelectionList` with a stable ID, label, and one to 32 options. Option IDs must be
+unique; field and list IDs are distinct from each other and from button IDs. List and option IDs
+use the usual 1–64 byte lowercase ASCII syntax; list and option labels are 1–96 UTF-8 bytes. An
+initial selection may be omitted, or must name one of the options.
+
+```rust
+use sjml::client_screen::{
+    self, ClientScreenButton, ClientScreenDefinition, ClientScreenListFormDefinition,
+    ClientScreenSelectionList, ClientScreenSelectionOption,
+};
+use sjml::events::ClientScreenFormSubmit;
+use sjml::{event, SjmlResult};
+
+fn show_destination_list() -> SjmlResult<()> {
+    client_screen::open_list_form(&ClientScreenListFormDefinition {
+        screen: ClientScreenDefinition {
+            id: "profile.destination".to_owned(),
+            title: "Choose a destination".to_owned(),
+            body: vec!["Pick one option, then submit.".to_owned()],
+            buttons: vec![ClientScreenButton {
+                id: "submit".to_owned(),
+                label: "Continue".to_owned(),
+            }],
+        },
+        fields: vec![],
+        list: ClientScreenSelectionList {
+            id: "destination".to_owned(),
+            label: "Destination".to_owned(),
+            options: vec![
+                ClientScreenSelectionOption {
+                    id: "overworld".to_owned(),
+                    label: "Overworld".to_owned(),
+                },
+                ClientScreenSelectionOption {
+                    id: "nether".to_owned(),
+                    label: "Nether".to_owned(),
+                },
+                ClientScreenSelectionOption {
+                    id: "end".to_owned(),
+                    label: "The End".to_owned(),
+                },
+            ],
+            initial_selected_id: Some("overworld".to_owned()),
+        },
+    })?;
+    Ok(())
+}
+
+#[event(name = "client.screen.form_submit")]
+fn handle_destination(submit: ClientScreenFormSubmit) -> SjmlResult<()> {
+    let selected = submit
+        .fields
+        .iter()
+        .find(|value| value.id == "destination")
+        .map(|value| value.value.as_str())
+        .unwrap_or_default();
+    let _ = selected;
+    Ok(())
+}
+```
+
+The mouse wheel scrolls the list locally when its visible option window is shorter than the
+option set. Changing the selection or scrolling does not invoke guest callbacks or send network
+traffic.
+When a button is clicked, the owner receives the selected option as one additional
+`ClientScreenFormValue { id, value }` in `ClientScreenFormSubmit.fields`, after the text-field
+values. Its `id` is the list ID and its `value` is the selected option ID; no selection is sent as
+an empty string. This happens only on button submission, including a `Cancel` button. Escape
+closes without submitting. The list uses the existing owner-only `client.screen.form_submit`
+callback and needs no separate capability. Its appearance and wheel interaction still need
+display-backed verification. The `client.screen.form_submit` export must be present before
+opening the list form; otherwise the host returns `INVALID_ARGUMENT`.
+Schema v3 is additive: schema-v1 button-only screens and schema-v2 text-only forms keep their
+existing payloads and callbacks.
+
 ## Body scrolling
 
 If the body text is taller than its visible area, the mouse wheel scrolls only that body viewport.

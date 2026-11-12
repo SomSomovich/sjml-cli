@@ -6,6 +6,8 @@ use crate::{ErrorCode, SjmlError, SjmlResult};
 pub const CLIENT_SCREEN_SCHEMA_VERSION: u32 = 1;
 /// Schema version used by client form definitions sent to the host.
 pub const CLIENT_SCREEN_FORM_SCHEMA_VERSION: u32 = 2;
+/// Schema version used by client list form definitions sent to the host.
+pub const CLIENT_SCREEN_LIST_FORM_SCHEMA_VERSION: u32 = 3;
 /// Maximum UTF-8 length of a screen or button ID.
 pub const MAX_CLIENT_SCREEN_ID_BYTES: usize = 64;
 /// Maximum UTF-8 length of a screen title.
@@ -26,6 +28,10 @@ pub const MAX_CLIENT_SCREEN_TEXT_FIELD_ID_BYTES: usize = MAX_CLIENT_SCREEN_ID_BY
 pub const MAX_CLIENT_SCREEN_TEXT_FIELD_LABEL_BYTES: usize = MAX_CLIENT_SCREEN_BUTTON_LABEL_BYTES;
 /// Maximum configurable UTF-8 length of one form field value.
 pub const MAX_CLIENT_SCREEN_TEXT_FIELD_VALUE_BYTES: u32 = 128;
+/// Maximum number of options in a client selection list.
+pub const MAX_CLIENT_SCREEN_SELECTION_OPTIONS: usize = 32;
+/// Maximum UTF-8 length of one selection list or option label.
+pub const MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES: usize = 96;
 /// Maximum encoded size of a complete screen definition.
 pub const MAX_CLIENT_SCREEN_PAYLOAD_BYTES: usize = 4096;
 
@@ -258,6 +264,189 @@ impl ClientScreenFormDefinition {
     }
 }
 
+/// One literal option in a bounded client selection list.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenSelectionOption {
+    /// Stable lowercase option ID returned with the selected value.
+    pub id: String,
+    /// Literal label shown for this option.
+    pub label: String,
+}
+
+impl ClientScreenSelectionOption {
+    /// Builds and validates one selection option.
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> SjmlResult<Self> {
+        let option = Self {
+            id: id.into(),
+            label: label.into(),
+        };
+        option.validate()?;
+        Ok(option)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        validate_id(&self.id, "selection option ID")?;
+        validate_text(
+            &self.label,
+            1,
+            MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES,
+            "selection option label",
+        )
+    }
+}
+
+/// One bounded, single-choice input displayed on a list form screen.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenSelectionList {
+    /// Stable lowercase key included in the submit callback.
+    pub id: String,
+    /// Literal label displayed above the selection control.
+    pub label: String,
+    /// One through 32 literal choices.
+    pub options: Vec<ClientScreenSelectionOption>,
+    /// Initially selected option ID, or `None` to start without a selection.
+    pub initial_selected_id: Option<String>,
+}
+
+impl ClientScreenSelectionList {
+    /// Builds and validates one bounded selection list.
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        options: Vec<ClientScreenSelectionOption>,
+        initial_selected_id: Option<String>,
+    ) -> SjmlResult<Self> {
+        let list = Self {
+            id: id.into(),
+            label: label.into(),
+            options,
+            initial_selected_id,
+        };
+        list.validate()?;
+        Ok(list)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        validate_id(&self.id, "selection list ID")?;
+        validate_text(
+            &self.label,
+            1,
+            MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES,
+            "selection list label",
+        )?;
+        if !(1..=MAX_CLIENT_SCREEN_SELECTION_OPTIONS).contains(&self.options.len()) {
+            return Err(invalid(format!(
+                "a selection list must contain between 1 and {MAX_CLIENT_SCREEN_SELECTION_OPTIONS} options"
+            )));
+        }
+        for (index, option) in self.options.iter().enumerate() {
+            option.validate()?;
+            if self.options[..index]
+                .iter()
+                .any(|previous| previous.id == option.id)
+            {
+                return Err(invalid("selection option IDs must be unique"));
+            }
+        }
+        if let Some(selected_id) = &self.initial_selected_id {
+            validate_id(selected_id, "initial selected option ID")?;
+            if !self.options.iter().any(|option| option.id == *selected_id) {
+                return Err(invalid(
+                    "initial selected option ID must reference a selection option",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A bounded form screen with zero to four text inputs and one selection list.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenListFormDefinition {
+    /// Screen content and submit buttons.
+    pub screen: ClientScreenDefinition,
+    /// Zero to four uniquely identified text input fields.
+    pub fields: Vec<ClientScreenTextField>,
+    /// The form's single bounded selection list.
+    pub list: ClientScreenSelectionList,
+}
+
+impl ClientScreenListFormDefinition {
+    /// Builds and validates a bounded list form screen.
+    pub fn new(
+        screen: ClientScreenDefinition,
+        fields: Vec<ClientScreenTextField>,
+        list: ClientScreenSelectionList,
+    ) -> SjmlResult<Self> {
+        let definition = Self {
+            screen,
+            fields,
+            list,
+        };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    fn validate(&self) -> SjmlResult<usize> {
+        let mut size = self.screen.validate()?;
+        self.list.validate()?;
+        if self.fields.len() > MAX_CLIENT_SCREEN_TEXT_FIELDS {
+            return Err(invalid(format!(
+                "a list form supports at most {MAX_CLIENT_SCREEN_TEXT_FIELDS} text fields"
+            )));
+        }
+        if self
+            .screen
+            .buttons
+            .iter()
+            .any(|button| button.id == self.list.id)
+            || self.fields.iter().any(|field| field.id == self.list.id)
+        {
+            return Err(invalid(
+                "selection list ID must be unique and cannot match a button ID",
+            ));
+        }
+        for (index, field) in self.fields.iter().enumerate() {
+            field.validate()?;
+            if self.fields[..index]
+                .iter()
+                .any(|previous| previous.id == field.id)
+                || self
+                    .screen
+                    .buttons
+                    .iter()
+                    .any(|button| button.id == field.id)
+            {
+                return Err(invalid(
+                    "form field IDs must be unique and cannot match a button ID",
+                ));
+            }
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for field in &self.fields {
+            size = checked_string_size(size, &field.id)?;
+            size = checked_string_size(size, &field.label)?;
+            size = checked_string_size(size, &field.initial_value)?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        size = checked_string_size(size, &self.list.id)?;
+        size = checked_string_size(size, &self.list.label)?;
+        size = checked_string_size(size, self.list.initial_selected_id.as_deref().unwrap_or(""))?;
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for option in &self.list.options {
+            size = checked_string_size(size, &option.id)?;
+            size = checked_string_size(size, &option.label)?;
+        }
+        if size > MAX_CLIENT_SCREEN_PAYLOAD_BYTES {
+            return Err(too_large(format!(
+                "encoded client list form exceeds {MAX_CLIENT_SCREEN_PAYLOAD_BYTES} bytes"
+            )));
+        }
+        Ok(size)
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_client_ui_v1")]
 extern "C" {
@@ -281,6 +470,15 @@ pub fn open(definition: &ClientScreenDefinition) -> SjmlResult<()> {
 /// module as `client.screen.form_submit`. The host copies the bounded payload synchronously.
 pub fn open_form(definition: &ClientScreenFormDefinition) -> SjmlResult<()> {
     let payload = encode_form_definition(definition)?;
+    open_payload(&payload)
+}
+
+/// Opens a bounded form with a single-choice list on the local physical client.
+///
+/// On a button click, the host sends all text values followed by the selected option (or an empty
+/// value when no option is selected) directly to the owning module as `client.screen.form_submit`.
+pub fn open_list_form(definition: &ClientScreenListFormDefinition) -> SjmlResult<()> {
+    let payload = encode_list_form_definition(definition)?;
     open_payload(&payload)
 }
 
@@ -348,6 +546,34 @@ fn encode_form_definition(definition: &ClientScreenFormDefinition) -> SjmlResult
     Ok(payload)
 }
 
+fn encode_list_form_definition(definition: &ClientScreenListFormDefinition) -> SjmlResult<Vec<u8>> {
+    let capacity = definition.validate()?;
+    let mut payload = encode_definition(&definition.screen)?;
+    payload.reserve(capacity.saturating_sub(payload.len()));
+    payload[..4].copy_from_slice(&CLIENT_SCREEN_LIST_FORM_SCHEMA_VERSION.to_le_bytes());
+    write_u32(&mut payload, definition.fields.len() as u32);
+    for field in &definition.fields {
+        write_string(&mut payload, &field.id)?;
+        write_string(&mut payload, &field.label)?;
+        write_string(&mut payload, &field.initial_value)?;
+        write_u32(&mut payload, field.max_utf8_bytes);
+    }
+    write_u32(&mut payload, 1);
+    write_string(&mut payload, &definition.list.id)?;
+    write_string(&mut payload, &definition.list.label)?;
+    write_string(
+        &mut payload,
+        definition.list.initial_selected_id.as_deref().unwrap_or(""),
+    )?;
+    write_u32(&mut payload, definition.list.options.len() as u32);
+    for option in &definition.list.options {
+        write_string(&mut payload, &option.id)?;
+        write_string(&mut payload, &option.label)?;
+    }
+    debug_assert!(payload.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    Ok(payload)
+}
+
 fn write_string(payload: &mut Vec<u8>, value: &str) -> SjmlResult<()> {
     let length = u32::try_from(value.len()).map_err(|_| payload_overflow())?;
     write_u32(payload, length);
@@ -408,8 +634,10 @@ fn payload_overflow() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_definition, encode_form_definition, ClientScreenButton, ClientScreenDefinition,
-        ClientScreenFormDefinition, ClientScreenTextField, MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
+        encode_definition, encode_form_definition, encode_list_form_definition, ClientScreenButton,
+        ClientScreenDefinition, ClientScreenFormDefinition, ClientScreenListFormDefinition,
+        ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenTextField,
+        MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
     };
 
     #[test]
@@ -480,6 +708,104 @@ mod tests {
         assert!(ClientScreenFormDefinition::new(
             screen,
             vec![ClientScreenTextField::new("save", "Name", "", 32).unwrap()],
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn encodes_schema_v3_list_form_after_the_v1_prefix_and_v2_fields() {
+        let screen = ClientScreenDefinition::new(
+            "demo:settings",
+            "Settings",
+            vec!["Pick a mode".to_owned()],
+            vec![ClientScreenButton::new("apply", "Apply").unwrap()],
+        )
+        .unwrap();
+        let form = ClientScreenListFormDefinition::new(
+            screen.clone(),
+            vec![ClientScreenTextField::new("name", "Name", "Ada", 64).unwrap()],
+            ClientScreenSelectionList::new(
+                "mode",
+                "Mode",
+                vec![
+                    ClientScreenSelectionOption::new("easy", "Easy").unwrap(),
+                    ClientScreenSelectionOption::new("hard", "Hard").unwrap(),
+                ],
+                Some("hard".to_owned()),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let encoded = encode_list_form_definition(&form).unwrap();
+        let mut expected = encode_definition(&screen).unwrap();
+        expected[..4].copy_from_slice(&3_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "name");
+        append_string(&mut expected, "Name");
+        append_string(&mut expected, "Ada");
+        expected.extend_from_slice(&64_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "mode");
+        append_string(&mut expected, "Mode");
+        append_string(&mut expected, "hard");
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        append_string(&mut expected, "easy");
+        append_string(&mut expected, "Easy");
+        append_string(&mut expected, "hard");
+        append_string(&mut expected, "Hard");
+        assert_eq!(encoded, expected);
+        assert!(encoded.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    }
+
+    #[test]
+    fn permits_empty_text_fields_and_unselected_list_but_enforces_references_and_unique_ids() {
+        let screen = ClientScreenDefinition::new(
+            "demo:settings",
+            "Settings",
+            Vec::new(),
+            vec![ClientScreenButton::new("apply", "Apply").unwrap()],
+        )
+        .unwrap();
+        let list = || {
+            ClientScreenSelectionList::new(
+                "mode",
+                "Mode",
+                vec![
+                    ClientScreenSelectionOption::new("easy", "Easy").unwrap(),
+                    ClientScreenSelectionOption::new("hard", "Hard").unwrap(),
+                ],
+                None,
+            )
+            .unwrap()
+        };
+        assert!(ClientScreenListFormDefinition::new(screen.clone(), Vec::new(), list()).is_ok());
+        assert!(ClientScreenSelectionList::new(
+            "mode",
+            "Mode",
+            vec![
+                ClientScreenSelectionOption::new("easy", "Easy").unwrap(),
+                ClientScreenSelectionOption::new("easy", "Duplicate").unwrap(),
+            ],
+            None,
+        )
+        .is_err());
+        assert!(ClientScreenSelectionList::new(
+            "mode",
+            "Mode",
+            vec![ClientScreenSelectionOption::new("easy", "Easy").unwrap()],
+            Some("missing".to_owned()),
+        )
+        .is_err());
+        assert!(ClientScreenListFormDefinition::new(
+            screen.clone(),
+            vec![ClientScreenTextField::new("mode", "Name", "", 32).unwrap()],
+            list(),
+        )
+        .is_err());
+        assert!(ClientScreenListFormDefinition::new(
+            screen,
+            vec![ClientScreenTextField::new("apply", "Name", "", 32).unwrap()],
+            list(),
         )
         .is_err());
     }
