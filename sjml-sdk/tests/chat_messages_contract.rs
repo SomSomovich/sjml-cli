@@ -1,4 +1,6 @@
-use sjml::chat_messages::{self, ChatMessageAction, ChatMessageSource};
+use sjml::chat_messages::{
+    self, ChatClickAction, ChatMessageAction, ChatMessageSource, ChatSpan, ChatText,
+};
 use sjml::ErrorCode;
 use std::{cell::Cell, rc::Rc};
 
@@ -8,6 +10,18 @@ fn message_sources_and_actions_are_typed_and_bounded() {
     assert_eq!(chat_messages::MAX_CHAT_MESSAGE_SUBSCRIPTIONS, 128);
     let _: ChatMessageSource = ChatMessageSource::System;
     let _: ChatMessageAction = ChatMessageAction::Hide;
+    let text = ChatText::plain("Visit ").unwrap();
+    let link = ChatSpan::new("example")
+        .unwrap()
+        .color(0x44AAFF)
+        .unwrap()
+        .bold(true)
+        .hover_text("Open the website")
+        .unwrap()
+        .click(ChatClickAction::open_url("https://example.com").unwrap());
+    let mut text = text;
+    text.push(link).unwrap();
+    let _: ChatMessageAction = ChatMessageAction::Replace(text);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

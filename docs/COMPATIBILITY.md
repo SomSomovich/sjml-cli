@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.54.0` with ABI `1.44.0`. ABI compatibility is major-version based:
+The current host is `0.55.0` with ABI `1.45.0`. ABI compatibility is major-version based:
 the host accepts a requested ABI with the same major version when the host's
-minor/patch version is equal or newer. A host at ABI `1.44.0` therefore accepts
-`1.0.x` through `1.44.0` (including earlier ABI 1.32–1.43 guests), but rejects
+minor/patch version is equal or newer. A host at ABI `1.45.0` therefore accepts
+`1.0.x` through `1.45.0` (including earlier ABI 1.32–1.44 guests), but rejects
 a later contract it does not know.
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -178,3 +178,11 @@ These require `content.register`, `events.subscribe` plus `events.cancel`,
 `world.write`, respectively. Dedicated-server GameTests exercise damage veto,
 dimension transfer, game-time mutation, and insertion into the live villager
 trade table.
+
+Host 0.55.0 / ABI 1.45.0 / SDK 0.53.0 adds local rich chat-message replacement
+with bounded literal spans, formatting, hover text, and safe click actions.
+Replacement requires `client.chat.observe` and the separately granted
+`client.chat.rewrite`; local filtering remains behind `client.chat.filter`.
+Legacy one-byte Show/Hide callbacks remain compatible. Host/SDK contract tests
+cover bounds, permission revocation, action decoding, and subscriber ordering;
+visible behavior still needs a display-backed Minecraft client.

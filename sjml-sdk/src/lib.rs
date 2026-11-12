@@ -131,7 +131,9 @@ pub use abi::{
 pub use batch::{Batch, BatchValue, CallResult};
 pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
 pub use chat_messages::{
-    ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
+    ChatClickAction, ChatMessage, ChatMessageAction, ChatMessageSource,
+    ChatMessageSubscriptionHandle, ChatSpan, ChatText, MAX_CHAT_INTERACTION_BYTES,
+    MAX_CHAT_INTERACTION_VALUE_BYTES, MAX_CHAT_TEXT_SPANS,
 };
 pub use client_audio::SoundCategory;
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};

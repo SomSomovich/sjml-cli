@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.52.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.53.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.44.0"
+abi = "^1.45.0"
 minecraft = "~1.21.1"
-sjml = "^0.54.0"
+sjml = "^0.55.0"
 
 [[modules]]
 id = "main"
@@ -195,7 +195,7 @@ module's manifest request and the administrator's list.
 | `client.input` | Receiving bounded client screen/global input events, named keybindings, and scaled cursor coordinates. |
 | `client.input.screen_scroll` | Receiving/consuming active-screen scroll callbacks; requires `client.input`. |
 | `player.ui.actionbar` | Sending bounded literal action-bar text to a live player; also requires `entity.read`. |
-| `client.chat.observe`, `client.chat.filter`, `client.chat.send` | Observing bounded local chat text, hiding its display insertion with the separate filter grant, or sending ordinary signed chat through Minecraft's local player connection. |
+| `client.chat.observe`, `client.chat.filter`, `client.chat.rewrite`, `client.chat.send` | Observing bounded local chat text, hiding its display insertion, replacing it with bounded rich text, or sending ordinary signed chat through Minecraft's local player connection. Filtering and replacement each need their separate grant. |
 | `client.ui.notify` | Showing bounded vanilla toast notifications on the physical client. |
 | `client.audio.play` | Playing a registered sound locally through Minecraft's sound manager. |
 | `client.render` | Subscribing to HUD, screen, or world-render callbacks. |

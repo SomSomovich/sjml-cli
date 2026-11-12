@@ -6,10 +6,13 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.44.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.45.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.44.0 adds `sjml_world_v1.set_game_time` for the shared elapsed clock, `sjml_player_v1.teleport_to_world` to an already-loaded destination chunk, bounded static villager trade declarations, and the synchronous cancellable `entity.damage_attempt` callback before damage mitigation. Game-time writes require `world.read` and `world.write`; cross-dimension teleport requires `entity.read`, `player.teleport`, and `world.read`; trade declarations require `content.register` on a server-capable module; damage vetoes require `events.subscribe` and `events.cancel`. ABI 1.43.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.45.0 adds
+a replacement result to local client chat-message callbacks, allowing bounded
+literal spans with formatting, hover text, and safe local click actions under
+`client.chat.rewrite`. ABI 1.44.0 adds `sjml_world_v1.set_game_time` for the shared elapsed clock, `sjml_player_v1.teleport_to_world` to an already-loaded destination chunk, bounded static villager trade declarations, and the synchronous cancellable `entity.damage_attempt` callback before damage mitigation. Game-time writes require `world.read` and `world.write`; cross-dimension teleport requires `entity.read`, `player.teleport`, and `world.read`; trade declarations require `content.register` on a server-capable module; damage vetoes require `events.subscribe` and `events.cancel`. ABI 1.43.0 adds
 bounded player-inventory durability writes, already-loaded chunk enumeration,
 nearest loaded-entity raycasts, the synchronous cancellable
 `entity.death_attempt` event, and manifest-declared physical-client commands.
@@ -904,14 +907,14 @@ Callbacks are synchronous and reject reentrance with `SERVICE_BUSY` (31).
 See [Native client chat layout](CHAT.md) for typed APIs, persistence, and the
 live-client verification boundary. Existing ABI 1.32 guests remain supported.
 
-## Client chat-message observation and filtering
+## Client chat-message observation, filtering, and replacement
 
 ABI 1.37.0 adds `sjml_client_chat_messages_v1`. `subscribe` and `unsubscribe`
 require `client.chat.observe`, a physical-client runtime, and the client main
 thread. Each module runtime may register one callback; the host supports up to
 128 active runtimes and removes each route on unsubscribe, failure, or runtime
 close. The callback receives a bounded plain-text snapshot immediately before
-the local `ChatComponent` inserts a message. Minecraft's signature, blocked
+NeoForge inserts a message into the local chat. Minecraft's signature, blocked
 player, and secure-chat filtering have already run. The guest receives no
 signature, style, hover/click event, or Minecraft object. Text is limited to
 4,096 UTF-8 bytes and truncated at a code-point boundary.
@@ -919,10 +922,29 @@ signature, style, hover/click event, or Minecraft object. Text is limited to
 The guest exports `sjml_v1_client_chat_message_dispatch(pointer, length) ->
 i64`; its input is schema `u32=1`, callback ID `u64`, source `u8` (`0=player
 chat`, `1=system`), truncation `u8`, and a length-prefixed UTF-8 string. It
-returns one stable bool byte. `true` suppresses only this local chat-history
-insertion, and is honored only when the module separately requests and receives
-`client.chat.filter`; observation alone cannot hide messages. The host never
-rewrites or resends signed content or changes server state. See
+returns a stable action byte: `0=Show`, `1=Hide`, or `2=Replace`. Show and Hide
+retain the original one-byte ABI encoding. Hide suppresses only this local
+display and is honored only when the module separately requests and receives
+`client.chat.filter`. Replace requires the separate `client.chat.rewrite` grant
+and is followed by a `u32` span count and stable-encoded spans. All strings are
+strict UTF-8 with a little-endian `u32` byte length. Each span is encoded in
+this order: text string, optional RGB `u32` color (`u32` values above
+`0xFFFFFF` are invalid), `u8` style flags, optional hover string, and optional
+click action. Optional values use a `u8` tag (`0=none`, `1=present`); present
+values immediately follow the tag. Style bits are `1=bold`, `2=italic`,
+`4=underline`, `8=strikethrough`, and `16=obfuscated`; all other bits are
+invalid. A present click action is `u8` kind plus string: `1=OPEN_URL`,
+`2=SUGGEST_COMMAND`, or `3=COPY_TO_CLIPBOARD`. URL values must be valid HTTP(S)
+URIs without user information, and Minecraft retains its normal URL
+confirmation. Replacements are limited to 64 spans, 4,096 aggregate UTF-8 text
+bytes, and 8,192 aggregate hover/click bytes; each hover/click value is at most
+512 bytes. The complete callback response is capped at 16 KiB. Click actions
+can suggest text in chat input or copy text to the clipboard; command execution
+and file opening are not supported.
+Command execution and file opening are not supported. Callbacks run in
+registration order; later callbacks see the latest replacement as plain text,
+and the last authorized replacement supplies the displayed spans. The host
+never rewrites or resends signed content or changes server state. See
 [client chat messages](CLIENT_CHAT_MESSAGES.md).
 
 The independent `sjml_client_chat_send_v1.send(message_ptr, message_len) -> i32`

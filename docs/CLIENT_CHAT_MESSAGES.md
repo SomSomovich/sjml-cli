@@ -1,58 +1,77 @@
 # Client chat message callbacks
 
-`sjml::chat_messages::subscribe` receives a detached text snapshot immediately
-before the physical client's vanilla chat component inserts it into local
-scrollback. The callback runs synchronously on the client main thread. It
-receives one of two source labels:
+`sjml::chat_messages::subscribe` observes a detached snapshot of an incoming
+message on the physical client main thread. It runs from NeoForge's
+`ClientChatReceivedEvent` immediately before the local message is displayed.
+Minecraft's secure-chat verification, blocked-player checks, and server chat
+filtering have already run. Overlay/action-bar messages are not part of this
+callback.
 
-- `PlayerChat` for a message carrying Minecraft's player-message signature.
-- `System` for unsigned text and system notices.
+The guest receives only the message's bounded plain text, source, and
+truncation flag. It never receives a signature, original `Component`, style,
+hover/click event, or server object. Text is capped at 4096 UTF-8 bytes and
+truncated at a code-point boundary.
 
-Minecraft has already applied its secure-chat policy, blocked-player checks,
-and server-supplied filtering before this hook. The guest sees only plain text,
-never a signature, `Component`, style, hover/click event, or server object. Text
-is capped at 4096 UTF-8 bytes and truncated on a code-point boundary; the
-`was_truncated()` flag reports that case.
+The module must declare and receive `client.chat.observe` to subscribe.
+Callbacks may request three local display actions:
 
-The required capability is `client.chat.observe`. Returning
-`ChatMessageAction::Hide` is honored only if `client.chat.filter` is also
-declared in the module manifest and granted by the host. Without the second
-capability, a callback can observe a message but cannot suppress it. Filtering
-affects only that physical client's vanilla chat display and local scrollback;
-it does not change or resend the signed message, alter the server, bypass
-Minecraft's chat checks, or modify the reporting chat log. It also does not
-suppress narration, overlays, or messages sent through other UI surfaces.
+- `ChatMessageAction::Show` keeps the current message.
+- `ChatMessageAction::Hide` hides the message only for this client and
+  requires the separately declared and granted `client.chat.filter`.
+- `ChatMessageAction::Replace` substitutes the entire rendered message only
+  for this client and requires the separately declared and granted
+  `client.chat.rewrite`.
+
+A replacement is built from at most 64 literal text spans, with a combined
+4096-byte text limit. Each span can set an RGB color, bold, italic, underline,
+strikethrough, obfuscation, and bounded hover text. Hover and click values are
+capped at 512 bytes each and 8192 bytes combined. Click actions are limited to
+HTTP(S) URL opening, suggesting text in the chat input, and copying text to the
+clipboard. Minecraft keeps its normal confirmation for opening a URL.
+Command execution and file opening are not exposed.
+
+Subscriptions run in registration order. Each callback sees the latest
+replacement as plain text; the last authorized replacement supplies the final
+rendered spans, while any authorized Hide suppresses display. A replacement
+does not alter or resend the signed server message or affect server state.
 
 ```rust,ignore
-use sjml::chat_messages::{self, ChatMessageAction, ChatMessageSource};
+use sjml::chat_messages::{self, ChatClickAction, ChatMessage, ChatMessageAction, ChatSpan, ChatText};
 
-let _subscription = chat_messages::subscribe(|message| {
-    if message.source() == ChatMessageSource::PlayerChat
-        && message.text().contains("local phrase")
-    {
-        Ok(ChatMessageAction::Hide)
+let _subscription = chat_messages::subscribe(|message: ChatMessage| {
+    if message.text().contains("website") {
+        let link = ChatSpan::new("open site")?
+            .color(0x55AAFF)?
+            .bold(true)
+            .hover_text("Open the project website")?
+            .click(ChatClickAction::open_url("https://example.com")?);
+        let mut replacement = ChatText::plain("Visit ")?;
+        replacement.push(link)?;
+        Ok(ChatMessageAction::Replace(replacement))
     } else {
         Ok(ChatMessageAction::Show)
     }
 })?;
 ```
 
-Subscriptions are owned by the module runtime and are removed on explicit
-unsubscribe or runtime shutdown. Each runtime has one subscription; the host
-supports up to 128 active runtimes. A guest callback failure removes only that
-runtime's subscription and leaves other modules' handlers active. Callbacks
-must stay short because they run synchronously while the client adds a chat
-message. The receive subscription observes messages at the display insertion
-point; it does not permit editing/reformatting message components.
+For the example, declare both `client.chat.observe` and
+`client.chat.rewrite` in the client module. Use `client.chat.filter` instead
+when the module should only hide matching messages. Capabilities are checked
+again when each callback returns, so revoking a grant immediately disables
+that action.
+
+Callbacks must stay short because they run synchronously while the client is
+processing the display event. A malformed result or guest callback failure
+removes only that runtime's subscription. Each runtime may have one
+subscription; the host supports up to 128 active runtimes. The callback request
+uses schema 1; response values 0 and 1 preserve the old Show/Hide encoding, and
+response value 2 carries a bounded styled replacement.
 
 The host import module is `sjml_client_chat_messages_v1`.
 
-- `subscribe(i64, i32) -> i32` registers callback export
+- `subscribe(i64, i32) -> i32` registers
   `sjml_v1_client_chat_message_dispatch`.
 - `unsubscribe(i32, i32) -> i32` releases the opaque kind-14 handle.
-
-The version-1 callback payload contains the callback ID, source tag,
-truncation flag, and bounded UTF-8 text; its result is one stable bool byte.
 
 ## Sending ordinary chat
 
@@ -67,7 +86,7 @@ Text must contain 1–256 UTF-16 code units and at most 1024 UTF-8 bytes. Blank
 text, control characters, line breaks, and text whose first non-whitespace
 character is `/` are rejected. Each module runtime may send once per second;
 faster calls return `ServiceBusy`. Sending is not routed through the incoming
-display filter API above.
+display callback above.
 
 ```rust,ignore
 use sjml::chat_messages;

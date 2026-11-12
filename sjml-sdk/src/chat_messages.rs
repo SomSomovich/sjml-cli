@@ -1,9 +1,9 @@
 //! Local client chat message observation and display-only filtering.
 //!
 //! Signed server messages have already passed Minecraft's signature and filter
-//! checks before this callback. The guest receives detached plain text only; it
-//! cannot alter, resend, or change the server-side message. Hiding a message
-//! requires the separately granted `client.chat.filter` capability.
+//! checks before this callback. The guest receives detached plain text only;
+//! replacement affects this client's display and cannot alter server state.
+//! Hiding requires `client.chat.filter`; replacing requires `client.chat.rewrite`.
 
 #[cfg(target_arch = "wasm32")]
 use crate::abi::{allocate_host_input, deallocate_host_input};
@@ -54,11 +54,333 @@ impl ChatMessage {
     }
 }
 
-/// Requested local display behavior. `Hide` is honored only with `client.chat.filter`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Requested local display behavior. Each action requires its own capability grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChatMessageAction {
     Show,
     Hide,
+    Replace(ChatText),
+}
+
+/// A bounded, richly formatted local chat message made from literal text spans.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ChatText {
+    spans: Vec<ChatSpan>,
+    text_bytes: usize,
+    interaction_bytes: usize,
+}
+
+impl ChatText {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn plain(text: impl Into<String>) -> SjmlResult<Self> {
+        let mut value = Self::new();
+        value.push(ChatSpan::new(text)?)?;
+        Ok(value)
+    }
+
+    pub fn push(&mut self, span: ChatSpan) -> SjmlResult<()> {
+        let text_bytes = self
+            .text_bytes
+            .checked_add(span.text.len())
+            .ok_or_else(|| invalid("chat text size overflowed"))?;
+        let interaction_bytes = self
+            .interaction_bytes
+            .checked_add(span.interaction_bytes())
+            .ok_or_else(|| invalid("chat interaction size overflowed"))?;
+        if self.spans.len() >= MAX_CHAT_TEXT_SPANS {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "chat replacement has too many spans",
+            ));
+        }
+        if text_bytes > MAX_CHAT_MESSAGE_BYTES {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "chat replacement text exceeds 4096 bytes",
+            ));
+        }
+        if interaction_bytes > MAX_CHAT_INTERACTION_BYTES {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "chat replacement interactions exceed 8192 bytes",
+            ));
+        }
+        self.text_bytes = text_bytes;
+        self.interaction_bytes = interaction_bytes;
+        self.spans.push(span);
+        Ok(())
+    }
+
+    pub fn spans(&self) -> &[ChatSpan] {
+        &self.spans
+    }
+}
+
+/// Per-span formatting and optional safe hover/click behavior.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChatSpan {
+    text: String,
+    color_rgb: Option<u32>,
+    flags: u8,
+    hover_text: Option<String>,
+    click_action: Option<ChatClickAction>,
+}
+
+impl ChatSpan {
+    pub fn new(text: impl Into<String>) -> SjmlResult<Self> {
+        let text = text.into();
+        validate_local_text(&text, MAX_CHAT_MESSAGE_BYTES, "chat span")?;
+        Ok(Self {
+            text,
+            color_rgb: None,
+            flags: 0,
+            hover_text: None,
+            click_action: None,
+        })
+    }
+
+    pub fn color(mut self, rgb: u32) -> SjmlResult<Self> {
+        if rgb > 0xFFFFFF {
+            return Err(invalid("chat span color must be an RGB value"));
+        }
+        self.color_rgb = Some(rgb);
+        Ok(self)
+    }
+    pub fn bold(mut self, enabled: bool) -> Self {
+        self.set_flag(1, enabled);
+        self
+    }
+    pub fn italic(mut self, enabled: bool) -> Self {
+        self.set_flag(1 << 1, enabled);
+        self
+    }
+    pub fn underline(mut self, enabled: bool) -> Self {
+        self.set_flag(1 << 2, enabled);
+        self
+    }
+    pub fn strikethrough(mut self, enabled: bool) -> Self {
+        self.set_flag(1 << 3, enabled);
+        self
+    }
+    pub fn obfuscated(mut self, enabled: bool) -> Self {
+        self.set_flag(1 << 4, enabled);
+        self
+    }
+
+    pub fn hover_text(mut self, value: impl Into<String>) -> SjmlResult<Self> {
+        let value = value.into();
+        validate_local_text(&value, MAX_CHAT_INTERACTION_VALUE_BYTES, "chat hover text")?;
+        self.hover_text = Some(value);
+        Ok(self)
+    }
+
+    pub fn click(mut self, action: ChatClickAction) -> Self {
+        self.click_action = Some(action);
+        self
+    }
+
+    fn set_flag(&mut self, flag: u8, enabled: bool) {
+        if enabled {
+            self.flags |= flag;
+        } else {
+            self.flags &= !flag;
+        }
+    }
+
+    fn interaction_bytes(&self) -> usize {
+        self.hover_text.as_ref().map_or(0, String::len)
+            + self
+                .click_action
+                .as_ref()
+                .map_or(0, |action| action.value().len())
+    }
+}
+
+/// Click actions that keep control with the local player; command execution is not exposed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChatClickAction {
+    kind: ChatClickKind,
+    value: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ChatClickKind {
+    OpenUrl,
+    SuggestCommand,
+    CopyToClipboard,
+}
+
+impl ChatClickAction {
+    pub fn open_url(value: impl Into<String>) -> SjmlResult<Self> {
+        let value = value.into();
+        validate_local_text(&value, MAX_CHAT_INTERACTION_VALUE_BYTES, "chat URL")?;
+        if !valid_http_url(&value) {
+            return Err(invalid("chat URL must be a valid HTTP(S) URL"));
+        }
+        Ok(Self {
+            kind: ChatClickKind::OpenUrl,
+            value,
+        })
+    }
+    pub fn suggest_command(value: impl Into<String>) -> SjmlResult<Self> {
+        Self::validated(value.into(), "chat suggested command").map(|value| Self {
+            kind: ChatClickKind::SuggestCommand,
+            value,
+        })
+    }
+    pub fn copy_to_clipboard(value: impl Into<String>) -> SjmlResult<Self> {
+        Self::validated(value.into(), "chat clipboard value").map(|value| Self {
+            kind: ChatClickKind::CopyToClipboard,
+            value,
+        })
+    }
+    fn validated(value: String, name: &'static str) -> SjmlResult<String> {
+        validate_local_text(&value, MAX_CHAT_INTERACTION_VALUE_BYTES, name)?;
+        Ok(value)
+    }
+    fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+/// Maximum styled spans in one replacement.
+pub const MAX_CHAT_TEXT_SPANS: usize = 64;
+/// Maximum aggregate hover and click text in one replacement.
+pub const MAX_CHAT_INTERACTION_BYTES: usize = 8192;
+/// Maximum UTF-8 bytes in one hover or click value.
+pub const MAX_CHAT_INTERACTION_VALUE_BYTES: usize = 512;
+
+fn validate_local_text(value: &str, maximum: usize, name: &'static str) -> SjmlResult<()> {
+    if value.len() > maximum {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            format!("{name} exceeds {maximum} UTF-8 bytes"),
+        ));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
+    {
+        return Err(invalid("chat text must not contain control characters"));
+    }
+    Ok(())
+}
+
+fn valid_http_url(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'%' {
+            if index + 2 >= bytes.len()
+                || !bytes[index + 1].is_ascii_hexdigit()
+                || !bytes[index + 2].is_ascii_hexdigit()
+            {
+                return false;
+            }
+            index += 3;
+            continue;
+        }
+        if !(byte.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&byte)) {
+            return false;
+        }
+        index += 1;
+    }
+    let Some((scheme, remainder)) = value.split_once("://") else {
+        return false;
+    };
+    if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")) {
+        return false;
+    }
+    let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.is_empty() || authority.contains('@') {
+        return false;
+    }
+    let (host, port, ipv6) = if let Some(bracketed) = authority.strip_prefix('[') {
+        let Some(close) = bracketed.find(']') else {
+            return false;
+        };
+        let host = &bracketed[..close];
+        if host.parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        let suffix = &bracketed[close + 1..];
+        let port = if suffix.is_empty() {
+            None
+        } else if let Some(port) = suffix.strip_prefix(':') {
+            Some(port)
+        } else {
+            return false;
+        };
+        (host, port, true)
+    } else {
+        let mut parts = authority.split(':');
+        let host = parts.next().unwrap_or_default();
+        let port = parts.next();
+        if parts.next().is_some() {
+            return false;
+        }
+        (host, port, false)
+    };
+    let valid_host = ipv6
+        || (!host.is_empty()
+            && !host.starts_with('.')
+            && !host.ends_with('.')
+            && !host.starts_with('-')
+            && !host.ends_with('-')
+            && !host.contains("..")
+            && host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-')));
+    let valid_port = port.is_none_or(|port| {
+        !port.is_empty()
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+            && port.parse::<u16>().is_ok_and(|number| number != 0)
+    });
+    valid_host && valid_port
+}
+
+impl StableEncode for ChatMessageAction {
+    fn encode(&self, encoder: &mut crate::Encoder) -> SjmlResult<()> {
+        match self {
+            Self::Show => encoder.write_u8(0),
+            Self::Hide => encoder.write_u8(1),
+            Self::Replace(text) => {
+                encoder.write_u8(2)?;
+                encoder.write_length(text.spans.len())?;
+                for span in &text.spans {
+                    span.text.encode(encoder)?;
+                    span.color_rgb.encode(encoder)?;
+                    encoder.write_u8(span.flags)?;
+                    span.hover_text.encode(encoder)?;
+                    span.click_action.encode(encoder)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl StableEncode for ChatClickAction {
+    fn encode(&self, encoder: &mut crate::Encoder) -> SjmlResult<()> {
+        match self.kind {
+            ChatClickKind::OpenUrl => {
+                encoder.write_u8(1)?;
+                self.value.encode(encoder)
+            }
+            ChatClickKind::SuggestCommand => {
+                encoder.write_u8(2)?;
+                self.value.encode(encoder)
+            }
+            ChatClickKind::CopyToClipboard => {
+                encoder.write_u8(3)?;
+                self.value.encode(encoder)
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -361,7 +683,7 @@ impl StableDecode for Delivery {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn deliver(delivery: Delivery) -> SjmlResult<bool> {
+fn deliver(delivery: Delivery) -> SjmlResult<ChatMessageAction> {
     if DISPATCHING.with(|state| state.replace(true)) {
         return Err(SjmlError::new(
             ErrorCode::ServiceBusy,
@@ -384,7 +706,7 @@ fn deliver(delivery: Delivery) -> SjmlResult<bool> {
             "client chat message callback is already active",
         )
     })?;
-    Ok(callback(delivery.message)? == ChatMessageAction::Hide)
+    callback(delivery.message)
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -397,11 +719,11 @@ impl Drop for DispatchGuard {
 }
 
 #[cfg(test)]
-fn dispatch(bytes: &[u8]) -> SjmlResult<bool> {
+fn dispatch(bytes: &[u8]) -> SjmlResult<ChatMessageAction> {
     deliver(crate::from_bytes(bytes)?)
 }
 
-/// Receives a bounded host message snapshot and returns one stable bool byte.
+/// Receives a bounded host message snapshot and returns one stable [`ChatMessageAction`].
 ///
 /// # Safety
 /// The host must provide a live initialized allocation returned by `sjml_v1_alloc` and keep it
@@ -514,13 +836,75 @@ mod tests {
                 .unwrap();
             state.entries.get_mut(&id).unwrap().handle = Some(handle);
         });
-        assert!(dispatch(&payload(1, 0, b"system")).unwrap());
+        assert_eq!(
+            dispatch(&payload(1, 0, b"system")).unwrap(),
+            ChatMessageAction::Hide
+        );
         let received = observed.borrow().clone().unwrap();
         assert_eq!(received.source(), ChatMessageSource::System);
         assert_eq!(received.text(), "system");
         CALLBACKS.with(|state| {
             state.borrow_mut().entries.clear();
         });
+    }
+
+    #[test]
+    fn replacement_actions_encode_bounded_formatting_and_safe_clicks() {
+        let replacement = ChatText::plain("Open ").unwrap();
+        let span = ChatSpan::new("site")
+            .unwrap()
+            .color(0x22AAFF)
+            .unwrap()
+            .bold(true)
+            .hover_text("Visit our website")
+            .unwrap()
+            .click(ChatClickAction::open_url("https://example.com/help").unwrap());
+        let mut replacement = replacement;
+        replacement.push(span).unwrap();
+        let encoded = crate::to_bytes(&ChatMessageAction::Replace(replacement)).unwrap();
+        assert_eq!(encoded[0], 2);
+        let mut decoder = Decoder::new(&encoded[1..]).unwrap();
+        assert_eq!(decoder.read_u32().unwrap(), 2);
+        assert_eq!(String::decode(&mut decoder).unwrap(), "Open ");
+        assert_eq!(Option::<u32>::decode(&mut decoder).unwrap(), None);
+        assert_eq!(decoder.read_u8().unwrap(), 0);
+        assert_eq!(Option::<String>::decode(&mut decoder).unwrap(), None);
+        assert_eq!(decoder.read_u8().unwrap(), 0);
+        assert_eq!(String::decode(&mut decoder).unwrap(), "site");
+        assert_eq!(Option::<u32>::decode(&mut decoder).unwrap(), Some(0x22AAFF));
+        assert_eq!(decoder.read_u8().unwrap(), 1);
+        assert_eq!(
+            Option::<String>::decode(&mut decoder).unwrap(),
+            Some("Visit our website".into())
+        );
+        assert_eq!(decoder.read_u8().unwrap(), 1);
+        assert_eq!(decoder.read_u8().unwrap(), 1);
+        assert_eq!(
+            String::decode(&mut decoder).unwrap(),
+            "https://example.com/help"
+        );
+        assert_eq!(decoder.remaining(), 0);
+    }
+
+    #[test]
+    fn replacement_text_and_interactions_are_bounded_and_commands_cannot_run() {
+        assert_eq!(
+            ChatText::plain("x".repeat(MAX_CHAT_MESSAGE_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert!(ChatClickAction::open_url("javascript:alert(1)").is_err());
+        assert!(ChatClickAction::open_url("https://user@example.com").is_err());
+        assert!(ChatClickAction::open_url("https://example.com").is_ok());
+        assert!(ChatClickAction::open_url("https://example.com/a%20b").is_ok());
+        assert!(ChatClickAction::open_url("https://example.com/a b").is_err());
+        assert!(ChatClickAction::open_url("https://example.com:65536").is_err());
+        let span = ChatSpan::new("x")
+            .unwrap()
+            .click(ChatClickAction::suggest_command("/help").unwrap());
+        assert_eq!(span.interaction_bytes(), 5);
+        assert!(ChatClickAction::copy_to_clipboard("copied text").is_ok());
     }
 
     #[test]

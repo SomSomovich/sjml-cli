@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.52.0"
+sjml-sdk = "0.53.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -102,6 +102,12 @@ chunk, and shared elapsed game-time writes. See [villager trades](https://github
 [cross-dimension teleport](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_DIMENSION_TELEPORT.md),
 and [shared game time](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_GAME_TIME.md).
 
+SDK 0.53.0 adds bounded local rich chat-message replacements with formatting,
+hover text, and safe URL/suggest/copy click actions. Rewriting requires the
+separate
+`client.chat.rewrite` grant; the older one-byte Show/Hide result remains
+compatible. See the [chat-message API contract](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_CHAT_MESSAGES.md).
+
 ```rust
 use sjml::prelude::*;
 
@@ -114,7 +120,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.52.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.53.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)
