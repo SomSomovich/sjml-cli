@@ -1,6 +1,6 @@
 use sjml::events::{
     BlockBreakAttempt, EffectTickEvent, EntityDeath, EntityDeathAttempt, PlayerJoined, PlayerLeft,
-    PlayerRespawned, ResourcesReloaded,
+    PlayerRespawned, ProjectileImpactAttempt, ResourcesReloaded,
 };
 use sjml::player::PlayerTeleport;
 use sjml::prelude::PlayerMoved;
@@ -70,6 +70,11 @@ fn on_entity_death_attempt(_: EntityDeathAttempt) -> SjmlResult<bool> {
 #[event(name = "block.break_attempt")]
 fn on_block_break_attempt(_: BlockBreakAttempt) -> SjmlResult<bool> {
     Ok(false)
+}
+
+#[event(name = "entity.projectile_impact_attempt")]
+fn on_projectile_impact_attempt(event: ProjectileImpactAttempt) -> SjmlResult<bool> {
+    Ok(event.hit_kind == "block")
 }
 
 #[command(name = "demo.echo")]
@@ -369,6 +374,25 @@ fn block_break_attempt_record_has_the_documented_v1_field_order_and_bool_callbac
     assert_eq!(bytes, expected);
     assert_eq!(from_bytes::<BlockBreakAttempt>(&bytes).unwrap(), event);
     assert_eq!(on_block_break_attempt(event), Ok(false));
+}
+
+#[test]
+fn projectile_impact_attempt_macro_exports_a_boolean_veto_callback() {
+    let event = ProjectileImpactAttempt {
+        projectile_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+        projectile_type_id: "minecraft:arrow".to_owned(),
+        dimension_id: "minecraft:overworld".to_owned(),
+        hit_kind: "block".to_owned(),
+        hit_entity_id: None,
+        hit_entity_type_id: None,
+        hit_block_id: Some("minecraft:stone".to_owned()),
+        block_position: Some(sjml::inventory::BlockPos { x: 0, y: 64, z: 0 }),
+        block_face: Some("up".to_owned()),
+        x: 0.5,
+        y: 64.5,
+        z: 0.5,
+    };
+    assert_eq!(on_projectile_impact_attempt(event), Ok(true));
 }
 
 #[test]

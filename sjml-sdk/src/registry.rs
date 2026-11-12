@@ -59,6 +59,63 @@ pub enum ItemRarity {
     Epic = 3,
 }
 
+/// Bounded vanilla food behavior for a registered item.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ItemFood {
+    nutrition: u32,
+    saturation_modifier: f32,
+    fast: bool,
+    always_eat: bool,
+}
+
+impl ItemFood {
+    /// Creates food properties with nutrition `1..=20` and a saturation modifier `0..=10`.
+    pub fn new(nutrition: u32, saturation_modifier: f32) -> SjmlResult<Self> {
+        if !(1..=20).contains(&nutrition) {
+            return Err(invalid_argument("food nutrition must be between 1 and 20"));
+        }
+        if !saturation_modifier.is_finite() || !(0.0..=10.0).contains(&saturation_modifier) {
+            return Err(invalid_argument(
+                "food saturation modifier must be finite and between 0 and 10",
+            ));
+        }
+        Ok(Self {
+            nutrition,
+            saturation_modifier,
+            fast: false,
+            always_eat: false,
+        })
+    }
+
+    /// Sets the vanilla fast-eating flag.
+    pub const fn fast(mut self) -> Self {
+        self.fast = true;
+        self
+    }
+
+    /// Allows eating even when the hunger bar is full.
+    pub const fn always_eat(mut self) -> Self {
+        self.always_eat = true;
+        self
+    }
+
+    pub const fn nutrition(self) -> u32 {
+        self.nutrition
+    }
+
+    pub const fn saturation_modifier(self) -> f32 {
+        self.saturation_modifier
+    }
+
+    pub const fn is_fast(self) -> bool {
+        self.fast
+    }
+
+    pub const fn can_always_eat(self) -> bool {
+        self.always_eat
+    }
+}
+
 impl Default for ItemDefinition {
     fn default() -> Self {
         Self {
@@ -728,6 +785,14 @@ extern "C" {
     fn imported_set_item_rarity(path_pointer: i32, path_length: i32, rarity: i32) -> i32;
     #[link_name = "set_item_enchantment_value"]
     fn imported_set_item_enchantment_value(path_pointer: i32, path_length: i32, value: i32) -> i32;
+    #[link_name = "set_item_food"]
+    fn imported_set_item_food(
+        path_pointer: i32,
+        path_length: i32,
+        nutrition: i32,
+        saturation_modifier_bits: i32,
+        flags: i32,
+    ) -> i32;
     #[link_name = "register_block"]
     fn imported_register_block(
         path_pointer: i32,
@@ -1084,6 +1149,35 @@ pub fn set_item_enchantment_value(item_path: &str, value: u32) -> SjmlResult<()>
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = value;
+        Err(unsupported_target())
+    }
+}
+
+/// Declares an already-registered item as a usable vanilla food item.
+///
+/// Call this during `#[mod_register]`, after `register_item` or registration of a block with an
+/// item form. The declared item must belong to the same package and module. Each item can receive
+/// one food declaration; unspecified items keep their existing non-food behavior.
+pub fn set_item_food(item_path: &str, food: ItemFood) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    let flags = i32::from(food.fast) | (i32::from(food.always_eat) << 1);
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the food values and flag mask.
+        let status = unsafe {
+            imported_set_item_food(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                food.nutrition as i32,
+                food.saturation_modifier.to_bits() as i32,
+                flags,
+            )
+        };
+        return status_result(status, "host rejected the item food declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (food, flags);
         Err(unsupported_target())
     }
 }
@@ -3936,6 +4030,44 @@ mod tests {
         );
         assert_eq!(
             set_item_enchantment_value("../ruby", 1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_food_values_and_flags_validate_before_host_access() {
+        let food = ItemFood::new(6, 0.6).unwrap().fast().always_eat();
+        assert_eq!(food.nutrition(), 6);
+        assert_eq!(food.saturation_modifier(), 0.6);
+        assert!(food.is_fast());
+        assert!(food.can_always_eat());
+        assert_eq!(
+            ItemFood::new(0, 0.6).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            ItemFood::new(21, 0.6).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            ItemFood::new(6, f32::NAN).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            ItemFood::new(6, -0.1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            ItemFood::new(6, 10.1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_food("ruby", food).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_food("../ruby", food).unwrap_err().code(),
             ErrorCode::InvalidArgument
         );
     }

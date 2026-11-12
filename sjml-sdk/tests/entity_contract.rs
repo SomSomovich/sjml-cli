@@ -60,6 +60,36 @@ fn native_entity_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        entity::custom_name(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_custom_name(handle, "plain name")
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::clear_custom_name(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_custom_name(handle, "").unwrap_err().code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        entity::set_custom_name(handle, "bad\nname")
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        entity::set_custom_name(handle, &"😀".repeat(257))
+            .unwrap_err()
+            .code(),
+        ErrorCode::PayloadTooLarge
+    );
+    assert_eq!(
         entity::damage(handle, 1.0).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );

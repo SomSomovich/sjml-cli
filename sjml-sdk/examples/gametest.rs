@@ -10,6 +10,7 @@ static SAW_PIG_DEATH: AtomicBool = AtomicBool::new(false);
 static SAW_PIG_DEATH_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static ARM_ENTITY_TARGET_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_ENTITY_TARGET_ATTEMPT: AtomicBool = AtomicBool::new(false);
+static SAW_PROJECTILE_IMPACT_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_EFFECT_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_BLOCK_PLACE: AtomicBool = AtomicBool::new(false);
 static SAW_BLOCK_PLACE_VETO: AtomicBool = AtomicBool::new(false);
@@ -44,6 +45,8 @@ fn register_test_content() -> SjmlResult<()> {
     registry::set_item_rarity("gametest_epic_rarity", ItemRarity::Epic)?;
     registry::register_item("gametest_enchantable", ItemDefinition::default())?;
     registry::set_item_enchantment_value("gametest_enchantable", 31)?;
+    registry::register_item("gametest_food", ItemDefinition::default())?;
+    registry::set_item_food("gametest_food", ItemFood::new(6, 0.6)?.fast().always_eat())?;
     registry::register_integer_component(
         "player_charge",
         IntegerComponentDefinition::new(-10, 10)?,
@@ -185,6 +188,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("entity.death", EventPriority::Normal)?;
     events::subscribe("entity.death_attempt", EventPriority::Normal)?;
     events::subscribe("entity.target_attempt", EventPriority::Normal)?;
+    events::subscribe("entity.projectile_impact_attempt", EventPriority::Normal)?;
     events::subscribe("entity.spawned", EventPriority::Normal)?;
     events::subscribe("entity.effect.tick", EventPriority::Normal)?;
     events::subscribe("block.place", EventPriority::Normal)?;
@@ -239,6 +243,15 @@ fn veto_armed_entity_target_attempt(event: EntityTargetAttempt) -> SjmlResult<bo
         && ARM_ENTITY_TARGET_ATTEMPT.swap(false, Ordering::Relaxed);
     if veto {
         SAW_ENTITY_TARGET_ATTEMPT.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
+}
+
+#[event(name = "entity.projectile_impact_attempt")]
+fn cancel_snowball_impact(event: ProjectileImpactAttempt) -> SjmlResult<bool> {
+    let veto = event.projectile_type_id == "minecraft:snowball" && event.hit_kind == "block";
+    if veto {
+        SAW_PROJECTILE_IMPACT_ATTEMPT.store(true, Ordering::Relaxed);
     }
     Ok(veto)
 }
@@ -439,6 +452,18 @@ fn check_entity_target_attempt(_: EntityDeathCheckArguments) -> SjmlResult<Strin
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "entity.target_attempt callback did not veto the target change",
+        ))
+    }
+}
+
+#[command(name = "entity.projectile_impact.check")]
+fn check_projectile_impact_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    if SAW_PROJECTILE_IMPACT_ATTEMPT.swap(false, Ordering::Relaxed) {
+        Ok("guest vetoed a snowball block impact".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity.projectile_impact_attempt callback did not veto the snowball",
         ))
     }
 }
@@ -1213,6 +1238,98 @@ fn update_test_menu(arguments: MenuUpdateArguments) -> SjmlResult<String> {
     Ok("the module-owned menu was replaced".to_owned())
 }
 
+#[command(name = "menu.editable.check")]
+fn exercise_editable_menu(arguments: MenuUpdateArguments) -> SjmlResult<String> {
+    let handle = player::online()?
+        .into_iter()
+        .find(|handle| {
+            player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.player_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "requested editable-menu player is not online",
+            )
+        })?;
+
+    let mut menu = sjml::menu::EditableMenuDefinition::new("Stone exchange", 1)?;
+    menu.slot(sjml::menu::EditableMenuSlot::input(0, ["minecraft:stone"])?)?;
+    menu.slot(sjml::menu::EditableMenuSlot::output(1)?)?;
+    menu.open(handle)?;
+
+    menu.transfer(
+        handle,
+        sjml::menu::EditableMenuEndpoint::PlayerInventory(0),
+        sjml::menu::EditableMenuEndpoint::Menu(0),
+        3,
+    )?;
+    if menu
+        .read_slot(handle, 0)?
+        .as_ref()
+        .is_none_or(|stack| stack.item_id != "minecraft:stone" || stack.count != 3)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "editable input slot did not receive the requested existing items",
+        ));
+    }
+
+    menu.transfer(
+        handle,
+        sjml::menu::EditableMenuEndpoint::Menu(0),
+        sjml::menu::EditableMenuEndpoint::Menu(1),
+        2,
+    )?;
+    if menu
+        .read_slot(handle, 0)?
+        .as_ref()
+        .is_none_or(|stack| stack.count != 1)
+        || menu
+            .read_slot(handle, 1)?
+            .as_ref()
+            .is_none_or(|stack| stack.count != 2)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "editable menu transfer did not conserve the expected item counts",
+        ));
+    }
+
+    menu.transfer(
+        handle,
+        sjml::menu::EditableMenuEndpoint::Menu(1),
+        sjml::menu::EditableMenuEndpoint::PlayerInventory(2),
+        1,
+    )?;
+    if menu
+        .read_slot(handle, 1)?
+        .as_ref()
+        .is_none_or(|stack| stack.count != 1)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "editable menu did not transfer one existing output item back to inventory",
+        ));
+    }
+
+    if menu
+        .transfer(
+            handle,
+            sjml::menu::EditableMenuEndpoint::PlayerInventory(1),
+            sjml::menu::EditableMenuEndpoint::Menu(0),
+            1,
+        )
+        .is_ok()
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "editable menu accepted an item outside the input allowlist",
+        ));
+    }
+
+    Ok("editable menu transfers preserve item identity and count".to_owned())
+}
+
 #[command(name = "menu.action.check")]
 fn check_menu_action(_: MenuActionCheckArguments) -> SjmlResult<String> {
     if SAW_MENU_ACTION.swap(false, Ordering::Relaxed) {
@@ -1590,7 +1707,9 @@ fn player_inventory_integer_component(arguments: PlayerArguments) -> SjmlResult<
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
-struct EntityArguments {}
+struct EntityArguments {
+    entity_id: String,
+}
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
@@ -1721,8 +1840,48 @@ fn check_entity_state_flags(arguments: EntityRaycastArguments) -> SjmlResult<Str
     Ok("entity glowing and silent flags were read, changed, and restored".to_owned())
 }
 
+#[command(name = "entity.custom_name.check")]
+fn check_entity_custom_name(arguments: EntityRaycastArguments) -> SjmlResult<String> {
+    let handle = entity::loaded()?
+        .into_iter()
+        .find(|handle| {
+            entity::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.entity_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "custom-name test target is not loaded",
+            )
+        })?;
+    let original_name = entity::custom_name(handle)?;
+    let check = (|| {
+        entity::set_custom_name(handle, "SJML literal entity name")?;
+        if entity::custom_name(handle)?.as_deref() != Some("SJML literal entity name") {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity custom name did not round-trip as literal text",
+            ));
+        }
+        entity::clear_custom_name(handle)?;
+        if entity::custom_name(handle)?.is_some() {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity custom name did not clear",
+            ));
+        }
+        Ok(())
+    })();
+    let restore = match original_name.as_deref() {
+        Some(name) => entity::set_custom_name(handle, name),
+        None => entity::clear_custom_name(handle),
+    };
+    check?;
+    restore?;
+    Ok("entity custom name was read, set, cleared, and restored".to_owned())
+}
+
 #[command(name = "entity.inspect")]
-fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
+fn inspect_entities(arguments: EntityArguments) -> SjmlResult<String> {
     let handles = entity::loaded()?;
     let snapshots = handles
         .iter()
@@ -1733,7 +1892,9 @@ fn inspect_entities(_: EntityArguments) -> SjmlResult<String> {
         .iter()
         .copied()
         .zip(&snapshots)
-        .find(|(_, snapshot)| snapshot.entity_type_id == "minecraft:pig")
+        .find(|(_, snapshot)| {
+            snapshot.uuid == arguments.entity_id && snapshot.entity_type_id == "minecraft:pig"
+        })
         .ok_or_else(|| {
             SjmlError::new(
                 ErrorCode::InvalidArgument,

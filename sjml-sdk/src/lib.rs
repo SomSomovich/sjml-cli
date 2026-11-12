@@ -164,7 +164,10 @@ pub use inventory::{
     BlockPos, Direction, InventoryEndpoint, InventorySnapshot, ItemStackDescriptor,
     ItemStackSnapshot, MAX_ITEM_TRANSFER_COUNT,
 };
-pub use menu::{MenuAction, MenuDefinition, MenuItem};
+pub use menu::{
+    EditableMenuDefinition, EditableMenuEndpoint, EditableMenuSlot, EditableMenuStack, MenuAction,
+    MenuDefinition, MenuItem,
+};
 pub use network::{
     ChannelRef, LogicalSide, NetworkContext, NetworkContextSnapshot, NetworkDirection,
     NetworkSubscriptionHandle, Player as NetworkPlayer, Uuid,
@@ -183,9 +186,9 @@ pub use recipe::{
     CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
 };
 pub use registry::{
-    BlockEntityModelDefinition, EntityModelDefinition, IntegerComponentDefinition, ItemRarity,
-    ModelAnimation, ModelAnimationAxis, ModelCuboid, VillagerTradeItem, VillagerTradeOffer,
-    MAX_BOUND_MODEL_CUBOIDS,
+    BlockEntityModelDefinition, EntityModelDefinition, IntegerComponentDefinition, ItemFood,
+    ItemRarity, ModelAnimation, ModelAnimationAxis, ModelCuboid, VillagerTradeItem,
+    VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,
 };
 pub use render::{
     RenderContext, RenderFont, RenderFrame, RenderLayer, RenderSubscriptionHandle,
@@ -273,8 +276,9 @@ pub mod prelude {
         BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
         EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged,
         PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerJoined, PlayerLeft,
-        PlayerMoved, ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
-        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        PlayerMoved, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        DEFAULT_SERVER_TICK_INTERVAL, MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT,
+        MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::gl;
     pub use crate::gl::{
@@ -289,7 +293,10 @@ pub mod prelude {
         ItemStackSnapshot, MAX_ITEM_TRANSFER_COUNT,
     };
     pub use crate::menu;
-    pub use crate::menu::{MenuAction, MenuDefinition, MenuItem};
+    pub use crate::menu::{
+        EditableMenuDefinition, EditableMenuEndpoint, EditableMenuSlot, EditableMenuStack,
+        MenuAction, MenuDefinition, MenuItem,
+    };
     pub use crate::network;
     pub use crate::network::{
         broadcast, send_to, send_to_server, subscribe as subscribe_network,
@@ -317,12 +324,12 @@ pub mod prelude {
         register_fluid, register_fluid_with_visuals, register_integer_component, register_item,
         register_particle, register_recipe_serializer, register_shaped_recipe,
         register_shapeless_recipe, register_smithing_transform_recipe, register_sound,
-        register_string_component, register_villager_trade, set_entity_attribute,
+        register_string_component, register_villager_trade, set_entity_attribute, set_item_food,
         set_item_integer_component, set_item_rarity, set_item_string_component,
         AttributeModifierOperation, BlockDefinition, BlockEntityModelDefinition,
         CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
         EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
-        FluidVisualDefinition, IntegerComponentDefinition, ItemDefinition, ItemRarity,
+        FluidVisualDefinition, IntegerComponentDefinition, ItemDefinition, ItemFood, ItemRarity,
         ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition,
         ShapedRecipeKey, ShapelessRecipeDefinition, SmithingTransformRecipeDefinition,
         StringComponentDefinition, VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,

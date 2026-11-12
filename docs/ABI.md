@@ -6,10 +6,19 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.48.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.49.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.48.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.49.0 adds
+synchronous cancellable `entity.projectile_impact_attempt`, literal custom-name
+reads and writes for loaded non-player entities, bounded registered food
+properties, and owner-scoped editable chest menus with allowlisted input/output
+slots and conservation-preserving transfers of existing stacks. The projectile
+event requires `events.subscribe` and `events.cancel`; entity name reads require
+`entity.read` and writes also require `entity.custom_name.write`; item food
+declarations require `content.register`; editable-menu reads require
+`entity.read` and `menu.open`, while transfers also require `menu.transfer`.
+ABI 1.48.0 adds
 synchronous cancellable `player.drop_attempt` with inventory-safe stack
 restoration, module-owned updates to the title and contents of its currently
 open read-only menu, reads and writes for loaded entity glowing/silent flags,
@@ -223,6 +232,7 @@ plus the non-cancellable `sjml_v1_event_player.joined`,
 `sjml_v1_event_player.respawned`,
 `sjml_v1_event_entity.death`, and
 `sjml_v1_event_entity.spawned`, `sjml_v1_event_entity.effect.tick`,
+`sjml_v1_event_entity.projectile_impact_attempt`,
 `sjml_v1_event_block.place`, `sjml_v1_event_player.interacted`,
 `sjml_v1_event_player.interaction`,
 `sjml_v1_event_entity.damaged`, `sjml_v1_event_world.loaded`,
@@ -235,7 +245,7 @@ version `1`, then a stable UTF-8 string containing the canonical UUID, then a
 stable UTF-8 string containing the profile name. `player.moved` receives
 schema-v1 `PlayerMoved`: the same identity strings, a stable UTF-8 dimension
 ID, finite little-endian `f64` position coordinates, then finite `f32` yaw and
-pitch values. All seventeen notifications run
+pitch values. All notification callbacks run
 only after explicit subscription, synchronously on the owning logical-server
 thread. `player.respawned` receives schema-v1 `PlayerRespawned`: little-endian
 version `1`, stable strings in order (`player_id` canonical UUID,
@@ -260,6 +270,19 @@ must return exactly one stable boolean byte and requires both
 existing target, including preserving `None` when a clear-target attempt is
 vetoed. Already-cancelled events do not reach guest callbacks. This callback is
 synchronous and cannot use `#[event_async]`.
+
+The synchronous cancellable `sjml_v1_event_entity.projectile_impact_attempt`
+callback receives schema-v1 `ProjectileImpactAttempt`: little-endian `u32(1)`;
+length-prefixed strings `projectile_id`, `projectile_type_id`, `dimension_id`,
+and `hit_kind`; optional strings `hit_entity_id`, `hit_entity_type_id`, and
+`hit_block_id`; an optional schema-v1 `BlockPos` (`x`, `y`, `z` as little-endian
+`i32`); optional `block_face`; then finite little-endian `f64` hit coordinates
+`x`, `y`, and `z`. `hit_kind` is `entity` or `block`, with exactly the matching
+target fields present. The host copies this bounded payload while NeoForge's
+impact event is active. The callback must return one stable boolean byte and
+requires `events.subscribe` and `events.cancel`; `true` cancels the impact.
+Block details are omitted if the target chunk is no longer loaded. This
+callback is synchronous and cannot use `#[event_async]`.
 
 NeoForge also invokes the synchronous cancellable
 `sjml_v1_event_block.break` callback on that same server thread only after
@@ -398,9 +421,9 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`,
 `entity.death`, `entity.spawned`, `entity.effect.tick`, `entity.target_attempt`, `block.break`,
-`block.place`, `player.interacted`, `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
+`block.place`, `player.interacted`, `player.interaction`, `player.drop_attempt`, `entity.projectile_impact_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`.
-Subscribing to `block.break`, `player.interaction`, `player.drop_attempt`, or `entity.target_attempt` additionally requires the
+Subscribing to `block.break`, `player.interaction`, `player.drop_attempt`, `entity.target_attempt`, or `entity.projectile_impact_attempt` additionally requires the
 module to request and receive the separate `events.cancel` capability. Static
 registration instances cannot subscribe. A subscription callback runs
 synchronously on the owning logical-server thread. Non-cancellable handlers may
@@ -410,7 +433,7 @@ Task-admission and async handler errors are logged; they do not affect the
 already-delivered notification. These tasks use the existing bounded
 `sjml_async_v1.wake`/poll runtime and inherit its task quota, timeout,
 cancellation, and module-shutdown behavior. The async macro rejects
-`block.break`, `player.interaction`, and `player.drop_attempt`; their cancellation
+`block.break`, `player.interaction`, `player.drop_attempt`, and `entity.projectile_impact_attempt`; their cancellation
 results remain strictly synchronous.
 
 ## Async task and service imports
@@ -486,6 +509,7 @@ The Rust SDK's registration wrappers use these imports during the
 | --- | --- | --- |
 | `sjml_registry_v1.register_item` | `(path_ptr: i32, path_len: i32, max_stack: i32, fire_resistant: i32) -> i32` | Stage an item under `<package>/<module>/<path>`. |
 | `sjml_registry_v1.set_item_enchantment_value` | `(item_path_ptr: i32, item_path_len: i32, value: i32) -> i32` | Set vanilla enchantability from 0 to 255 on a previously declared item owned by the same module. |
+| `sjml_registry_v1.set_item_food` | `(item_path_ptr: i32, item_path_len: i32, nutrition: i32, saturation_modifier_bits: i32, flags: i32) -> i32` | Set nutrition 1–20, finite saturation modifier 0–10, and vanilla `fast` (bit 0) / `always_eat` (bit 1) flags on a previously declared item owned by the same module. |
 | `sjml_registry_v1.register_block` | `(path_ptr: i32, path_len: i32, strength_bits: i32, resistance_bits: i32, requires_tool: i32, has_item: i32) -> i32` | Stage a basic block and optionally its `BlockItem`. |
 | `sjml_registry_v1.register_block_entity` | `(path_ptr: i32, path_len: i32, block_path_ptr: i32, block_path_len: i32) -> i32` | Stage a generic block entity type for a block declared by the same module. |
 | `sjml_registry_v1.register_entity_model` | `(path_ptr: i32, path_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded colored model for an entity declared by the same module, with optional model-wide and per-cuboid sine rotations. |
@@ -729,6 +753,34 @@ per module per server tick. Calls and callbacks run on the owning server thread.
 Open and update are unavailable from static `mod_register` and client-only
 module contexts. Updates require the active screen to be this module's menu and
 are limited to eight replacements per module per server tick.
+
+## Editable menu imports
+
+`sjml_editable_menu_v1.open`, `read_slot`, and `transfer` expose a distinct
+server-authoritative container menu. Open/read require `entity.read` and
+`menu.open`; transfers additionally require `menu.transfer`.
+
+| Import | WebAssembly signature | Behavior |
+| --- | --- | --- |
+| `sjml_editable_menu_v1.open` | `(player_ptr: i32, player_len: i32, schema_ptr: i32, schema_len: i32) -> i32` | Opens an owner-scoped menu with empty declared input/output slots. |
+| `sjml_editable_menu_v1.read_slot` | `(player_ptr: i32, player_len: i32, slot: i32, output_ptr: i32, output_capacity: i32) -> i32` | Writes an optional detached item-ID/count snapshot for a declared slot. |
+| `sjml_editable_menu_v1.transfer` | `(player_ptr: i32, player_len: i32, source_kind: i32, source_slot: i32, destination_kind: i32, destination_slot: i32, count: i32) -> i32` | Moves 1–64 existing items between a declared menu slot and a player main-inventory/hotbar slot, or between two menu slots. |
+
+The schema is at most 16 KiB and starts with little-endian `u32(1)` version,
+`u32` rows (1–6), a length-prefixed UTF-8 title (up to 256 bytes), and a `u32`
+slot count (1–54). Each slot has `u32` index, `u32` role (`0=input`,
+`1=output`), `u32` item-ID count, and that many canonical length-prefixed
+registry IDs. Input slots require 1–32 unique IDs; output slots require zero.
+Slot indexes must be unique and fit the declared rows. `read_slot` writes a
+schema-v1 optional `EditableMenuStack` containing one registry ID and count.
+Transfer endpoint kind is `0=player inventory` (slot 0–35) or `1=menu` (a
+declared slot). A move validates both stacks, slot roles/allowlists, full item
+and component identity, and destination capacity before changing either side;
+it never creates or transforms items. Each module may transfer at most 32
+times per server tick. Closing the menu returns remaining stacks to inventory
+and drops only exact overflow remainders. Calls require a live player handle
+and the owning logical-server thread; another module's or a vanilla menu cannot
+be read or changed.
 
 ## Guest command callbacks (NeoForge adapter)
 
@@ -1505,6 +1557,25 @@ client calls fail closed. See [entity state flags](ENTITY_STATE_FLAGS.md).
 | --- | --- | --- |
 | `is_glowing`, `is_silent` | `handle_ptr, handle_len, out_ptr, out_capacity` | Write little-endian `u32(0 or 1)`; status only |
 | `set_glowing`, `set_silent` | `handle_ptr, handle_len, value` | Change the requested flag; status only |
+
+## Literal non-player entity custom names
+
+`sjml_entity_v1.custom_name` reads an optional plain-text custom name from a
+loaded non-player entity and requires `entity.read`. `set_custom_name` and
+`clear_custom_name` also require the separate `entity.custom_name.write` grant.
+Names must be nonempty, control-free UTF-8 up to 1,024 bytes and 256 Unicode
+scalar values; clearing uses the dedicated clear import. The host constructs a
+literal text component and never parses markup or formatting codes.
+
+| Import | Parameters | Success output |
+| --- | --- | --- |
+| `custom_name` | `handle_ptr, handle_len, out_ptr, out_capacity` | Optional schema-v1 string in a bounded response of at most 1,033 bytes; status only |
+| `set_custom_name` | `handle_ptr, handle_len, name_ptr, name_len` | Set plain text; status only |
+| `clear_custom_name` | `handle_ptr, handle_len` | Clear the current name; status only |
+
+All operations require the exact 24-byte module-owned entity handle and run on
+the owning logical-server thread. Static-registration and client calls fail
+closed. Player names and arbitrary `Component` construction are not exposed.
 
 ## Live non-player entity attributes
 

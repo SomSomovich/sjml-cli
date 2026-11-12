@@ -21,6 +21,12 @@ pub const MAX_ENTITY_VELOCITY_COMPONENT: f64 = 64.0;
 pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
+/// Maximum UTF-8 byte length for a plain entity custom name.
+pub const MAX_ENTITY_CUSTOM_NAME_BYTES: usize = 1024;
+/// Maximum Unicode scalar count for a plain entity custom name.
+pub const MAX_ENTITY_CUSTOM_NAME_CODE_POINTS: usize = 256;
+/// Maximum encoded response size for an optional entity custom name.
+pub const MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES: usize = 4 + 1 + 4 + MAX_ENTITY_CUSTOM_NAME_BYTES;
 
 /// Current identity, type, dimension, and coordinates of one loaded non-player entity.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -120,6 +126,17 @@ extern "C" {
     fn imported_is_silent(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_silent"]
     fn imported_set_silent(handle: i32, handle_length: i32, silent: i32) -> i32;
+    #[link_name = "custom_name"]
+    fn imported_custom_name(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_custom_name"]
+    fn imported_set_custom_name(
+        handle: i32,
+        handle_length: i32,
+        name: i32,
+        name_length: i32,
+    ) -> i32;
+    #[link_name = "clear_custom_name"]
+    fn imported_clear_custom_name(handle: i32, handle_length: i32) -> i32;
     #[link_name = "set_velocity"]
     fn imported_set_velocity(
         handle: i32,
@@ -164,6 +181,13 @@ struct EntityRaycastQuery {
 #[sjml(version = 1)]
 struct EntityRaycastResult {
     handle: Option<EntityHandle>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct EntityCustomNameResponse {
+    name: Option<String>,
 }
 
 /// Maximum number of loaded non-player entities returned by [`within`].
@@ -781,6 +805,120 @@ pub fn set_silent(handle: EntityHandle, silent: bool) -> SjmlResult<()> {
     }
 }
 
+/// Reads a loaded non-player entity's custom name as plain text, if one exists.
+///
+/// Requires `entity.read`. Rich styling on an existing vanilla name is
+/// flattened to display text. The returned value is bounded to 1,024 UTF-8
+/// bytes and 256 Unicode scalar values.
+pub fn custom_name(handle: EntityHandle) -> SjmlResult<Option<String>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let response: EntityCustomNameResponse = read_output(
+            MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the handle and output allocation live for this synchronous host call.
+                unsafe {
+                    imported_custom_name(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        if let Some(name) = response.name.as_ref() {
+            validate_custom_name(name, true)?;
+        }
+        Ok(response.name)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets a bounded plain-text custom name on a loaded non-player entity.
+///
+/// Requires both `entity.read` and `entity.custom_name.write`. The host uses
+/// Minecraft's `Component.literal`, so formatting-like characters remain
+/// literal text and cannot create rich commands. Names must be nonempty,
+/// contain no control characters, and fit the 1,024-byte / 256-character
+/// limits. Use [`clear_custom_name`] to remove a name.
+pub fn set_custom_name(handle: EntityHandle, name: &str) -> SjmlResult<()> {
+    validate_custom_name(name, false)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: both byte slices remain live and immutable during the synchronous call.
+        let status = unsafe {
+            imported_set_custom_name(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                name.as_ptr() as usize as u32 as i32,
+                name.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the entity custom-name mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Clears a loaded non-player entity's custom name.
+///
+/// Requires both `entity.read` and `entity.custom_name.write`. Clearing is a
+/// separate operation so an empty displayed name cannot be confused with an
+/// absent custom name.
+pub fn clear_custom_name(handle: EntityHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains valid through this synchronous host call.
+        let status = unsafe {
+            imported_clear_custom_name(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the entity custom-name clear request")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_custom_name(name: &str, allow_empty: bool) -> SjmlResult<()> {
+    if !allow_empty && name.is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity custom name must not be empty; use clear_custom_name",
+        ));
+    }
+    if name.len() > MAX_ENTITY_CUSTOM_NAME_BYTES
+        || name.chars().count() > MAX_ENTITY_CUSTOM_NAME_CODE_POINTS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "entity custom name exceeds the 1,024-byte or 256-character limit",
+        ));
+    }
+    if !allow_empty && name.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity custom name cannot contain control characters",
+        ));
+    }
+    Ok(())
+}
+
 /// Requests one bounded generic damage hit against a loaded living non-player entity.
 ///
 /// The module must request and receive both `entity.read` and `entity.damage`. The host uses
@@ -896,11 +1034,14 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, damage, fire_ticks, raycast, remove_effect, set_fire_ticks, set_velocity,
-        validate_entity_raycast, validate_spatial_query, within, EntityRaycastQuery,
-        EntityRaycastResult, EntityVelocity, SpatialQuery, SpatialResults, MAX_ENTITY_DAMAGE,
-        MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT,
-        MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
+        apply_effect, clear_custom_name, custom_name, damage, fire_ticks, raycast, remove_effect,
+        set_custom_name, set_fire_ticks, set_velocity, validate_custom_name,
+        validate_entity_raycast, validate_spatial_query, within, EntityCustomNameResponse,
+        EntityRaycastQuery, EntityRaycastResult, EntityVelocity, SpatialQuery, SpatialResults,
+        MAX_ENTITY_CUSTOM_NAME_BYTES, MAX_ENTITY_CUSTOM_NAME_CODE_POINTS,
+        MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES, MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS,
+        MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
+        MAX_SPATIAL_QUERY_RESULTS,
     };
     use crate::{inventory::BlockPos, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle};
 
@@ -1204,6 +1345,65 @@ mod tests {
         );
         assert_eq!(
             fire_ticks(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn custom_name_bounds_and_wire_response_are_stable() {
+        let name = "😀".repeat(MAX_ENTITY_CUSTOM_NAME_CODE_POINTS);
+        assert_eq!(name.len(), MAX_ENTITY_CUSTOM_NAME_BYTES);
+        assert_eq!(MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES, 1033);
+        assert!(validate_custom_name(&name, false).is_ok());
+        assert_eq!(
+            validate_custom_name(&"😀".repeat(MAX_ENTITY_CUSTOM_NAME_CODE_POINTS + 1), false)
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_custom_name("", false).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_custom_name("bad\nname", false).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let response = EntityCustomNameResponse {
+            name: Some("name".to_owned()),
+        };
+        let encoded = crate::to_bytes(&response).unwrap();
+        assert_eq!(&encoded[..4], &1_u32.to_le_bytes());
+        assert_eq!(
+            encoded[4], 1,
+            "the optional string uses the stable option tag"
+        );
+        assert_eq!(
+            crate::from_bytes::<EntityCustomNameResponse>(&encoded).unwrap(),
+            response
+        );
+    }
+
+    #[test]
+    fn custom_name_requires_literal_safe_bounded_input_before_host_access() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            set_custom_name(handle, "plain § text").unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_custom_name(handle, &"x".repeat(MAX_ENTITY_CUSTOM_NAME_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            custom_name(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            clear_custom_name(handle).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
         );
     }

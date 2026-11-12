@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.56.0"
+sjml-sdk = "0.57.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -131,6 +131,13 @@ glowing/silent flags, and static item enchantability. See [player drop
 attempts](../docs/PLAYER_DROP_ATTEMPTS.md), [menu updates](../docs/MENU_UPDATES.md),
 and [entity state flags](../docs/ENTITY_STATE_FLAGS.md).
 
+SDK 0.57.0 adds synchronous cancellable projectile-impact events, bounded
+plain custom names for loaded non-player entities, registered food properties,
+and editable server menus with allowlisted slots and item-conserving transfers.
+See [projectile impact attempts](../docs/PROJECTILE_IMPACT_ATTEMPT.md),
+[entity custom names](../docs/ENTITY_CUSTOM_NAMES.md), [item food](../docs/ITEM_FOOD.md),
+and [editable menus](../docs/EDITABLE_MENUS.md).
+
 ```rust
 use sjml::prelude::*;
 
@@ -143,7 +150,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.56.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.57.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)

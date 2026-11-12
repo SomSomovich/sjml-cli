@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.56.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.57.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.48.0"
+abi = "^1.49.0"
 minecraft = "~1.21.1"
-sjml = "^0.58.0"
+sjml = "^0.59.0"
 
 [[modules]]
 id = "main"
@@ -176,13 +176,13 @@ module's manifest request and the administrator's list.
 
 | Capability | Enables |
 | --- | --- |
-| `content.register` | Static registry declarations, including bounded item rarity/enchantment values, and server guest commands. |
+| `content.register` | Static registry declarations, including bounded item food/rarity/enchantment values, and server guest commands. |
 | `client.command` | Register and execute bounded local commands on the physical client; does not send commands to the server. |
 | `events.subscribe` | Subscribing to supported host events. |
-| `events.cancel` | Vetoing cancellable `block.break`, `block.break_attempt`, `block.place_attempt`, right-click `player.interaction`, `player.drop_attempt`, and supported entity attempts; also requires `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
+| `events.cancel` | Vetoing cancellable `block.break`, `block.break_attempt`, `block.place_attempt`, right-click `player.interaction`, `player.drop_attempt`, `entity.projectile_impact_attempt`, and supported entity attempts; also requires `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
 | `world.read`, `world.write` | Reading loaded server-world state; writes include blocks and properties, scheduled block ticks, time, weather, allowlisted boolean/integer game rules, and world-border settings, and require both. |
 | `entity.read`, `entity.spawn`, `entity.effect.apply`, `entity.effect.remove` | Reading player/entity snapshots, spawning registered entities, or applying/removing registered effects; effect mutation also requires `entity.read`. |
-| `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write` | Removing loaded non-player entities, changing bounded velocity, fire duration, glowing/silent flags, or reading/writing allowlisted living-entity and server-player attribute base values; writes also require `entity.read`. |
+| `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write`, `entity.custom_name.write` | Removing loaded non-player entities, changing bounded velocity, fire duration, glowing/silent flags, or literal custom names, and reading/writing allowlisted living-entity and server-player attribute base values; writes also require `entity.read`. |
 | `player.teleport`, `player.vitals.write`, `player.game_mode.write`, `player.motion.write`, `player.abilities.write` | Teleporting a live player, changing bounded vitals, game mode, velocity, or current flight state; each also requires `entity.read` and logical-server execution. |
 | `entity.data.read`, `entity.data.write` | Reading or changing module-owned data attached to non-player entities. |
 | `inventory.read`, `inventory.write` | Reading loaded block/player inventories and detached item-stack snapshots, or changing registered block-inventory stacks, player slots/durability, and same-module integer components. Player operations also require `entity.read`; block operations require `world.read` and an inventory capability. |
@@ -191,7 +191,8 @@ module's manifest request and the administrator's list.
 | `storage.read`, `storage.write` | Reading or changing persistent typed records. |
 | `service.call` | Calling versioned server-side guest services; client service calls are unavailable. |
 | `task.compute` | Running bounded server-side worker computations. |
-| `menu.open` | Opening or updating a bounded read-only server menu; updates are limited to eight per module per server tick. Action callbacks also need `entity.read` and `events.subscribe`. |
+| `menu.open` | Opening/updating a bounded read-only server menu or opening an allowlisted editable menu; updates are limited to eight per module per server tick. Editable-menu reads also require `entity.read`; action callbacks require `entity.read` and `events.subscribe`. |
+| `menu.transfer` | Moving 1–64 existing items between declared editable-menu slots and the player inventory; also requires `entity.read` and `menu.open`, with at most 32 transfers per module per server tick. |
 | `client.input` | Receiving bounded client screen/global input events, named keybindings, and scaled cursor coordinates. |
 | `client.input.observe` | Receiving observe-only global keyboard notices after Minecraft processes the key. |
 | `client.input.screen_cancel` | Vetoing supported key presses delivered to the active screen; does not cancel global gameplay keys. |

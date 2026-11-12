@@ -200,6 +200,41 @@ pub struct EntityTargetAttempt {
     pub target_change_type: String,
 }
 
+/// Synchronous, cancellable server-side projectile impact attempt.
+///
+/// Return `Ok(true)` from the `entity.projectile_impact_attempt` handler to cancel the impact; the
+/// projectile then continues flying according to NeoForge's `ProjectileImpactEvent` contract.
+/// The event is detached and identifies either an entity hit or a block hit. For block impacts,
+/// the host reads the block ID only after confirming that the hit chunk is already loaded.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ProjectileImpactAttempt {
+    /// Canonical lowercase UUID of the projectile.
+    pub projectile_id: String,
+    /// Registry ID of the projectile entity type.
+    pub projectile_type_id: String,
+    /// Resource location of the level containing the projectile.
+    pub dimension_id: String,
+    /// `entity` or `block`.
+    pub hit_kind: String,
+    /// UUID of the hit entity for `entity` impacts; otherwise `None`.
+    pub hit_entity_id: Option<String>,
+    /// Registry ID of the hit entity type for `entity` impacts; otherwise `None`.
+    pub hit_entity_type_id: Option<String>,
+    /// Registry ID of the hit block for `block` impacts; otherwise `None`.
+    pub hit_block_id: Option<String>,
+    /// Block position for `block` impacts; its nested record schema is version 1.
+    pub block_position: Option<BlockPos>,
+    /// Face name such as `north` for `block` impacts; otherwise `None`.
+    pub block_face: Option<String>,
+    /// World X coordinate where the projectile ray hit.
+    pub x: f64,
+    /// World Y coordinate where the projectile ray hit.
+    pub y: f64,
+    /// World Z coordinate where the projectile ray hit.
+    pub z: f64,
+}
+
 /// Synchronous lifecycle notification for one logical-server level.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -625,7 +660,8 @@ mod tests {
         BlockPlaceAttempt, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
         EntityDeathAttempt, EntitySpawned, EntityTargetAttempt, EventPriority, InventoryChanged,
         PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerMoved,
-        PlayerRespawned, ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        PlayerRespawned, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -908,6 +944,89 @@ mod tests {
         assert_eq!(
             from_bytes::<EntityTargetAttempt>(&encoded).unwrap(),
             clear_target
+        );
+    }
+
+    #[test]
+    fn cancellable_projectile_impact_attempt_matches_host_schema_v1_for_both_hit_kinds() {
+        let entity_impact = ProjectileImpactAttempt {
+            projectile_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            projectile_type_id: "minecraft:arrow".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            hit_kind: "entity".to_owned(),
+            hit_entity_id: Some("00000000-0000-0000-0000-000000000002".to_owned()),
+            hit_entity_type_id: Some("minecraft:cow".to_owned()),
+            hit_block_id: None,
+            block_position: None,
+            block_face: None,
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+        };
+        let encoded = to_bytes(&entity_impact).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &entity_impact.projectile_id);
+        append_test_string(&mut expected, &entity_impact.projectile_type_id);
+        append_test_string(&mut expected, &entity_impact.dimension_id);
+        append_test_string(&mut expected, &entity_impact.hit_kind);
+        expected.push(1);
+        append_test_string(
+            &mut expected,
+            entity_impact.hit_entity_id.as_deref().unwrap(),
+        );
+        expected.push(1);
+        append_test_string(
+            &mut expected,
+            entity_impact.hit_entity_type_id.as_deref().unwrap(),
+        );
+        expected.extend_from_slice(&[0, 0, 0]);
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<ProjectileImpactAttempt>(&encoded).unwrap(),
+            entity_impact
+        );
+
+        let block_impact = ProjectileImpactAttempt {
+            hit_kind: "block".to_owned(),
+            hit_entity_id: None,
+            hit_entity_type_id: None,
+            hit_block_id: Some("minecraft:stone".to_owned()),
+            block_position: Some(BlockPos { x: -3, y: 64, z: 7 }),
+            block_face: Some("up".to_owned()),
+            ..entity_impact
+        };
+        let encoded = to_bytes(&block_impact).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &block_impact.projectile_id);
+        append_test_string(&mut expected, &block_impact.projectile_type_id);
+        append_test_string(&mut expected, &block_impact.dimension_id);
+        append_test_string(&mut expected, &block_impact.hit_kind);
+        expected.extend_from_slice(&[0, 0]);
+        expected.push(1);
+        append_test_string(&mut expected, block_impact.hit_block_id.as_deref().unwrap());
+        expected.push(1);
+        expected.extend_from_slice(&1_u32.to_le_bytes()); // nested BlockPos schema version
+        expected.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected.extend_from_slice(&(64_i32).to_le_bytes());
+        expected.extend_from_slice(&(7_i32).to_le_bytes());
+        expected.push(1);
+        append_test_string(&mut expected, block_impact.block_face.as_deref().unwrap());
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<ProjectileImpactAttempt>(&encoded).unwrap(),
+            block_impact
         );
     }
 
