@@ -11,6 +11,24 @@ player::increment_custom_stat(player_handle, PlayerCustomStat::Deaths, 1)?;
 
 Reads require `entity.read`. Increments require both `entity.read` and `player.statistics.write`, declared by the module and granted by the server administrator. These imports are server-only. Client modules, stale handles, static registration, and calls off the owning server thread are denied.
 
+`player::set_custom_stat` can assign an exact value to one supported custom counter. For
+registry-backed item, block, and entity counters, `player_statistics::set_value` provides the same
+operation for a typed `PlayerStatistic`. Both setters require `entity.read` and
+`player.statistics.write`, accept only `0..=i32::MAX`, and reject unregistered statistic targets.
+They return the value that the server actually stored after NeoForge `StatAwardEvent` listeners
+run. The host routes the change through the server's `ServerStatsCounter`, updates matching
+scoreboard statistic objectives, and sends the resulting dirty stat to the client; the server's
+normal player save path persists it. A listener may cancel or alter the requested value, so compare
+the returned value with the requested value when that distinction matters.
+
+```rust
+use sjml::{player, player_statistics, PlayerCustomStat, PlayerStatistic, StatisticFamily};
+
+let custom_value = player::set_custom_stat(player_handle, PlayerCustomStat::Deaths, 25)?;
+let diamond_uses = PlayerStatistic::new(StatisticFamily::ItemUsed, "minecraft:diamond")?;
+let item_value = player_statistics::set_value(player_handle, &diamond_uses, 10)?;
+```
+
 Each increment must be between `1` and `player::MAX_PLAYER_STATISTIC_INCREMENT` (`1,000,000`). Minecraft stores these counters as signed 32-bit integers; the host rejects an increment that would raise the current value above `i32::MAX`. Reads return the stored nonnegative integer as `u32`.
 
 ## Supported counters
@@ -97,8 +115,25 @@ Each increment must be between `1` and `player::MAX_PLAYER_STATISTIC_INCREMENT` 
 
 The host checks every ID against the vanilla custom-stat allowlist and the live `BuiltInRegistries.CUSTOM_STAT` registry. It does not accept arbitrary strings or mod-defined counters.
 
-## Unsupported statistic types
+## Registry-backed statistic families
 
-The API does not expose the other `Stats` groups: `BLOCK_MINED`, `ITEM_CRAFTED`, `ITEM_USED`, `ITEM_BROKEN`, `ITEM_PICKED_UP`, `ITEM_DROPPED`, `ENTITY_KILLED`, and `ENTITY_KILLED_BY`. Those are registry-backed `StatType<T>` values with block, item, or entity keys; they are not entries in `Stats.CUSTOM` and are deliberately omitted from `PlayerCustomStat`.
+For block and entity counters, use the separate typed `player_statistics` API. A family selects the
+registry type, and its `registry_id` is checked against that registry before the operation:
 
-Vanilla can update counters such as play time, movement, and time-since-death during normal gameplay. An increment writes through `ServerPlayer.awardStat`, keeping the normal vanilla stat, scoreboard, and save path.
+```rust
+use sjml::{player_statistics, PlayerStatistic, StatisticFamily};
+
+let diamond_uses = PlayerStatistic::new(StatisticFamily::ItemUsed, "minecraft:diamond")?;
+let current = player_statistics::read(player_handle, &diamond_uses)?;
+player_statistics::increment(player_handle, &diamond_uses, 1)?;
+```
+
+The supported families are `BlockMined`, `ItemUsed`, `ItemBroken`, `ItemCrafted`, `EntityKilled`,
+and `EntityKilledBy`. `ITEM_PICKED_UP` and `ITEM_DROPPED` remain unavailable. Registry-backed
+reads require `entity.read`; increments also require `player.statistics.write`. IDs are canonical
+`namespace:path` values and are verified against the selected live vanilla registry, so an item ID
+cannot be used for a block statistic.
+
+Each increment is limited to `0..=1,000,000`; zero is a no-op. Minecraft stores these values as
+signed 32-bit integers, so the host rejects overflow. The same server-thread and current
+login-session checks as custom counters apply.

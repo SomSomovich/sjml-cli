@@ -363,6 +363,8 @@ pub const MAX_PLAYER_RESPAWN_POINT_BYTES: u32 = 281;
 pub const MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES: u32 = MAX_PLAYER_RESPAWN_POINT_BYTES + 1;
 /// Maximum amount one call may add to a vanilla custom-stat counter.
 pub const MAX_PLAYER_STATISTIC_INCREMENT: u32 = 1_000_000;
+/// Maximum exact value accepted by vanilla's signed 32-bit statistic counters.
+pub const MAX_PLAYER_STATISTIC_VALUE: u32 = i32::MAX as u32;
 
 /// One of Minecraft's built-in player game modes.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -840,6 +842,16 @@ extern "C" {
         statistic_id: i32,
         statistic_id_length: i32,
         amount: i32,
+    ) -> i32;
+    #[link_name = "set_custom_stat"]
+    fn imported_set_custom_stat(
+        handle: i32,
+        handle_length: i32,
+        statistic_id: i32,
+        statistic_id_length: i32,
+        value: i32,
+        output: i32,
+        capacity: i32,
     ) -> i32;
     #[link_name = "grant_advancement"]
     fn imported_grant_advancement(
@@ -1732,6 +1744,56 @@ pub fn increment_custom_stat(
     }
 }
 
+/// Sets one registered vanilla custom statistic to an exact nonnegative value.
+///
+/// Requires both `entity.read` and `player.statistics.write`, declared by the module and granted
+/// by the server administrator. `value` must fit Minecraft's signed 32-bit counter. The host
+/// validates the registered `Stats.CUSTOM` entry, active login session, and owning server thread.
+/// Returns the effective value after NeoForge statistic-award listeners run.
+pub fn set_custom_stat(
+    handle: PlayerHandle,
+    statistic: PlayerCustomStat,
+    value: u32,
+) -> SjmlResult<u32> {
+    if value > MAX_PLAYER_STATISTIC_VALUE {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player statistic value must be between 0 and 2147483647",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let statistic_id = statistic.id();
+        let applied: u32 = read_output(core::mem::size_of::<u32>() as u32, |output, capacity| {
+            // SAFETY: handle, static statistic ID, and output span remain valid for this sync import.
+            unsafe {
+                imported_set_custom_stat(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    statistic_id.as_ptr() as usize as u32 as i32,
+                    statistic_id.len() as i32,
+                    value as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if applied > MAX_PLAYER_STATISTIC_VALUE {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned a player custom-stat value outside vanilla's integer range",
+            ));
+        }
+        Ok(applied)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, statistic);
+        Err(unsupported_target())
+    }
+}
+
 fn validate_cooldown_item_id(item_id: &str) -> SjmlResult<()> {
     let valid_resource_id = item_id.split_once(':').is_some_and(|(namespace, path)| {
         !namespace.is_empty()
@@ -2336,9 +2398,10 @@ mod tests {
         validate_player_tab_list_pair, validate_player_tab_list_text, validate_player_team_name,
         validate_player_title_text, vitals, PlayerMotion, PlayerTeamResponse, PlayerTeleport,
         PlayerTitleTimings, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
-        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_TAB_LIST_TEXT_BYTES,
-        MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS, MAX_PLAYER_TEAM_NAME_BYTES,
-        MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
+        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_STATISTIC_VALUE,
+        MAX_PLAYER_TAB_LIST_TEXT_BYTES, MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS,
+        MAX_PLAYER_TEAM_NAME_BYTES, MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES,
+        MAX_TELEPORT_COORDINATE,
     };
     use crate::{ActiveEffect, ErrorCode, PlayerHandle, StableDecode, WorldHandle};
 
@@ -2543,6 +2606,28 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn custom_stat_setter_rejects_values_outside_vanillas_signed_counter_range() {
+        let handle = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(MAX_PLAYER_STATISTIC_VALUE, i32::MAX as u32);
+        assert_eq!(
+            super::set_custom_stat(
+                handle,
+                super::PlayerCustomStat::Deaths,
+                MAX_PLAYER_STATISTIC_VALUE + 1
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            super::set_custom_stat(handle, super::PlayerCustomStat::Deaths, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
         );
     }
 

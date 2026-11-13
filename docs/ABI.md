@@ -2236,15 +2236,32 @@ typed family selector:
 | --- | --- | --- |
 | `read_registry_stat` | `player_ptr, player_len, family, statistic_id_ptr, statistic_id_len, out_ptr, out_capacity` | Four-byte little-endian nonnegative vanilla counter. |
 | `increment_registry_stat` | `player_ptr, player_len, family, statistic_id_ptr, statistic_id_len, amount` | Status only; amount is 0–1,000,000 and zero is a no-op. |
+| `set_registry_stat` | `player_ptr, player_len, family, statistic_id_ptr, statistic_id_len, value, out_ptr, out_capacity` | Four-byte little-endian effective value after statistic-award listeners run. |
 
 Family codes are `0=BLOCK_MINED` (block ID), `1=ITEM_USED`, `2=ITEM_BROKEN`,
 `3=ITEM_CRAFTED` (item IDs), `4=ENTITY_KILLED`, and `5=ENTITY_KILLED_BY`
 (entity type IDs). The host validates IDs against the registry selected by the
 family and rejects signed-counter overflow. Reads require `entity.read`;
-increments also require `player.statistics.write`. Calls resolve the active
+increments and exact sets also require `player.statistics.write`; a set value
+must be in `0..=i32::MAX`. Calls resolve the active
 server-player session on its owning server thread. `ITEM_PICKED_UP` and
 `ITEM_DROPPED` are not exposed. The `player` module separately covers
 `Stats.CUSTOM`. See [player statistics](PLAYER_STATISTICS.md).
+
+Vanilla custom statistic imports are in `sjml_player_v1`:
+
+| Import | Parameters | Success output |
+| --- | --- | --- |
+| `custom_stat` | `player_ptr, player_len, statistic_id_ptr, statistic_id_len, out_ptr, out_capacity` | Four-byte little-endian nonnegative custom counter. |
+| `increment_custom_stat` | `player_ptr, player_len, statistic_id_ptr, statistic_id_len, amount` | Status only; amount is 1–1,000,000. |
+| `set_custom_stat` | `player_ptr, player_len, statistic_id_ptr, statistic_id_len, value, out_ptr, out_capacity` | Four-byte little-endian effective value after statistic-award listeners run. |
+
+Custom statistic reads require `entity.read`; increments and exact sets also
+require `player.statistics.write`. Set values are limited to `0..=i32::MAX`.
+The host uses `ServerStatsCounter`, updates matching scoreboard objectives,
+sends the changed stat to the client, and relies on the normal player save path
+for persistence. NeoForge `StatAwardEvent` listeners may cancel or alter a set;
+the output reports the value left in the counter.
 
 ## Loaded non-player entities
 

@@ -1,4 +1,4 @@
-//! Bounded reads and increments for vanilla registry-backed player statistic families.
+//! Bounded reads, increments, and exact setters for vanilla registry-backed player statistic families.
 //!
 //! The host resolves every target ID against the registry selected by its family. A valid ID in
 //! another registry does not make an invalid item/block/entity target valid.
@@ -13,6 +13,8 @@ use crate::{ErrorCode, PlayerHandle, SjmlError, SjmlResult};
 
 /// Maximum amount one call can add to a registry-backed vanilla stat.
 pub const MAX_INCREMENT: u32 = 1_000_000;
+/// Maximum exact value accepted by vanilla's signed 32-bit statistic counter.
+pub const MAX_VALUE: u32 = i32::MAX as u32;
 /// Maximum UTF-8 byte length of a canonical registry target ID.
 pub const MAX_STATISTIC_ID_BYTES: usize = 256;
 
@@ -37,6 +39,17 @@ extern "C" {
         statistic_id: i32,
         statistic_id_length: i32,
         amount: i32,
+    ) -> i32;
+    #[link_name = "set_registry_stat"]
+    fn imported_set_registry_stat(
+        player: i32,
+        player_length: i32,
+        family: i32,
+        statistic_id: i32,
+        statistic_id_length: i32,
+        value: i32,
+        output: i32,
+        capacity: i32,
     ) -> i32;
 }
 
@@ -152,6 +165,46 @@ pub fn increment(player: PlayerHandle, statistic: &PlayerStatistic, amount: u32)
     }
 }
 
+/// Sets one supported registry-backed vanilla statistic to an exact nonnegative value.
+///
+/// Requires `entity.read` and `player.statistics.write`. `value` must fit vanilla's signed
+/// 32-bit statistic counter. The target ID must exist in the registry selected by `family`.
+/// Returns the value that was applied by the host after NeoForge statistic-award listeners run.
+pub fn set_value(player: PlayerHandle, statistic: &PlayerStatistic, value: u32) -> SjmlResult<u32> {
+    validate_registry_id(&statistic.registry_id)?;
+    if value > MAX_VALUE {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player statistic value must be between 0 and 2147483647",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_player = to_bytes(&player)?;
+        let id = statistic.registry_id.as_bytes();
+        read_output(4, |output, capacity| {
+            // SAFETY: handle, ID, and output span remain live for the synchronous server import.
+            unsafe {
+                imported_set_registry_stat(
+                    encoded_player.as_ptr() as usize as u32 as i32,
+                    encoded_player.len() as i32,
+                    statistic.family as i32,
+                    id.as_ptr() as usize as u32 as i32,
+                    id.len() as i32,
+                    value as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, statistic);
+        Err(unsupported_target())
+    }
+}
+
 fn validate_registry_id(value: &str) -> SjmlResult<()> {
     let Some((namespace, path)) = value.split_once(':') else {
         return Err(invalid_registry_id());
@@ -196,7 +249,7 @@ fn read_output(capacity: u32, invoke: impl FnOnce(i32, i32) -> i32) -> SjmlResul
     } else {
         Err(crate::SjmlError::from_abi_code(
             status as u32,
-            "host rejected the player statistic read",
+            "host rejected the player statistic operation",
         ))
     };
     // SAFETY: release the exact allocation after host access and decoding are complete.
@@ -221,7 +274,7 @@ fn unsupported_target() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_registry_id, PlayerStatistic, StatisticFamily, MAX_INCREMENT};
+    use super::{validate_registry_id, PlayerStatistic, StatisticFamily, MAX_INCREMENT, MAX_VALUE};
     use crate::{ErrorCode, PlayerHandle};
 
     #[test]
@@ -285,6 +338,16 @@ mod tests {
         assert_eq!(
             super::increment(handle, &statistic, 1).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            super::set_value(handle, &statistic, 1).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            super::set_value(handle, &statistic, MAX_VALUE + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
         );
     }
 }
