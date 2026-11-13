@@ -2602,6 +2602,29 @@ enchantments are preserved. Client-side, static-registration, stale-handle,
 and off-thread calls fail closed. See
 [player inventory enchantments](PLAYER_INVENTORY_ENCHANTMENTS.md).
 
+## Plain-text lore on player inventory stacks
+
+Lore reads require `entity.read` and `inventory.read`; set and clear require
+`entity.read` and `inventory.write`. These imports are available only to
+logical-server and `both` modules, run on the owning server thread, resolve a
+live player session, and accept only slots `0..=40`.
+
+| Import | WebAssembly signature | Behavior |
+| --- | --- | --- |
+| `read_player_lore` | `(player_ptr, player_len, slot, out_ptr, out_capacity) -> i32` | Writes schema-v1 lines: little-endian u32 schema `1`, u32 line count, then for each line a u32 UTF-8 byte length and UTF-8 bytes. Empty lore and empty slots return count `0`. |
+| `set_player_lore` | `(player_ptr, player_len, slot, payload_ptr, payload_len) -> i32` | Accepts the same schema-v1 encoding and replaces only vanilla `DataComponents.LORE` with literal text components on an existing nonempty stack. |
+| `clear_player_lore` | `(player_ptr, player_len, slot) -> i32` | Removes only vanilla `DataComponents.LORE` from an existing nonempty stack. |
+
+The payload is limited to 2,088 bytes, eight lines, and 256 UTF-8 bytes and
+Unicode scalar values per line. Control characters are rejected; blank lines
+are valid. An empty set request is invalid and must use the clear import.
+Reads flatten each stored component to text; guest code cannot read or set
+JSON, styles, click events, or hover events. Oversized pre-existing lore returns
+`PAYLOAD_TOO_LARGE` instead of being truncated. Writes preserve item identity,
+count, damage, and every component except lore, then mark the inventory dirty
+and synchronize the active menu. Static-registration calls fail closed. See
+[player inventory lore](PLAYER_INVENTORY_LORE.md).
+
 ## Module-owned string components on inventory items
 
 The `sjml_inventory_v1` component imports operate on one slot and only on

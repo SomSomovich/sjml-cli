@@ -13,8 +13,8 @@ use crate::inventory::InventorySnapshot;
 use crate::inventory::{ItemStackDescriptor, MAX_INVENTORY_SLOTS};
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
-#[cfg(target_arch = "wasm32")]
-use crate::{Decoder, StableDecode};
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::{Decoder, StableDecode, StableEncode};
 use crate::{ErrorCode, PlayerHandle, SjmlError, SjmlResult};
 
 /// Maximum number of slots returned by one player inventory query.
@@ -39,6 +39,45 @@ pub const MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES: usize = 256;
 pub const MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES: usize = 256;
 /// Maximum broad ABI enchantment level; the host applies each registry entry's narrower bounds.
 pub const MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL: u32 = 255;
+/// Maximum number of plain-text lore lines on one player inventory stack.
+pub const MAX_PLAYER_INVENTORY_LORE_LINES: usize = 8;
+/// Maximum UTF-8 byte length of one plain-text lore line.
+pub const MAX_PLAYER_INVENTORY_LORE_LINE_BYTES: usize = 256;
+/// Maximum Unicode scalar count of one plain-text lore line.
+pub const MAX_PLAYER_INVENTORY_LORE_LINE_CODE_POINTS: usize = 256;
+/// Maximum stable schema-v1 bytes in one player inventory lore payload.
+pub const MAX_PLAYER_INVENTORY_LORE_BYTES: u32 = 2 * 4 + 8 * (4 + 256);
+
+#[cfg(any(target_arch = "wasm32", test))]
+const PLAYER_INVENTORY_LORE_SCHEMA: u32 = 1;
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode)]
+#[sjml(version = 1)]
+struct PlayerInventoryLorePayload {
+    lines: Vec<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for PlayerInventoryLorePayload {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != PLAYER_INVENTORY_LORE_SCHEMA {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported player inventory lore schema",
+            ));
+        }
+        let count = decoder.read_length(MAX_PLAYER_INVENTORY_LORE_LINES)?;
+        let mut lines = Vec::with_capacity(count);
+        for _ in 0..count {
+            let line = String::decode(decoder)?;
+            validate_lore_line(&line)?;
+            lines.push(line);
+        }
+        Ok(Self { lines })
+    }
+}
 
 /// The only two updates accepted by [`set_slot`]. New stacks use registered items' default components.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -90,6 +129,27 @@ extern "C" {
 
     #[link_name = "clear_player_item_custom_name"]
     fn imported_clear_player_item_custom_name(player: i32, player_length: i32, slot: i32) -> i32;
+
+    #[link_name = "read_player_lore"]
+    fn imported_read_player_lore(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "set_player_lore"]
+    fn imported_set_player_lore(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        payload: i32,
+        payload_length: i32,
+    ) -> i32;
+
+    #[link_name = "clear_player_lore"]
+    fn imported_clear_player_lore(player: i32, player_length: i32, slot: i32) -> i32;
 
     #[link_name = "read_player_enchantment_level"]
     fn imported_read_player_enchantment_level(
@@ -585,6 +645,162 @@ pub fn clear_item_custom_name(player: PlayerHandle, slot: u32) -> SjmlResult<()>
     }
 }
 
+/// Reads the detached plain-text lore lines from an existing player inventory stack.
+///
+/// Components are flattened to literal text. Styles, click/hover events, and JSON structure are
+/// never exposed. An empty result means the stack has no lore. The host rejects values outside
+/// eight lines of at most 256 UTF-8 bytes each rather than silently truncating existing lore.
+/// Slot indices use the same layout as [`read`].
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.read`; this operation
+/// runs only on the logical-server thread and resolves the live player session for each call.
+pub fn read_lore(player: PlayerHandle, slot: u32) -> SjmlResult<Vec<String>> {
+    validate_lore_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        let response: PlayerInventoryLorePayload = read_output(|output, capacity| {
+            // SAFETY: the handle and allocated output remain live through this synchronous import.
+            unsafe {
+                imported_read_player_lore(
+                    player.as_ptr() as usize as u32 as i32,
+                    player.len() as i32,
+                    slot as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        validate_lore_lines(&response.lines, true)?;
+        Ok(response.lines)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets up to eight plain literal lore lines on an existing player inventory stack.
+///
+/// Each line is limited to 256 UTF-8 bytes and characters and cannot contain control characters.
+/// An empty list is rejected; use [`clear_lore`] to remove the component. The host replaces only
+/// Minecraft's vanilla lore component, preserving the item, count, damage, name, enchantments,
+/// and all other components. Slot indices use the same layout as [`read`].
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`; this operation
+/// runs only on the logical-server thread, synchronizes the active inventory menu, and rejects an
+/// empty slot or stale/foreign player handle.
+pub fn set_lore(player: PlayerHandle, slot: u32, lines: &[String]) -> SjmlResult<()> {
+    validate_lore_slot(slot)?;
+    validate_lore_lines(lines, false)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        let payload = to_bytes(&PlayerInventoryLorePayload {
+            lines: lines.to_vec(),
+        })?;
+        if payload.len() > MAX_PLAYER_INVENTORY_LORE_BYTES as usize {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "player inventory lore exceeds its 2,088-byte ABI limit",
+            ));
+        }
+        // SAFETY: the handle and encoded payload remain live through this synchronous host call.
+        let status = unsafe {
+            imported_set_player_lore(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                payload.as_ptr() as usize as u32 as i32,
+                payload.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the player inventory lore update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, lines);
+        Err(unsupported_target())
+    }
+}
+
+/// Clears only Minecraft's vanilla lore component from an existing player inventory stack.
+///
+/// The item, count, damage, name, enchantments, and all other components are preserved. Slot
+/// indices use the same layout as [`read`]; empty slots are rejected.
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`; this operation
+/// runs only on the logical-server thread and synchronizes the active inventory menu.
+pub fn clear_lore(player: PlayerHandle, slot: u32) -> SjmlResult<()> {
+    validate_lore_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle bytes remain live for this synchronous host call.
+        let status = unsafe {
+            imported_clear_player_lore(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+            )
+        };
+        status_result(status, "host rejected the player inventory lore clear")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_lore_slot(slot: u32) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory slot must be between 0 and 40",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_lore_lines(lines: &[String], allow_empty: bool) -> SjmlResult<()> {
+    if lines.len() > MAX_PLAYER_INVENTORY_LORE_LINES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player inventory lore supports at most eight lines",
+        ));
+    }
+    if !allow_empty && lines.is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory lore must contain one to eight lines; use clear_lore to remove it",
+        ));
+    }
+    for line in lines {
+        validate_lore_line(line)?;
+    }
+    Ok(())
+}
+
+fn validate_lore_line(line: &str) -> SjmlResult<()> {
+    if line.len() > MAX_PLAYER_INVENTORY_LORE_LINE_BYTES
+        || line.chars().count() > MAX_PLAYER_INVENTORY_LORE_LINE_CODE_POINTS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player inventory lore lines are limited to 256 UTF-8 bytes and characters",
+        ));
+    }
+    if line.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory lore lines cannot contain control characters",
+        ));
+    }
+    Ok(())
+}
+
 /// Reads the level of one registered enchantment on an existing player inventory stack.
 ///
 /// Returns `None` when the item does not currently have that enchantment. The ID must be a
@@ -906,25 +1122,26 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_item_custom_name, give_item, read_enchantment_level, remove_enchantment, set_damage,
-        set_enchantment_level, set_item_custom_name, set_slot, validate_custom_name,
-        validate_damage, validate_enchantment_access, validate_give_item, validate_inventory,
-        PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES,
-        MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS,
-        MAX_PLAYER_INVENTORY_DAMAGE, MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES,
-        MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL, MAX_PLAYER_INVENTORY_GIVE_COUNT,
-        MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
-        MAX_PLAYER_INVENTORY_SLOT_INDEX,
+        MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES,
+        MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS, MAX_PLAYER_INVENTORY_DAMAGE,
+        MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES, MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL,
+        MAX_PLAYER_INVENTORY_GIVE_COUNT, MAX_PLAYER_INVENTORY_SLOT_COUNT,
+        MAX_PLAYER_INVENTORY_SLOT_INDEX, MAX_PLAYER_INVENTORY_SLOTS, PlayerInventoryLorePayload,
+        PlayerInventorySlotUpdate, clear_item_custom_name, clear_lore, give_item,
+        read_enchantment_level, read_lore, remove_enchantment, set_damage, set_enchantment_level,
+        set_item_custom_name, set_lore, set_slot, validate_custom_name, validate_damage,
+        validate_enchantment_access, validate_give_item, validate_inventory, validate_lore_line,
+        validate_lore_lines,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use super::{
         read, read_boolean_component, read_integer_component, write_boolean_component,
         write_integer_component,
     };
-    use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
     use crate::ErrorCode;
     #[cfg(not(target_arch = "wasm32"))]
     use crate::PlayerHandle;
+    use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
 
     #[test]
     fn player_inventory_snapshot_is_bounded_to_128_slots() {
@@ -1153,6 +1370,114 @@ mod tests {
         );
     }
 
+    #[test]
+    fn player_inventory_lore_uses_bounded_literal_schema_v1_lines() {
+        let lines = vec![
+            "Café 🪨".to_owned(),
+            "§cstill literal".to_owned(),
+            String::new(),
+        ];
+        validate_lore_lines(&lines, false).unwrap();
+        let encoded = crate::to_bytes(&PlayerInventoryLorePayload {
+            lines: lines.clone(),
+        })
+        .unwrap();
+        let expected = [
+            1, 0, 0, 0, 3, 0, 0, 0, // schema and count
+            10, 0, 0, 0, // first line length
+            0x43, 0x61, 0x66, 0xc3, 0xa9, 0x20, 0xf0, 0x9f, 0xaa, 0xa8, 16, 0, 0,
+            0, // second line length
+            0xc2, 0xa7, 0x63, 0x73, 0x74, 0x69, 0x6c, 0x6c, 0x20, 0x6c, 0x69, 0x74, 0x65, 0x72,
+            0x61, 0x6c, 0, 0, 0, 0, // empty third line
+        ];
+        assert_eq!(expected, encoded.as_slice());
+        let decoded: PlayerInventoryLorePayload = crate::from_bytes(&encoded).unwrap();
+        assert_eq!(lines, decoded.lines);
+        assert!(validate_lore_line(&"é".repeat(MAX_PLAYER_INVENTORY_LORE_LINE_BYTES / 2)).is_ok());
+        assert!(validate_lore_line(&"a".repeat(MAX_PLAYER_INVENTORY_LORE_LINE_BYTES)).is_ok());
+        assert_eq!(
+            read_lore(PlayerHandle::new(1, 2, 3, 4).unwrap(), 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "a valid read reaches the wasm-only host on native builds"
+        );
+        assert_eq!(
+            clear_lore(PlayerHandle::new(1, 2, 3, 4).unwrap(), 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "a valid clear reaches the wasm-only host on native builds"
+        );
+        assert_eq!(
+            set_lore(
+                PlayerHandle::new(1, 2, 3, 4).unwrap(),
+                0,
+                &["literal".to_owned()]
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid lines reach the wasm-only host on native builds"
+        );
+
+        assert_eq!(
+            read_lore(PlayerHandle::new(1, 2, 3, 4).unwrap(), 41)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            clear_lore(PlayerHandle::new(1, 2, 3, 4).unwrap(), 41)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_lore(PlayerHandle::new(1, 2, 3, 4).unwrap(), 0, &[])
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_lore(
+                PlayerHandle::new(1, 2, 3, 4).unwrap(),
+                0,
+                &["x".repeat(257)]
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn player_inventory_lore_rejects_control_characters_and_oversized_collections() {
+        assert_eq!(
+            validate_lore_line("line\nfeed").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_lore_line(&"é".repeat(MAX_PLAYER_INVENTORY_LORE_LINE_BYTES / 2 + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_lore_line(&"a".repeat(MAX_PLAYER_INVENTORY_LORE_LINE_CODE_POINTS + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_lore_lines(&vec!["x".to_owned(); 9], false)
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert!(validate_lore_lines(&[], true).is_ok());
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn player_inventory_enchantments_validate_registry_ids_slots_and_levels() {
@@ -1201,14 +1526,16 @@ mod tests {
                 "noncanonical registry ID {id:?} must be rejected before host access"
             );
         }
-        assert!(validate_enchantment_access(
-            0,
-            &format!(
-                "x:{}",
-                "a".repeat(MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES - 2)
+        assert!(
+            validate_enchantment_access(
+                0,
+                &format!(
+                    "x:{}",
+                    "a".repeat(MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES - 2)
+                )
             )
-        )
-        .is_ok());
+            .is_ok()
+        );
         assert_eq!(
             validate_enchantment_access(
                 0,

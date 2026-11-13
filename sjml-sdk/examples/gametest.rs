@@ -68,6 +68,8 @@ mod player_inventory_custom_name;
 mod player_inventory_enchantment;
 #[path = "gametest/player_inventory_give.rs"]
 mod player_inventory_give;
+#[path = "gametest/player_inventory_lore.rs"]
+mod player_inventory_lore;
 #[path = "gametest/player_item_use_attempt.rs"]
 mod player_item_use_attempt;
 #[path = "gametest/player_respawn_point.rs"]
