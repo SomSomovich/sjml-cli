@@ -28,6 +28,8 @@ mod entity_effect_application;
 mod entity_heal_attempt;
 #[path = "gametest/entity_join_attempt.rs"]
 mod entity_join_attempt;
+#[path = "gametest/entity_knockback_attempt.rs"]
+mod entity_knockback_attempt;
 #[path = "gametest/entity_navigation.rs"]
 mod entity_navigation;
 #[path = "gametest/entity_riding.rs"]
@@ -451,6 +453,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     entity_heal_attempt::initialize()?;
     entity_effect_application::initialize()?;
     entity_join_attempt::initialize()?;
+    entity_knockback_attempt::initialize()?;
     entity_breed_attempt::initialize()?;
     block_grow_attempt::initialize()?;
     block_fertilize_attempt::initialize()?;

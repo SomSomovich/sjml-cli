@@ -678,6 +678,40 @@ pub struct EntityDamageAttempt {
     pub amount: f32,
 }
 
+/// Synchronous cancellable knockback attempt for a living entity on the logical server.
+///
+/// NeoForge 21.1.265 fires this before applying knockback. The event exposes original and current
+/// strength/direction values for observation only: this SJML callback may veto the operation but
+/// cannot mutate those values. Return `Ok(true)` from `entity.knockback_attempt` to cancel it.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityKnockbackAttempt {
+    /// Canonical UUID string of the living entity that would be pushed.
+    pub entity_id: String,
+    /// Registry ID of the entity type.
+    pub entity_type_id: String,
+    /// Resource location of the entity's level.
+    pub dimension_id: String,
+    /// Entity X coordinate at the time the attempt was dispatched.
+    pub x: f64,
+    /// Entity Y coordinate at the time the attempt was dispatched.
+    pub y: f64,
+    /// Entity Z coordinate at the time the attempt was dispatched.
+    pub z: f64,
+    /// Knockback strength before earlier event listeners changed it.
+    pub original_strength: f32,
+    /// Current requested knockback strength.
+    pub strength: f32,
+    /// Original X direction ratio.
+    pub original_ratio_x: f64,
+    /// Original Z direction ratio.
+    pub original_ratio_z: f64,
+    /// Current X direction ratio.
+    pub ratio_x: f64,
+    /// Current Z direction ratio.
+    pub ratio_z: f64,
+}
+
 /// Synchronous cancellable attempt to heal a living entity on the logical server.
 ///
 /// NeoForge 21.1.265 fires this from `LivingEntity::heal` before applying the amount. Return
@@ -1436,7 +1470,8 @@ mod tests {
         BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
         ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
         EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
+        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntityKnockbackAttempt, EntitySpawned,
         EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
         InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
         ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerDropAttempt,
@@ -1952,6 +1987,40 @@ mod tests {
         };
         let encoded = to_bytes(&event).unwrap();
         assert_eq!(from_bytes::<EntityHealAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn cancellable_entity_knockback_attempt_matches_host_schema_v1_bytes() {
+        let event = EntityKnockbackAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            original_strength: 0.8,
+            strength: 0.5,
+            original_ratio_x: 1.0,
+            original_ratio_z: -2.0,
+            ratio_x: 0.75,
+            ratio_z: -1.5,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.entity_id);
+        append_test_string(&mut expected, &event.entity_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        expected.extend_from_slice(&(0.8_f32).to_le_bytes());
+        expected.extend_from_slice(&(0.5_f32).to_le_bytes());
+        expected.extend_from_slice(&(1.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(-2.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(0.75_f64).to_le_bytes());
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        assert_eq!(encoded, expected, "Rust encoding must match host schema-v1 bytes");
+        assert_eq!(from_bytes::<EntityKnockbackAttempt>(&encoded).unwrap(), event);
     }
 
     #[test]

@@ -120,3 +120,13 @@ ID/count pairs without item components or NBT. Returning `Ok(true)` suppresses
 the catch drops while retaining the requested rod damage. It requires both
 `events.subscribe` and `events.cancel`; see
 [cancellable fishing catches](PLAYER_FISHED_ATTEMPTS.md).
+
+
+Server modules can veto an impending living-entity knockback through
+`entity.knockback_attempt`. The synchronous callback receives the target UUID,
+type, dimension, position, original/current strength, and original/current X/Z
+ratios as detached values. Return `Ok(true)` to cancel the knockback. These
+parameters are read-only to the guest; the API does not change Minecraft's
+strength or direction. The event can arise from damage, shield blocking, mob
+attacks, or player attacks and requires `events.subscribe` plus `events.cancel`.
+See [entity knockback attempts](ENTITY_KNOCKBACK_ATTEMPTS.md).

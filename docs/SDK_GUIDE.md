@@ -2466,3 +2466,14 @@ can use the separate `client_profile` scope backed by local per-mod storage.
 See [Persistent storage](STORAGE.md) for bounds, lifecycle, and binary encoding.
 
 A registered item may also handle general entity use through synchronous `#[event(name = "item.use_on_entity")]`. The callback runs only after the more specific `Entity.interactAt` stage and the general `player.interaction` veto have passed; it receives detached player/item/entity values and returns the same bounded `ItemUseAction` as other item-use hooks. See [registered item use on entities](ITEM_USE_ON_ENTITY.md).
+
+
+### Cancellable entity knockback attempts
+
+Subscribe to `entity.knockback_attempt` and export a synchronous `#[event]`
+handler taking `EntityKnockbackAttempt` and returning `SjmlResult<bool>`.
+Returning `Ok(true)` cancels the impending knockback; returning `Ok(false)`
+leaves it unchanged. The snapshot includes original and current strength and
+direction ratios for observation, but guest code cannot modify them. The event
+runs on the logical server thread and requires `events.subscribe` and
+`events.cancel`. See [entity knockback attempts](ENTITY_KNOCKBACK_ATTEMPTS.md).

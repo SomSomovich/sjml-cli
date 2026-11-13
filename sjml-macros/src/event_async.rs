@@ -32,6 +32,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "client.chat.send_attempt"
             | "entity.death_attempt"
             | "entity.damage_attempt"
+            | "entity.knockback_attempt"
             | "entity.heal_attempt"
             | "entity.effect_application"
             | "entity.join_attempt"
@@ -397,6 +398,13 @@ mod tests {
                 quote! { async fn damage_attempt(_: EntityDamageAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.damage_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.knockback_attempt"),
+                quote! { async fn knockback_attempt(_: EntityKnockbackAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.knockback_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

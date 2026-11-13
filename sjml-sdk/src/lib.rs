@@ -198,7 +198,7 @@ pub use events::{BlockFertilizeAttempt, BlockTick, BlockTickProperty};
 pub use events::{
     BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
     ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
-    ClientTick, EntityTick, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
+    ClientTick, EntityKnockbackAttempt, EntityTick, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
     ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerItemCrafted, PlayerItemUseAttempt,
     PlayerSleepAttempt, PlayerTick, CLIENT_ACTION_CANCEL_CAPABILITY,
     MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
@@ -400,6 +400,7 @@ pub mod prelude {
         ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
         ClientTick, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
         EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntityKnockbackAttempt,
         EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt,
         InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
         ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerDropAttempt,
