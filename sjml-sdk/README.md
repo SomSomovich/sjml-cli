@@ -5,12 +5,14 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.83.0"
+sjml-sdk = "0.88.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
 guest logic and data types can be tested, but native builds do not provide the
 host imports or WebAssembly callback exports.
+
+SDK 0.88.0 adds per-state friction for registered blocks, bounded loaded-only fluid tick scheduling, and sampled client cursor movement. See [block-state friction](../docs/BLOCK_STATE_FRICTION.md), [world fluid ticks](../docs/WORLD_FLUID_TICKS.md), and [client cursor movement](../docs/CLIENT_CURSOR_MOVED.md).
 
 Registered blocks can subscribe to their own scheduled ticks with
 `events::subscribe("block.tick", ...)`; the callback receives the detached

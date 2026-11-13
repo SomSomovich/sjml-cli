@@ -16,13 +16,22 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.89.0`, the Rust SDK/macros are `0.87.0`, and the ABI is
-`1.79.0`. ABI compatibility remains major-version based: host 0.89.0 accepts ABI
-`1.0.x` through `1.79.0`; it rejects later contracts it does not know. Packages
-using the current APIs declare ABI `^1.79.0` and host range `^0.89.0`.
+The current host is `0.90.0`, the Rust SDK/macros are `0.88.0`, and the ABI is
+`1.80.0`. ABI compatibility remains major-version based: host 0.90.0 accepts ABI
+`1.0.x` through `1.80.0`; it rejects later contracts it does not know. Packages
+using the current APIs declare ABI `^1.80.0` and host range `^0.90.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### New permissions and block-behavior schema in ABI 1.80.0
+
+Fluid tick scheduling requires the additional `world.fluid_tick.schedule` grant
+alongside `world.read` and `world.write`; requests are limited to an already
+loaded chunk. Exact-state block behavior payload schema 2 adds an optional
+friction value while the host continues to accept schema 1. Cursor movement uses
+the existing `client.input.observe` grant and is sampled once per client tick; it
+is not a raw mouse-move event.
 
 ### Entity glowing permission migration for ABI 1.79.0
 
@@ -338,3 +347,7 @@ Host 0.87.0 / ABI 1.77.0 / SDK/macros 0.85.0 adds bounded block update options, 
 Host 0.88.0 / ABI 1.78.0 / SDK/macros 0.86.0 adds owner-scoped client-screen closing, guarded server player rotation writes, detached equipment snapshots for loaded non-player living entities, and static crafting remainders for registered standalone items. The APIs use explicit capability, context, owner, registry, and size checks. Gradle passed 1,176 host tests, 436 core tests (one skipped), and all 131 required dedicated-server GameTests; the CLI workspace passed 26 CLI, 43 macro, 358 SDK unit, 162 SDK integration, and 12 documentation tests plus strict Clippy and wasm32/example checks. This did not verify visible client behavior or a remote multiplayer session; no release was made to crates.io or the public CLI repository.
 
 Host 0.89.0 / ABI 1.79.0 / SDK/macros 0.87.0 adds criterion-level advancement progress notifications, loaded-world game-event dispatch, and a separate permission for glowing-flag writes. It also completes item-pickup vetoes and plain-text player inventory lore with live GameTest coverage. The private CLI's generated-project template and examples now declare the matching versions. Gradle passed 1,190 host tests, 449 core tests (one skipped), and all 136 required GameTests. The private CLI 0.1.19 workspace passed 26 CLI, 45 macro, 363 SDK unit, 167 SDK integration, and 12 documentation tests; strict Clippy, SDK/example wasm32 checks, and offline tests for all example workspaces passed. Visible client behavior and remote multiplayer remain unverified; no release was made to crates.io or the public CLI repository.
+
+Host 0.90.0 / ABI 1.80.0 / SDK/macros 0.88.0 adds per-state friction overrides for registered blocks, bounded loaded-only fluid-tick scheduling, and sampled physical-client cursor movement. The fluid scheduler requires `world.fluid_tick.schedule` and never loads chunks. NeoForge 21.1.265 has no raw global mouse-move event, so cursor deltas are sampled at most once per client tick and reset when the screen/window/cursor context changes.
+
+Host 0.90.0 / ABI 1.80.0 / SDK/macros 0.88.0 adds per-state friction overrides for registered blocks, bounded loaded-only fluid-tick scheduling, and sampled physical-client cursor movement. The fluid scheduler requires `world.fluid_tick.schedule` and never loads chunks. NeoForge 21.1.265 has no raw global mouse-move event, so cursor deltas are sampled at most once per client tick and reset when the screen/window/cursor context changes. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,197 host tests and 454 core tests (one skipped), with all 137 required GameTests passing. Cargo passed 26 CLI, 45 macro, 365 SDK unit, 167 SDK integration, and 12 doc tests; strict Clippy, SDK wasm32 compilation, and native/Clippy/wasm32 checks for the root, multi-module, world-render, and OpenGL-geometry example workspaces passed. These headless checks do not verify visible cursor behavior or remote multiplayer; no crates.io publication or public CLI sync was made.

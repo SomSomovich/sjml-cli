@@ -198,6 +198,7 @@ fn register_test_content() -> SjmlResult<()> {
         "gametest_stateful_behavior_block",
         &[("powered", "true")],
         registry::BlockStateBehavior::new()
+            .friction(0.95)?
             .sound(BlockSound::Amethyst)
             .redstone_conductor(false)
             .suffocating(false)

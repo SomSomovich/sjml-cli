@@ -6,7 +6,7 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.79.0**. Versions use SemVer. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
+The current core ABI version is **1.80.0**. Versions use SemVer. ABI 1.80.0 adds per-state friction for registered blocks, loaded-only fluid-tick scheduling, and sampled physical-client cursor-movement callbacks. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
 incompatible. Build metadata does not affect version ordering. ABI 1.78.0 adds owner-scoped closing for guest screens, guarded server player rotation writes, detached six-slot equipment snapshots for loaded living non-player entities, and static crafting remainders for registered standalone items. ABI 1.76.0 adds module-owned player tab-list headers/footers and dummy scoreboard objectives, post-success villager-trade notifications, bounded ordinary item spawning, and exact-state block sound and predicate overrides. ABI 1.75.0 adds owner-scoped player boss bars, loaded non-player living-entity vitals and bounded healing, and exact-state emitted-light overrides for registered blocks. ABI 1.74.0 adds per-state bounded shape overrides for
@@ -1785,6 +1785,21 @@ Callbacks are observational and cannot cancel vanilla scrolling. They share
 the `client.input` permission and 256-subscription per-module limit; static
 registration and dedicated servers fail closed. See
 [mouse-wheel input](CLIENT_INPUT_SCROLL.md).
+
+Sampled cursor listeners use `sjml_client_input_v1.subscribe_cursor_moved` and
+`unsubscribe_cursor_moved` with 24-byte module-scoped handles. The host sends
+schema `u32(1)`, callback ID `u64`, current `x`/`y`, and `delta_x`/`delta_y` as
+four little-endian `f64` values to
+`sjml_v1_client_cursor_moved_dispatch(pointer, length) -> i64`. Coordinates are
+bounded to `0..=1,000,000`; non-zero deltas are bounded to ±4,096 logical GUI
+pixels. Because NeoForge 21.1.265 has no global raw cursor-motion event, SJML
+samples once after each physical-client tick and emits at most one callback per
+sample. Stationary positions are silent. Screen changes, window resizes, and
+missing cursor/window context reset the baseline; large cursor warps are
+dropped. Each module may own one listener, with 256 listeners globally. The
+listener requires `client.input.observe`, runs only on the client main thread,
+and never changes vanilla input. Static registration and dedicated servers fail
+closed. See [sampled cursor movement](CLIENT_CURSOR_MOVED.md).
 
 `sjml_client_input_v1.cursor_position(output_ptr) -> i32` writes a 16-byte
 value containing little-endian IEEE-754 `f64` GUI coordinates (`x`, then `y`).

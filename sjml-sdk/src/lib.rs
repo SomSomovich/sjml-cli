@@ -154,10 +154,13 @@ pub use client_camera::{
 };
 pub use client_chat::{ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
 pub use client_input::{
-    cursor_position, is_key_down, is_mouse_button_down, subscribe_global_keys,
-    unsubscribe_global_keys, ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
-    CursorPosition, GlobalKeyObservation, GlobalKeyObservationHandle, MouseScrollEvent,
-    MouseScrollSubscriptionHandle, MAX_CURSOR_COORDINATE, MAX_GLFW_KEY_CODE, MAX_MOUSE_BUTTON,
+    cursor_position, is_key_down, is_mouse_button_down, subscribe_cursor_moved,
+    subscribe_global_keys, unsubscribe_cursor_moved, unsubscribe_global_keys,
+    ClientCursorMovedEvent, ClientInputAction, ClientInputEvent, ClientInputSubscriptionHandle,
+    CursorMovedSubscriptionHandle, CursorPosition, GlobalKeyObservation,
+    GlobalKeyObservationHandle, MouseScrollEvent, MouseScrollSubscriptionHandle,
+    MAX_CURSOR_COORDINATE, MAX_CURSOR_MOVED_DELTA, MAX_CURSOR_MOVED_SUBSCRIPTIONS,
+    MAX_CURSOR_MOVED_SUBSCRIPTIONS_PER_MODULE, MAX_GLFW_KEY_CODE, MAX_MOUSE_BUTTON,
 };
 pub use client_keybindings::{
     Context as KeybindingContext, Key as KeybindingKey, KeybindingDefinition,
@@ -370,11 +373,14 @@ pub mod prelude {
     pub use crate::client_chat::{self, ChatLayout, ChatLayoutHandle, ChatScreenEvent, ChatTheme};
     pub use crate::client_input;
     pub use crate::client_input::{
-        cursor_position, is_key_down, is_mouse_button_down, subscribe_global_keys,
-        subscribe_scroll, unsubscribe_global_keys, unsubscribe_scroll, ClientInputAction,
-        ClientInputEvent, ClientInputSubscriptionHandle, CursorPosition, GlobalKeyObservation,
-        GlobalKeyObservationHandle, MouseScrollEvent, MouseScrollSubscriptionHandle,
-        MAX_CLIENT_INPUT_SUBSCRIPTIONS, MAX_CURSOR_COORDINATE, MAX_GLFW_KEY_CODE, MAX_MOUSE_BUTTON,
+        cursor_position, is_key_down, is_mouse_button_down, subscribe_cursor_moved,
+        subscribe_global_keys, subscribe_scroll, unsubscribe_cursor_moved, unsubscribe_global_keys,
+        unsubscribe_scroll, ClientCursorMovedEvent, ClientInputAction, ClientInputEvent,
+        ClientInputSubscriptionHandle, CursorMovedSubscriptionHandle, CursorPosition,
+        GlobalKeyObservation, GlobalKeyObservationHandle, MouseScrollEvent,
+        MouseScrollSubscriptionHandle, MAX_CLIENT_INPUT_SUBSCRIPTIONS, MAX_CURSOR_COORDINATE,
+        MAX_CURSOR_MOVED_DELTA, MAX_CURSOR_MOVED_SUBSCRIPTIONS,
+        MAX_CURSOR_MOVED_SUBSCRIPTIONS_PER_MODULE, MAX_GLFW_KEY_CODE, MAX_MOUSE_BUTTON,
     };
     pub use crate::client_keybindings;
     pub use crate::client_keybindings::{

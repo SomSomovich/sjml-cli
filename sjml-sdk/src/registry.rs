@@ -15,7 +15,7 @@ const BLOCK_STATE_SHAPE_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_SHAPE_PAYLOAD_BYTES: usize = 512;
 const BLOCK_STATE_LIGHT_LEVEL_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES: usize = 512;
-const BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION: u32 = 1;
+const BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION: u32 = 2;
 const MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES: usize = 512;
 const BLOCK_STATE_BEHAVIOR_SOUND: u32 = 1;
 const BLOCK_STATE_BEHAVIOR_REDSTONE_CONDUCTOR: u32 = 1 << 1;
@@ -23,6 +23,7 @@ const BLOCK_STATE_BEHAVIOR_SUFFOCATING: u32 = 1 << 2;
 const BLOCK_STATE_BEHAVIOR_VIEW_BLOCKING: u32 = 1 << 3;
 const BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING: u32 = 1 << 4;
 const BLOCK_STATE_BEHAVIOR_POST_PROCESS: u32 = 1 << 5;
+const BLOCK_STATE_BEHAVIOR_FRICTION: u32 = 1 << 6;
 /// Maximum number of vanilla status effects on one registered food item.
 pub const MAX_ITEM_FOOD_EFFECTS: usize = 8;
 /// Maximum UTF-8 size of one fully qualified vanilla or modded effect ID.
@@ -498,12 +499,15 @@ pub struct BlockBehavior {
     sound: BlockSound,
 }
 
-/// State-specific properties handled by Minecraft's vanilla BlockState predicates.
+/// State-specific properties handled by Minecraft's BlockState hooks.
 ///
 /// Fields left unset retain the registered block's existing behavior. These overrides are static
 /// and are selected from the immutable state properties; they never call guest code at runtime.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// Friction uses NeoForge's state-aware block extension. Speed and jump factors are only
+/// block-wide in Minecraft 1.21.1 and belong on [`BlockBehavior`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BlockStateBehavior {
+    friction: Option<f32>,
     sound: Option<BlockSound>,
     redstone_conductor: Option<bool>,
     suffocating: Option<bool>,
@@ -516,6 +520,7 @@ impl BlockStateBehavior {
     /// Creates an empty override. Set at least one field before staging it.
     pub const fn new() -> Self {
         Self {
+            friction: None,
             sound: None,
             redstone_conductor: None,
             suffocating: None,
@@ -523,6 +528,20 @@ impl BlockStateBehavior {
             emissive_rendering: None,
             post_process: None,
         }
+    }
+
+    /// Sets the friction for this exact block state from 0.0 through 2.0.
+    ///
+    /// NeoForge's state-aware friction hook is used. Minecraft 1.21.1 does not expose equivalent
+    /// state-aware hooks for speed and jump factors, so those remain block-wide settings.
+    pub fn friction(mut self, value: f32) -> SjmlResult<Self> {
+        if !value.is_finite() || !(0.0..=2.0).contains(&value) {
+            return Err(invalid_argument(
+                "block-state friction must be finite and between 0 and 2",
+            ));
+        }
+        self.friction = Some(value);
+        Ok(self)
     }
 
     /// Sets the vanilla sound group used by this exact block state.
@@ -562,7 +581,8 @@ impl BlockStateBehavior {
     }
 
     fn validate(self) -> SjmlResult<()> {
-        if self.sound.is_none()
+        if self.friction.is_none()
+            && self.sound.is_none()
             && self.redstone_conductor.is_none()
             && self.suffocating.is_none()
             && self.view_blocking.is_none()
@@ -576,9 +596,12 @@ impl BlockStateBehavior {
         Ok(())
     }
 
-    fn abi_values(self) -> (u32, i32, u32) {
+    fn abi_values(self) -> (u32, i32, u32, u32) {
         let mut mask = 0;
         let mut values = 0;
+        if self.friction.is_some() {
+            mask |= BLOCK_STATE_BEHAVIOR_FRICTION;
+        }
         if self.sound.is_some() {
             mask |= BLOCK_STATE_BEHAVIOR_SOUND;
         }
@@ -602,7 +625,12 @@ impl BlockStateBehavior {
                 }
             }
         }
-        (mask, self.sound.map_or(0, |sound| sound as i32), values)
+        (
+            mask,
+            self.sound.map_or(0, |sound| sound as i32),
+            values,
+            self.friction.map_or(0, f32::to_bits),
+        )
     }
 }
 
@@ -2404,13 +2432,13 @@ pub fn set_block_state_light_level(
     }
 }
 
-/// Applies selected vanilla state-aware sound and rendering predicates to one exact block state.
+/// Applies selected state-aware physics, sound, and rendering behavior to one exact block state.
 ///
 /// Call this from `#[mod_register]` after declaring the block and all of its state properties.
 /// The state slice must name every declared property exactly once using canonical values. Fields
 /// left unset in [`BlockStateBehavior`] retain the block's existing state behavior. The host
 /// resolves these values into bounded immutable lookup tables and never invokes guest code from
-/// Minecraft's sound, redstone, collision, or render queries.
+/// Minecraft's friction, sound, redstone, collision, or render queries.
 pub fn set_block_state_behavior(
     path: &str,
     state: &[(&str, &str)],
@@ -2513,10 +2541,11 @@ fn encode_block_state_behavior(
         payload.extend_from_slice(name.as_bytes());
         payload.extend_from_slice(value.as_bytes());
     }
-    let (mask, sound, boolean_values) = behavior.abi_values();
+    let (mask, sound, boolean_values, friction_bits) = behavior.abi_values();
     payload.extend_from_slice(&mask.to_le_bytes());
     payload.extend_from_slice(&sound.to_le_bytes());
     payload.extend_from_slice(&boolean_values.to_le_bytes());
+    payload.extend_from_slice(&friction_bits.to_le_bytes());
     if payload.len() > MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES {
         return Err(invalid_argument(
             "block-state behavior payload exceeds its supported byte limit",
@@ -4774,6 +4803,8 @@ mod tests {
     #[test]
     fn block_state_behavior_payloads_preserve_exact_optional_fields() {
         let behavior = BlockStateBehavior::new()
+            .friction(0.95)
+            .unwrap()
             .sound(BlockSound::Amethyst)
             .redstone_conductor(false)
             .suffocating(false)
@@ -4781,7 +4812,7 @@ mod tests {
             .emissive_rendering(true)
             .post_process(false);
         let encoded = encode_block_state_behavior(&[("powered", "true")], behavior).unwrap();
-        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 2);
         assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 1);
         assert_eq!(
             u32::from_le_bytes(encoded[27..31].try_into().unwrap()),
@@ -4791,13 +4822,41 @@ mod tests {
                 | BLOCK_STATE_BEHAVIOR_VIEW_BLOCKING
                 | BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING
                 | BLOCK_STATE_BEHAVIOR_POST_PROCESS
+                | BLOCK_STATE_BEHAVIOR_FRICTION
         );
         assert_eq!(i32::from_le_bytes(encoded[31..35].try_into().unwrap()), 12);
         assert_eq!(
             u32::from_le_bytes(encoded[35..39].try_into().unwrap()),
             BLOCK_STATE_BEHAVIOR_VIEW_BLOCKING | BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING
         );
+        assert_eq!(
+            u32::from_le_bytes(encoded[39..43].try_into().unwrap()),
+            0.95_f32.to_bits()
+        );
         assert!(encoded.len() <= MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES);
+
+        let friction_only = encode_block_state_behavior(
+            &[("powered", "true")],
+            BlockStateBehavior::new().friction(1.2).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            u32::from_le_bytes(friction_only[27..31].try_into().unwrap()),
+            BLOCK_STATE_BEHAVIOR_FRICTION
+        );
+        assert_eq!(
+            u32::from_le_bytes(friction_only[39..43].try_into().unwrap()),
+            1.2_f32.to_bits()
+        );
+        for invalid in [f32::NAN, f32::INFINITY, -0.01, 2.01] {
+            assert_eq!(
+                BlockStateBehavior::new()
+                    .friction(invalid)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
 
         assert_eq!(
             encode_block_state_behavior(&[("powered", "true")], BlockStateBehavior::new())

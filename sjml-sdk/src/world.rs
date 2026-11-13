@@ -84,6 +84,8 @@ pub const MAX_WORLD_GAME_TIME_TICKS: i64 = 1_000_000_000_000;
 pub const MAX_WORLD_SPAWN_POINT_BYTES: usize = 20;
 /// Maximum delay accepted for a guest-scheduled vanilla block tick, in ticks.
 pub const MAX_WORLD_BLOCK_TICK_DELAY_TICKS: u32 = 72_000;
+/// Maximum delay accepted for a guest-scheduled vanilla fluid tick, in ticks.
+pub const MAX_WORLD_FLUID_TICK_DELAY_TICKS: u32 = 72_000;
 /// Maximum chunk-radius requested by [`loaded_chunks`], in chunks.
 pub const MAX_WORLD_CHUNK_RADIUS: u32 = 16;
 /// Maximum number of already-loaded chunks returned by one [`loaded_chunks`] call.
@@ -1191,6 +1193,17 @@ extern "C" {
         z: i32,
         expected_block_id: i32,
         expected_block_id_length: i32,
+        delay_ticks: i32,
+    ) -> i32;
+    #[link_name = "schedule_fluid_tick"]
+    fn imported_schedule_fluid_tick(
+        handle: i32,
+        handle_length: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        expected_fluid_id: i32,
+        expected_fluid_id_length: i32,
         delay_ticks: i32,
     ) -> i32;
     #[link_name = "notify_neighbors_at"]
@@ -3485,6 +3498,59 @@ pub fn schedule_block_tick(
     }
 }
 
+/// Schedules one ordinary Minecraft fluid tick for the expected fluid at a loaded position.
+///
+/// The module must request and receive `world.read`, `world.write`, and
+/// `world.fluid_tick.schedule`. The host rejects unloaded positions, non-canonical or unknown
+/// fluid IDs, and positions that no longer contain the expected fluid without loading a chunk.
+/// The delay must be between 1 and [`MAX_WORLD_FLUID_TICK_DELAY_TICKS`] ticks. Calls are limited
+/// to 16 per module per server tick. Minecraft de-duplicates matching pending ticks according to
+/// its normal fluid scheduler.
+pub fn schedule_fluid_tick(
+    world: WorldHandle,
+    position: BlockPos,
+    expected_fluid_id: &str,
+    delay_ticks: u32,
+) -> SjmlResult<()> {
+    validate_fluid_id(expected_fluid_id)?;
+    if !(1..=MAX_WORLD_FLUID_TICK_DELAY_TICKS).contains(&delay_ticks) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "scheduled fluid tick delay must be within 1..=72000 ticks",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        // SAFETY: the host copies the handle and bounded UTF-8 fluid ID before returning.
+        let status = unsafe {
+            imported_schedule_fluid_tick(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                position.x,
+                position.y,
+                position.z,
+                expected_fluid_id.as_ptr() as usize as u32 as i32,
+                expected_fluid_id.len() as i32,
+                delay_ticks as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the scheduled fluid tick",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
 /// Runs the normal vanilla neighbor update around a block at a loaded position.
 ///
 /// The module must request and receive both `world.read` and `world.write`. The call runs
@@ -3631,6 +3697,10 @@ fn validate_block_id(id: &str) -> SjmlResult<()> {
     validate_resource_id(id, "block")
 }
 
+fn validate_fluid_id(id: &str) -> SjmlResult<()> {
+    validate_resource_id(id, "fluid")
+}
+
 fn validate_particle_id(id: &str) -> SjmlResult<()> {
     validate_resource_id(id, "particle")
 }
@@ -3756,18 +3826,18 @@ mod tests {
         biome_ids, block_has_tag, block_properties, collides, day_time, daylight_cycle_enabled,
         entity_type_tag_members, fluid_at, fluid_tag_members, integer_game_rule, item_has_tag,
         item_tag_members, loaded_chunks, notify_neighbors_at, play_sound, raycast,
-        schedule_block_tick, set_block, set_block_properties, set_block_with_options,
-        set_daylight_cycle_enabled, set_game_time, set_integer_game_rule, set_time, spawn_entity,
-        spawn_item, spawn_particle, spawn_projectile, structures_at, tag_members,
-        validate_biome_ids, validate_block_property_updates, validate_loaded_chunk_query,
-        validate_loaded_chunk_results, validate_structure_ids, validate_tag_member_ids,
-        validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse, BlockPropertiesMutation,
-        BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateBatch,
-        BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse, BlockUpdateOptions,
-        ChunkPos, DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity,
-        ItemTagQuery, ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
-        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery,
-        StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
+        schedule_block_tick, schedule_fluid_tick, set_block, set_block_properties,
+        set_block_with_options, set_daylight_cycle_enabled, set_game_time, set_integer_game_rule,
+        set_time, spawn_entity, spawn_item, spawn_particle, spawn_projectile, structures_at,
+        tag_members, validate_biome_ids, validate_block_property_updates,
+        validate_loaded_chunk_query, validate_loaded_chunk_results, validate_structure_ids,
+        validate_tag_member_ids, validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse,
+        BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
+        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse,
+        BlockUpdateOptions, ChunkPos, DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse,
+        ItemSpawnVelocity, ItemTagQuery, ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse,
+        ProjectileVelocity, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
+        StructuresAtQuery, StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
         VanillaProjectileKind, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
         WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery,
         WorldGameRuleSnapshot, WorldIntegerGameRule, WorldIntegerGameRuleMutation,
@@ -3778,9 +3848,9 @@ mod tests {
         MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
         MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
-        MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
-        MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED, MAX_WORLD_ITEM_STACK_COUNT,
-        MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
+        MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_FLUID_TICK_DELAY_TICKS,
+        MAX_WORLD_GAME_TIME_TICKS, MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED,
+        MAX_WORLD_ITEM_STACK_COUNT, MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
         MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_PROJECTILE_SPEED, MAX_WORLD_STRUCTURES_AT,
         MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES, MAX_WORLD_STRUCTURE_ID_BYTES,
         MAX_WORLD_TAG_ID_BYTES, MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES,
@@ -5040,6 +5110,39 @@ mod tests {
         }
         assert_eq!(
             schedule_block_tick(world, position, "minecraft:stone", 20)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn scheduled_fluid_tick_validates_id_and_delay_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        for invalid in [
+            "water",
+            "Minecraft:water",
+            "minecraft:Bad",
+            "minecraft:bad path",
+        ] {
+            assert_eq!(
+                schedule_fluid_tick(world, position, invalid, 20)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for invalid in [0, MAX_WORLD_FLUID_TICK_DELAY_TICKS + 1] {
+            assert_eq!(
+                schedule_fluid_tick(world, position, "minecraft:water", invalid)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            schedule_fluid_tick(world, position, "minecraft:water", 20)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

@@ -33,5 +33,9 @@ crate-type = ["cdylib"]
 name = "client_screen_multi_select"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "client_cursor_moved"
+crate-type = ["cdylib"]
+
 [dependencies]
 sjml-macros.workspace = true
