@@ -798,7 +798,7 @@ changes, resource reloads, and menu actions. Synchronous cancellable callbacks i
 `item.use`, `item.use_on_block`, `item.use_on_entity`,
 `entity.death_attempt`, `entity.damage_attempt`,
 `entity.target_attempt`, `entity.breed_attempt`, `entity.projectile_impact_attempt`,
-`player.fished_attempt`, and
+`player.fished_attempt`, `player.attack_attempt`, and
 `world.explosion_attempt`. Server event callbacks run on the owning
 logical-server thread. Notifications require `events.subscribe`; cancellable
 events also require `events.cancel`. Both capabilities appear in the combined
@@ -842,6 +842,13 @@ placement through NeoForge's `BlockEvent.FluidPlaceBlockEvent`. Its detached
 `BlockFluidPlaceAttempt` provides the fluid ID, original/result block IDs, and
 target/source positions. A veto does not stop the fluid from flowing on later
 ticks. See [fluid placement attempts](BLOCK_FLUID_PLACE_ATTEMPTS.md).
+
+`player.attack_attempt` synchronously vetoes a server-side attack before
+Minecraft runs the weapon hook or applies damage. Its `PlayerAttackAttempt`
+snapshot contains detached player and target UUIDs, target type and dimension
+IDs, and the target coordinates. It exposes no damage amount, held item, live
+entity, or mutable event field. Both event capabilities are required; see
+[player attack attempts](PLAYER_ATTACK_ATTEMPTS.md).
 
 `player.fished_attempt` is a synchronous cancellable server callback for
 NeoForge's fishing-catch event. Its `PlayerFishedAttempt` and nested

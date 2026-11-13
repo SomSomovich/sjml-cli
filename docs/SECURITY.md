@@ -285,6 +285,12 @@ synchronously on the logical-server thread. It receives only bounded registry
 IDs and block positions, can veto the one `FluidPlaceBlockEvent`, and cannot
 mutate the target state or stop later fluid flow.
 
+`player.attack_attempt` uses the same two event capabilities and is dispatched
+synchronously on the owning logical-server thread. It gives guest code detached
+player/target IDs, target type and dimension IDs, and bounded target
+coordinates; a true result cancels before the weapon hook and damage code. It
+does not allow guest code to edit attack damage or any live event field.
+
 `entity.death_attempt` requires the same two capabilities and runs synchronously
 on the logical-server thread. A guest receives a detached identity and position
 snapshot; returning `true` cancels the death transition and the host restores the

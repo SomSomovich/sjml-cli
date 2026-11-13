@@ -121,6 +121,13 @@ the catch drops while retaining the requested rod damage. It requires both
 `events.subscribe` and `events.cancel`; see
 [cancellable fishing catches](PLAYER_FISHED_ATTEMPTS.md).
 
+Server modules can veto a player's attack through `player.attack_attempt`.
+`PlayerAttackAttempt` exposes detached player/target UUIDs, the target type and
+dimension IDs, and target coordinates. Returning `Ok(true)` cancels the real
+attack before the weapon hook or damage handling. Both `events.subscribe` and
+`events.cancel` are required; see
+[cancellable player attacks](PLAYER_ATTACK_ATTEMPTS.md).
+
 
 Server modules can veto an impending living-entity knockback through
 `entity.knockback_attempt`. The synchronous callback receives the target UUID,

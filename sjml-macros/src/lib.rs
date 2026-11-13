@@ -896,6 +896,20 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_player_attack_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "player.attack_attempt"),
+            quote! {
+                fn deny_attack(event: PlayerAttackAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_player.attack_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
     fn cancellable_player_fished_attempt_exports_the_sync_boolean_callback() {
         let generated = expand_event(
             quote!(name = "player.fished_attempt"),

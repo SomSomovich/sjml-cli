@@ -695,7 +695,7 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`, `player.advancement_earned`,
-`player.sleep_attempt`, `player.item_use_attempt`, `entity.death`, `entity.death_attempt`,
+`player.sleep_attempt`, `player.item_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
@@ -713,7 +713,7 @@ Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`, `block.fertilize_attempt`,
-`block.fluid_place_attempt`, `player.fished_attempt`, or `world.explosion_attempt` additionally
+`block.fluid_place_attempt`, `player.fished_attempt`, `player.attack_attempt`, or `world.explosion_attempt` additionally
 requires the module to request and receive the separate `events.cancel`
 capability. `client.action_attempt` additionally requires the separate
 `client.input.action_cancel` capability. Static registration instances cannot subscribe. Server event
@@ -2758,3 +2758,19 @@ live Minecraft objects or block-state properties. NeoForge's cancellable
 thread; a true guest result vetoes only that attempted block-state placement.
 The fluid may continue flowing and later ticks are independent. See
 [fluid placement attempts](BLOCK_FLUID_PLACE_ATTEMPTS.md).
+
+## Player attack attempt
+
+The synchronous cancellable `sjml_v1_event_player.attack_attempt` callback
+requires both `events.subscribe` and `events.cancel`. The schema-v1
+`PlayerAttackAttempt` payload is little-endian `u32(1)`, then length-prefixed
+UTF-8 `player_id`, `target_id`, `target_type_id`, and `dimension_id`, followed
+by little-endian `f64` `target_x`, `target_y`, and `target_z`. The first two
+strings are canonical UUIDs; the other strings are canonical lowercase
+resource locations. Strings are limited to 256 bytes, positions must be finite
+and within ±30,000,000, and the complete payload is capped at 2 KiB. The
+snapshot contains no live Minecraft objects or mutable event fields. A true
+result cancels NeoForge's `AttackEntityEvent` before vanilla weapon hooks or
+damage handling; the hook runs on the owning logical-server thread and
+already-canceled events are not dispatched. See
+[player attack attempts](PLAYER_ATTACK_ATTEMPTS.md).

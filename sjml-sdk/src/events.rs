@@ -1103,6 +1103,32 @@ pub struct BlockFluidPlaceAttempt {
     pub result_block_id: String,
 }
 
+/// Synchronous cancellable attempt by a player to attack an entity on the logical server.
+///
+/// Return `Ok(true)` from a `player.attack_attempt` handler to cancel this attack before
+/// Minecraft runs weapon hooks or damage processing. The payload contains detached attacker and
+/// target UUIDs, target type and dimension IDs, and the target's current position. It does not
+/// expose damage, a live player/entity object, or mutable event fields. Both `events.subscribe`
+/// and `events.cancel` are required.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerAttackAttempt {
+    /// UUID of the player who initiated the attack.
+    pub player_id: String,
+    /// UUID of the targeted entity.
+    pub target_id: String,
+    /// Registry ID of the targeted entity type.
+    pub target_type_id: String,
+    /// Resource location of the dimension containing both entities.
+    pub dimension_id: String,
+    /// Target's X coordinate when the attack hook ran.
+    pub target_x: f64,
+    /// Target's Y coordinate when the attack hook ran.
+    pub target_y: f64,
+    /// Target's Z coordinate when the attack hook ran.
+    pub target_z: f64,
+}
+
 /// Synchronous, non-cancellable `block.place` snapshot from the logical server.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -1498,9 +1524,9 @@ mod tests {
         EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick,
         EventPriority, ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines,
         ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
-        PlayerAdvancementEarned, PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved,
-        PlayerRespawned, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
+        PlayerAdvancementEarned, PlayerAttackAttempt, PlayerDropAttempt, PlayerFishedAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt,
+        PlayerMoved, PlayerRespawned, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
         ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
@@ -1857,6 +1883,33 @@ mod tests {
             from_bytes::<BlockFluidPlaceAttempt>(&encoded).unwrap(),
             event
         );
+    }
+
+    #[test]
+    fn player_attack_attempt_matches_host_schema_v1_bytes() {
+        let event = PlayerAttackAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            target_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            target_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            target_x: -4.5,
+            target_y: 72.0,
+            target_z: 19.25,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.player_id);
+        append_test_string(&mut expected, &event.target_id);
+        append_test_string(&mut expected, &event.target_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&event.target_x.to_le_bytes());
+        expected.extend_from_slice(&event.target_y.to_le_bytes());
+        expected.extend_from_slice(&event.target_z.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<PlayerAttackAttempt>(&encoded).unwrap(), event);
     }
 
     #[test]

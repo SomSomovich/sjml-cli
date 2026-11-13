@@ -46,6 +46,8 @@ mod entity_tick;
 mod gameplay_events;
 #[path = "gametest/player_advancements.rs"]
 mod player_advancements;
+#[path = "gametest/player_attack_attempt.rs"]
+mod player_attack_attempt;
 #[path = "gametest/player_fished_attempt.rs"]
 mod player_fished_attempt;
 #[path = "gametest/player_inventory_custom_name.rs"]
@@ -470,6 +472,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     block_use::initialize()?;
     block_tick::initialize()?;
     player_fished_attempt::initialize()?;
+    player_attack_attempt::initialize()?;
     entity_heal_attempt::initialize()?;
     entity_effect_application::initialize()?;
     entity_join_attempt::initialize()?;
