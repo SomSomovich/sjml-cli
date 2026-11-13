@@ -2247,22 +2247,30 @@ closed. Player names and arbitrary `Component` construction are not exposed.
 
 ## Live non-player entity attributes
 
-The `sjml_entity_v1.attribute` and `set_attribute_base` imports expose six
-allowlisted vanilla attributes for loaded living non-player entities. Reads
-require `entity.read`; writes also require `entity.attributes.write`.
+The `sjml_entity_v1.attribute` and `set_attribute_base` imports expose the
+SDK's 31 allowlisted vanilla attributes for loaded living non-player entities.
+Reads require `entity.read`; writes also require `entity.attributes.write`.
 
 | Import | Parameters | Success output |
 | --- | --- | --- |
 | `attribute` | `handle_ptr, handle_len, attribute_id_ptr, attribute_id_len, out_ptr, out_capacity` | 20 bytes: schema `u32(1)`, base `f64`, effective `f64` |
 | `set_attribute_base` | `handle_ptr, handle_len, attribute_id_ptr, attribute_id_len, value_ptr, value_len` | Set an allowlisted base value from a 12-byte schema-v1 record; status only |
+| `add_attribute_modifier` | `handle_ptr, handle_len, attribute_id_ptr, attribute_id_len, key_ptr, key_len, request_ptr, request_len` | Add a module-owned transient modifier from a 16-byte schema-v1 request; status only |
+| `remove_attribute_modifier` | `handle_ptr, handle_len, key_ptr, key_len, out_ptr, out_capacity` | 5 bytes: schema `u32(1)`, removed `u8(0|1)` |
 
 The handle is exactly 24 bytes; IDs are canonical UTF-8 and are restricted to
 the SDK's fixed `LivingAttribute` set. The request carries schema `u32(1)` and
 a finite `f64` within the attribute-specific range. The host checks the live
 entity handle, logical-server context, owning server thread, living entity
-type, attribute presence, and capability grants on every call. A write changes
-only the base value; active modifiers remain in effect. Static registration
-and client calls fail closed. See [live entity attributes](ENTITY_ATTRIBUTES.md).
+type, attribute presence, and capability grants on every call. A base-value
+write changes only that value. Transient modifiers accept finite amounts in
+-1,024..=1,024 and operation IDs `0=add value`, `1=add multiplied base`, and
+`2=add multiplied total`. Modifier keys match `[a-z0-9_.-]{1,64}`; quotas are
+16 per entity and 256 per module. Vanilla modifier IDs are derived from the
+package/module owner and the guest key, so a module cannot mutate another
+module's modifier. The host removes owned modifiers on explicit removal,
+entity/world unload, and module shutdown; they are not saved to entity NBT.
+Static registration and client calls fail closed. See [live entity attributes](ENTITY_ATTRIBUTES.md).
 
 ## Non-player entity attachments
 

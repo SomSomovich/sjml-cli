@@ -5,6 +5,7 @@
 //! vanilla IDs exposed by [`LivingAttribute`] require `entity.read`, and writes also require
 //! `entity.attributes.write`.
 
+use crate::registry::AttributeModifierOperation;
 #[cfg(target_arch = "wasm32")]
 use crate::to_bytes;
 use crate::{EntityHandle, ErrorCode, PlayerHandle, SjmlError, SjmlResult};
@@ -13,6 +14,15 @@ use crate::{EntityHandle, ErrorCode, PlayerHandle, SjmlError, SjmlResult};
 const SNAPSHOT_BYTES: usize = 20;
 #[cfg(target_arch = "wasm32")]
 const BASE_VALUE_BYTES: usize = 12;
+#[cfg(any(target_arch = "wasm32", test))]
+const MODIFIER_REQUEST_BYTES: usize = 16;
+#[cfg(any(target_arch = "wasm32", test))]
+const MODIFIER_REMOVE_RESULT_BYTES: usize = 5;
+
+/// Maximum absolute amount accepted by [`add_transient_modifier`].
+pub const MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT: f64 = 1_024.0;
+/// Maximum length of one module-owned modifier key.
+pub const MAX_ATTRIBUTE_MODIFIER_KEY_BYTES: usize = 64;
 
 /// A vanilla living-entity attribute with a stable registry ID and bounded writable base value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,6 +207,26 @@ extern "C" {
         value: i32,
         value_length: i32,
     ) -> i32;
+    #[link_name = "add_attribute_modifier"]
+    fn imported_add_attribute_modifier(
+        handle: i32,
+        handle_length: i32,
+        attribute_id: i32,
+        attribute_id_length: i32,
+        key: i32,
+        key_length: i32,
+        request: i32,
+        request_length: i32,
+    ) -> i32;
+    #[link_name = "remove_attribute_modifier"]
+    fn imported_remove_attribute_modifier(
+        handle: i32,
+        handle_length: i32,
+        key: i32,
+        key_length: i32,
+        output: i32,
+        output_capacity: i32,
+    ) -> i32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -284,6 +314,137 @@ pub fn set_base_value(
     {
         let _ = handle;
         Err(unsupported_target())
+    }
+}
+
+/// Adds an owner-scoped transient vanilla modifier to one loaded living non-player entity.
+///
+/// The attribute must be in [`LivingAttribute`]'s allowlist. `key` identifies the modifier only
+/// inside this module and entity, and must match `[a-z0-9_.-]{1,64}`. A duplicate key is rejected.
+/// The modifier is not saved to entity NBT and is removed when the module shuts down, the entity
+/// leaves its level, or [`remove_transient_modifier`] is called. The module must request and
+/// receive both `entity.read` and `entity.attributes.write`.
+pub fn add_transient_modifier(
+    handle: EntityHandle,
+    attribute: LivingAttribute,
+    key: &str,
+    amount: f64,
+    operation: AttributeModifierOperation,
+) -> SjmlResult<()> {
+    validate_modifier_key(key)?;
+    validate_modifier_amount(amount)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let request = encode_modifier_request(amount, operation);
+        // SAFETY: all borrowed strings and fixed-size buffers stay live during the synchronous call.
+        let status = unsafe {
+            imported_add_attribute_modifier(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                attribute.id().as_ptr() as usize as u32 as i32,
+                attribute.id().len() as u32 as i32,
+                key.as_ptr() as usize as u32 as i32,
+                key.len() as u32 as i32,
+                request.as_ptr() as usize as u32 as i32,
+                request.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the entity attribute modifier")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, attribute, operation);
+        Err(unsupported_target())
+    }
+}
+
+/// Removes a module-owned transient modifier by key from one loaded living non-player entity.
+///
+/// Returns `true` if the module-owned vanilla modifier was present and removed. Other modules'
+/// modifiers cannot be removed. Calls require both `entity.read` and `entity.attributes.write`.
+pub fn remove_transient_modifier(handle: EntityHandle, key: &str) -> SjmlResult<bool> {
+    validate_modifier_key(key)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let mut output = [0_u8; MODIFIER_REMOVE_RESULT_BYTES];
+        // SAFETY: pointers reference live fixed-size buffers for this synchronous host call.
+        let status = unsafe {
+            imported_remove_attribute_modifier(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                key.as_ptr() as usize as u32 as i32,
+                key.len() as u32 as i32,
+                output.as_mut_ptr() as usize as u32 as i32,
+                output.len() as u32 as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the entity attribute modifier removal",
+        )?;
+        decode_modifier_remove_result(&output)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, key);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_modifier_key(key: &str) -> SjmlResult<()> {
+    if key.is_empty()
+        || key.len() > MAX_ATTRIBUTE_MODIFIER_KEY_BYTES
+        || !key.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+        })
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity attribute modifier keys must match [a-z0-9_.-]{1,64}",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_modifier_amount(amount: f64) -> SjmlResult<()> {
+    if !amount.is_finite() || amount.abs() > MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity attribute modifier amount must be finite and within -1,024..=1,024",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn encode_modifier_request(
+    amount: f64,
+    operation: AttributeModifierOperation,
+) -> [u8; MODIFIER_REQUEST_BYTES] {
+    let mut encoded = [0_u8; MODIFIER_REQUEST_BYTES];
+    encoded[..4].copy_from_slice(&1_u32.to_le_bytes());
+    encoded[4..12].copy_from_slice(&amount.to_le_bytes());
+    encoded[12..].copy_from_slice(&(operation as i32).to_le_bytes());
+    encoded
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn decode_modifier_remove_result(bytes: &[u8; MODIFIER_REMOVE_RESULT_BYTES]) -> SjmlResult<bool> {
+    if u32::from_le_bytes(bytes[..4].try_into().expect("fixed header")) != 1 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "unsupported entity attribute modifier removal schema",
+        ));
+    }
+    match bytes[4] {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "host returned an invalid entity attribute modifier removal result",
+        )),
     }
 }
 
@@ -404,7 +565,12 @@ fn unsupported_target() -> SjmlError {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_values, AttributeValues, LivingAttribute};
+    use super::{
+        decode_modifier_remove_result, decode_values, encode_modifier_request,
+        validate_modifier_amount, validate_modifier_key, AttributeValues, LivingAttribute,
+        MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
+    };
+    use crate::registry::AttributeModifierOperation;
     use crate::{EntityHandle, ErrorCode};
 
     #[test]
@@ -435,6 +601,39 @@ mod tests {
                 .code(),
             ErrorCode::UnknownErrorCode
         );
+    }
+
+    #[test]
+    fn transient_modifier_keys_and_amounts_are_bounded() {
+        assert!(validate_modifier_key("speed_boost.v1").is_ok());
+        assert!(validate_modifier_key(&"a".repeat(64)).is_ok());
+        assert!(validate_modifier_key("").is_err());
+        assert!(validate_modifier_key("UpperCase").is_err());
+        assert!(validate_modifier_key("path/name").is_err());
+        assert!(validate_modifier_key(&"a".repeat(65)).is_err());
+
+        assert!(validate_modifier_amount(MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT).is_ok());
+        assert!(validate_modifier_amount(-MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT).is_ok());
+        assert!(validate_modifier_amount(f64::NAN).is_err());
+        assert!(validate_modifier_amount(f64::INFINITY).is_err());
+        assert!(validate_modifier_amount(MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT + 0.01).is_err());
+    }
+
+    #[test]
+    fn transient_modifier_remove_result_requires_schema_and_a_stable_boolean() {
+        assert!(decode_modifier_remove_result(&[1, 0, 0, 0, 1]).unwrap());
+        assert!(!decode_modifier_remove_result(&[1, 0, 0, 0, 0]).unwrap());
+        assert!(decode_modifier_remove_result(&[2, 0, 0, 0, 1]).is_err());
+        assert!(decode_modifier_remove_result(&[1, 0, 0, 0, 2]).is_err());
+    }
+
+    #[test]
+    fn transient_modifier_request_matches_schema_v1_little_endian_bytes() {
+        let encoded = encode_modifier_request(0.5, AttributeModifierOperation::AddMultipliedBase);
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        expected.extend_from_slice(&0.5_f64.to_le_bytes());
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        assert_eq!(encoded.as_slice(), expected);
     }
 
     #[test]

@@ -190,7 +190,10 @@ pub use entity::{
     MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
     NAVIGATION_WRITE_CAPABILITY, TARGET_WRITE_CAPABILITY,
 };
-pub use entity_attributes::{AttributeValues, LivingAttribute};
+pub use entity_attributes::{
+    AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
+    MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
+};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use events::BlockGrowAttempt;
 pub use events::EntityBreedAttempt;
@@ -384,7 +387,10 @@ pub mod prelude {
         NAVIGATION_WRITE_CAPABILITY, TARGET_WRITE_CAPABILITY,
     };
     pub use crate::entity_attributes;
-    pub use crate::entity_attributes::{AttributeValues, LivingAttribute};
+    pub use crate::entity_attributes::{
+        AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
+        MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
+    };
     pub use crate::entity_data;
     pub use crate::entity_data::{
         ENTITY_DATA_MISSING, MAX_ENTITY_DATA_KEY_BYTES, MAX_ENTITY_DATA_VALUE_BYTES,

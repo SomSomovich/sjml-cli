@@ -22,6 +22,8 @@ mod block_tick;
 mod block_use;
 #[path = "gametest/entity_ai_control.rs"]
 mod entity_ai_control;
+#[path = "gametest/entity_attribute_modifiers.rs"]
+mod entity_attribute_modifiers;
 #[path = "gametest/entity_breed_attempt.rs"]
 mod entity_breed_attempt;
 #[path = "gametest/entity_effect_application.rs"]
