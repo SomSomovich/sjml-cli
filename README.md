@@ -70,6 +70,7 @@ the generated project.
 - [Complete manifest schema](docs/MANIFEST_SCHEMA.md) and [`.sjml` archive format](docs/FORMAT.md)
 - [Compatibility and host support](docs/COMPATIBILITY.md)
 - [Minecraft API coverage matrix](docs/minecraft-api-coverage.md)
+- [Cancellable player item-pickup attempts](docs/PLAYER_ITEM_PICKUP_ATTEMPT.md)
 - [Registered item behavior](docs/CUSTOM_ITEM_BEHAVIOR.md), [player inventory enchantments](docs/PLAYER_INVENTORY_ENCHANTMENTS.md), [scoreboard access](docs/SCOREBOARD.md), and [module-owned scoreboard objectives](docs/SCOREBOARD_OBJECTIVES.md)
 - [Client music selection](docs/CLIENT_MUSIC.md), [breeding](docs/ENTITY_BREED_ATTEMPTS.md), and [crop growth](docs/BLOCK_GROW_ATTEMPTS.md)
 - [Client localization lookups](docs/CLIENT_LOCALIZATION.md)

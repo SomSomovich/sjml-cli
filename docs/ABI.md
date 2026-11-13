@@ -525,6 +525,8 @@ host can restore the whole stack into the player's inventory. If capacity is
 insufficient, the host preserves the vanilla toss to avoid losing items.
 This event cannot be asynchronous.
 
+The synchronous cancellable `sjml_v1_event_player.item_pickup_attempt` callback receives schema-v1 `PlayerItemPickupAttempt`: little-endian `u32(1)`, stable length-prefixed strings for canonical player UUID and canonical item ID, little-endian `u32` count, then little-endian `f64` item X/Y/Z. Strings are limited to 256 UTF-8 bytes, count to `1..=1,000,000`, coordinates must be finite and within ±30,000,000, and the payload is limited to 2 KiB. The callback runs before inventory insertion on the owning logical-server thread. Return one stable boolean byte; `true` sets NeoForge's `TriState.FALSE` pickup result, leaving the item entity and inventory unchanged. The callback is skipped when another listener already denied pickup and requires `events.subscribe` plus `events.cancel`. This event cannot be asynchronous.
+
 The non-cancellable `sjml_v1_event_player.item_crafted` callback receives a
 schema-v1 `PlayerItemCrafted`: little-endian `u32(1)`, stable length-prefixed
 UTF-8 strings for canonical player UUID, matched recipe ID, and output item
@@ -719,7 +721,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
 `block.break_attempt`, `block.place`, `block.place_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.fluid_place_attempt`, `player.interacted`,
-`player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
+`player.interaction`, `player.drop_attempt`, `player.item_pickup_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
 `entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`,
@@ -727,7 +729,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`, `player.fished_attempt`,
 `client.chat.send_attempt`, and `client.action_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
-`player.interaction`, `player.drop_attempt`, `player.sleep_attempt`,
+`player.interaction`, `player.drop_attempt`, `player.item_pickup_attempt`, `player.sleep_attempt`,
 `player.item_use_attempt`, `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`,
 `client.chat.send_attempt`, `client.action_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,

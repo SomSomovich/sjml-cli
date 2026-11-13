@@ -129,6 +129,8 @@ static SAW_SERVER_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_INVENTORY_PICKUP: AtomicBool = AtomicBool::new(false);
 static SAW_MENU_ACTION: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_DROP_ATTEMPT: AtomicBool = AtomicBool::new(false);
+static SAW_ALLOWED_STICK_PICKUP_ATTEMPT: AtomicBool = AtomicBool::new(false);
+static SAW_VETOED_DIAMOND_PICKUP_ATTEMPT: AtomicBool = AtomicBool::new(false);
 
 #[mod_register]
 fn register_test_content() -> SjmlResult<()> {
@@ -550,6 +552,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     player_villager_trade::initialize()?;
     events::subscribe("player.interaction", EventPriority::Normal)?;
     events::subscribe("player.drop_attempt", EventPriority::Normal)?;
+    events::subscribe("player.item_pickup_attempt", EventPriority::Normal)?;
     events::subscribe("entity.damaged", EventPriority::Normal)?;
     events::subscribe("entity.damage_attempt", EventPriority::Normal)?;
     events::subscribe("world.loaded", EventPriority::Normal)?;
@@ -711,6 +714,22 @@ fn veto_diamond_drop_attempt(event: PlayerDropAttempt) -> SjmlResult<bool> {
     let veto = event.item_id == "minecraft:diamond" && event.can_cancel;
     if veto {
         SAW_PLAYER_DROP_ATTEMPT.store(true, Ordering::Relaxed);
+    }
+    Ok(veto)
+}
+
+#[event(name = "player.item_pickup_attempt")]
+fn veto_test_diamond_pickup_attempt(event: PlayerItemPickupAttempt) -> SjmlResult<bool> {
+    if !event.x.is_finite() || !event.y.is_finite() || !event.z.is_finite() {
+        return Ok(false);
+    }
+    if event.item_id == "minecraft:stick" && event.count == 1 {
+        SAW_ALLOWED_STICK_PICKUP_ATTEMPT.store(true, Ordering::Relaxed);
+        return Ok(false);
+    }
+    let veto = event.item_id == "minecraft:diamond" && event.count == 2;
+    if veto {
+        SAW_VETOED_DIAMOND_PICKUP_ATTEMPT.store(true, Ordering::Relaxed);
     }
     Ok(veto)
 }
@@ -931,6 +950,20 @@ fn check_player_drop_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String>
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "player.drop_attempt callback did not veto the diamond drop",
+        ))
+    }
+}
+
+#[command(name = "player.item_pickup_attempt.check")]
+fn check_player_item_pickup_attempt(_: EntityDeathCheckArguments) -> SjmlResult<String> {
+    let allowed = SAW_ALLOWED_STICK_PICKUP_ATTEMPT.swap(false, Ordering::Relaxed);
+    let vetoed = SAW_VETOED_DIAMOND_PICKUP_ATTEMPT.swap(false, Ordering::Relaxed);
+    if allowed && vetoed {
+        Ok("guest observed normal stick pickup and vetoed diamond pickup".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player.item_pickup_attempt did not deliver both allow and veto decisions",
         ))
     }
 }

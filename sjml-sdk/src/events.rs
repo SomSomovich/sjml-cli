@@ -603,6 +603,29 @@ pub struct PlayerDropAttempt {
     pub can_cancel: bool,
 }
 
+/// Synchronous cancellable attempt to pick up a detached item stack on the logical server.
+///
+/// Return `Ok(true)` from a `player.item_pickup_attempt` handler to prevent the item from being
+/// inserted into the player's inventory. The callback runs before vanilla pickup rules are applied,
+/// receives only the player UUID, canonical item ID/count, and position, and requires both
+/// `events.subscribe` and `events.cancel`. It cannot modify the item stack or player inventory.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerItemPickupAttempt {
+    /// Canonical UUID string of the player who touched the item.
+    pub player_id: String,
+    /// Canonical registry ID of the item being picked up.
+    pub item_id: String,
+    /// Item count, bounded by the host to `1..=1_000_000`.
+    pub count: u32,
+    /// Item-entity X coordinate at the start of the pickup attempt.
+    pub x: f64,
+    /// Item-entity Y coordinate at the start of the pickup attempt.
+    pub y: f64,
+    /// Item-entity Z coordinate at the start of the pickup attempt.
+    pub z: f64,
+}
+
 /// One detached item ID and count from a fishing catch, without components or NBT.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -2750,6 +2773,34 @@ mod tests {
         assert_eq!(
             from_bytes::<PlayerDropAttempt>(&encoded).unwrap(),
             not_cancellable
+        );
+    }
+
+    #[test]
+    fn player_item_pickup_attempt_matches_host_schema_v1_and_round_trips_position() {
+        let attempt = PlayerItemPickupAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            item_id: "minecraft:diamond".to_owned(),
+            count: 3,
+            x: -1.25,
+            y: 64.0,
+            z: 7.5,
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &attempt.player_id);
+        append_test_string(&mut expected, &attempt.item_id);
+        expected.extend_from_slice(&attempt.count.to_le_bytes());
+        expected.extend_from_slice(&attempt.x.to_le_bytes());
+        expected.extend_from_slice(&attempt.y.to_le_bytes());
+        expected.extend_from_slice(&attempt.z.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust bytes must match host schema-v1 layout"
+        );
+        assert_eq!(
+            from_bytes::<PlayerItemPickupAttempt>(&encoded).unwrap(),
+            attempt
         );
     }
 

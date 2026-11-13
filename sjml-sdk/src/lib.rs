@@ -206,6 +206,7 @@ pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use events::BlockGrowAttempt;
 pub use events::EntityBreedAttempt;
 pub use events::PlayerAttackAttempt;
+pub use events::PlayerItemPickupAttempt;
 pub use events::{
     BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty,
 };
@@ -444,9 +445,9 @@ pub mod prelude {
         EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, InventoryChanged,
         ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock,
         ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAttackAttempt, PlayerDropAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt,
-        PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt, PlayerTick,
-        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt,
+        PlayerItemUseAttempt, PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt,
+        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
         CLIENT_ACTION_CANCEL_CAPABILITY, DEFAULT_SERVER_TICK_INTERVAL,
         MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
         MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,

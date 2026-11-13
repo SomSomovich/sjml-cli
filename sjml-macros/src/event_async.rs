@@ -25,6 +25,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "block.place_attempt"
             | "player.interaction"
             | "player.drop_attempt"
+            | "player.item_pickup_attempt"
             | "player.sleep_attempt"
             | "item.use"
             | "item.use_on_block"
@@ -329,6 +330,13 @@ mod tests {
                 quote! { async fn drop_attempt(_: PlayerDropAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "player.drop_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.item_pickup_attempt"),
+                quote! { async fn pickup_attempt(_: PlayerItemPickupAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.item_pickup_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

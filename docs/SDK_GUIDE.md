@@ -802,7 +802,7 @@ death/spawn/effect/damage, target and projectile-impact events; block
 break/place; world load/unload and explosion-attempt; server tick, inventory
 changes, resource reloads, menu actions, and completed villager trades. Synchronous cancellable callbacks include `block.break`,
 `block.break_attempt`, `block.place_attempt`, `block.grow_attempt`, `player.interaction`,
-`player.drop_attempt`, `player.sleep_attempt`, `player.item_use_attempt`, `block.use`,
+`player.drop_attempt`, `player.item_pickup_attempt`, `player.sleep_attempt`, `player.item_use_attempt`, `block.use`,
 `item.use`, `item.use_on_block`, `item.use_on_entity`,
 `entity.death_attempt`, `entity.damage_attempt`,
 `entity.target_attempt`, `entity.breed_attempt`, `entity.projectile_impact_attempt`,
@@ -811,6 +811,8 @@ changes, resource reloads, menu actions, and completed villager trades. Synchron
 logical-server thread. Notifications require `events.subscribe`; cancellable
 events also require `events.cancel`. Both capabilities appear in the combined
 module and administrator-grant declarations above.
+
+`player.item_pickup_attempt` runs before a touched item stack is inserted into a player inventory. `PlayerItemPickupAttempt` contains only the canonical player UUID, item ID/count, and finite item-entity coordinates. Return `Ok(true)` to set NeoForge's pickup state to `TriState.FALSE`; `Ok(false)` lets vanilla and other event listeners decide. The host does not dispatch after another listener has already denied pickup. See [cancellable item pickup attempts](PLAYER_ITEM_PICKUP_ATTEMPT.md).
 
 Registered blocks can handle their own right-clicks through a synchronous
 `#[event(name = "block.use")]` callback. Subscribe from the retained logical-
