@@ -393,6 +393,19 @@ length-prefixed UTF-8 strings in order (`player_id` canonical UUID,
 2 KiB and each string to 256 bytes. It fires after a server player earns an
 advancement and requires `events.subscribe`.
 
+The non-cancellable `sjml_v1_event_player.advancement_progress` callback
+receives schema-v1 `PlayerAdvancementProgressEvent`: little-endian `u32(1)`, then
+length-prefixed UTF-8 strings `player_id` (canonical UUID), `advancement_id`
+(canonical lowercase resource location), and `criterion_id`, followed by
+little-endian `u32 operation` (`0=Grant`, `1=Revoke`) and a stable boolean byte
+`is_done` (`0=false`, `1=true`). Each string is limited to 256 UTF-8 bytes and
+the complete payload to 2 KiB. NeoForge 21.1.265 fires this notification on
+the logical-server main event bus after the criterion progress change; the
+provided advancement progress reports `is_done` after that change. It is
+observation-only: the callback cannot cancel or modify progress. Subscription
+requires both `events.subscribe` and the separate `player.advancement.observe`
+grant. The callback may use `#[event_async]` because it is non-cancellable.
+
 The synchronous cancellable `sjml_v1_event_world.explosion_attempt` callback
 receives schema-v1 `ExplosionAttempt`: little-endian `u32(1)`, a
 length-prefixed `dimension_id`, optional `source_entity_id` and
@@ -716,6 +729,7 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`, `player.advancement_earned`,
+`player.advancement_progress`,
 `player.sleep_attempt`, `player.item_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,

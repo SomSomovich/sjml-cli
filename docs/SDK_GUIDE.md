@@ -797,7 +797,8 @@ mutation and structured feedback remain unavailable.
 The `#[event]` attributes above export callbacks; they do not register them for
 delivery. From `mod_init` in a retained logical-server instance, explicitly
 subscribe with `events::subscribe(event_name, priority)`. The NeoForge adapter recognizes server lifecycle, player join/leave/movement,
-respawn, interactions, item-use attempts, registered-block use, and earned advancements; entity
+respawn, interactions, item-use attempts, registered-block use, earned advancements, and
+criterion-level `player.advancement_progress`; entity
 death/spawn/effect/damage, target and projectile-impact events; block
 break/place; world load/unload and explosion-attempt; server tick, inventory
 changes, resource reloads, menu actions, and completed villager trades. Synchronous cancellable callbacks include `block.break`,
@@ -808,9 +809,12 @@ changes, resource reloads, menu actions, and completed villager trades. Synchron
 `entity.target_attempt`, `entity.breed_attempt`, `entity.projectile_impact_attempt`,
 `player.fished_attempt`, `player.attack_attempt`, and
 `world.explosion_attempt`. Server event callbacks run on the owning
-logical-server thread. Notifications require `events.subscribe`; cancellable
-events also require `events.cancel`. Both capabilities appear in the combined
-module and administrator-grant declarations above.
+logical-server thread. Notifications require `events.subscribe`; criterion-level
+advancement progress also requires the separate `player.advancement.observe`
+grant. Cancellable events also require `events.cancel`. See
+[criterion progress events](PLAYER_ADVANCEMENT_PROGRESS_EVENT.md). The event
+capabilities appear in the combined module and administrator-grant declarations
+above.
 
 `player.item_pickup_attempt` runs before a touched item stack is inserted into a player inventory. `PlayerItemPickupAttempt` contains only the canonical player UUID, item ID/count, and finite item-entity coordinates. Return `Ok(true)` to set NeoForge's pickup state to `TriState.FALSE`; `Ok(false)` lets vanilla and other event listeners decide. The host does not dispatch after another listener has already denied pickup. See [cancellable item pickup attempts](PLAYER_ITEM_PICKUP_ATTEMPT.md).
 

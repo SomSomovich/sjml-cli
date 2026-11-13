@@ -20,6 +20,16 @@ server player completes an advancement. Its `PlayerAdvancementEarned` payload
 contains the player's UUID and name, the current dimension ID, and the
 advancement ID. It requires `events.subscribe`.
 
+`player.advancement_progress` reports each individual criterion grant or
+revoke after Minecraft changes the progress. Its detached
+`PlayerAdvancementProgressEvent` record contains the player UUID, canonical
+advancement ID, criterion name, `AdvancementProgressOperation::Grant` or
+`::Revoke`, and `is_done`, which reflects completion after the change. It
+requires `events.subscribe` and the separate `player.advancement.observe`
+capability. The notification cannot cancel or alter progress and can use
+`#[event_async]`. See [criterion progress events](PLAYER_ADVANCEMENT_PROGRESS_EVENT.md)
+for the wire schema and grant/revoke example.
+
 `world.explosion_attempt` runs synchronously from NeoForge's cancelable
 `ExplosionEvent.Start`, before explosion damage, block changes, or fire are
 applied. Return `Ok(true)` to cancel the whole explosion. Its detached

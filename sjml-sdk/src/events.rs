@@ -24,6 +24,8 @@ pub const MAX_FISHED_DROPS: usize = 16;
 pub const MAX_FISHED_ITEM_COUNT: u32 = 1_000_000;
 /// Separate grant required to veto `client.action_attempt` actions.
 pub const CLIENT_ACTION_CANCEL_CAPABILITY: &str = "client.input.action_cancel";
+/// Separate grant required to observe player advancement criterion progress.
+pub const PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY: &str = "player.advancement.observe";
 /// Maximum callbacks invoked for one physical-client action attempt.
 pub const MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS: usize = 64;
 
@@ -81,6 +83,164 @@ pub struct PlayerAdvancementEarned {
     pub dimension_id: String,
     /// Registry ID of the earned advancement.
     pub advancement_id: String,
+}
+
+/// Criterion-level progress change reported after Minecraft updates advancement progress.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerAdvancementProgressEvent {
+    /// Canonical UUID string of the player whose criterion changed.
+    pub player_id: String,
+    /// Canonical registry ID of the advancement.
+    pub advancement_id: String,
+    /// Advancement criterion name that was granted or revoked.
+    pub criterion_id: String,
+    /// Whether this transition granted or revoked the criterion.
+    pub operation: AdvancementProgressOperation,
+    /// Whether the advancement was complete after this criterion changed.
+    pub is_done: bool,
+}
+
+/// Progress operation that produced a [`PlayerAdvancementProgressEvent`] notification.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum AdvancementProgressOperation {
+    /// The criterion became complete.
+    Grant,
+    /// The criterion was revoked.
+    Revoke,
+}
+
+impl StableEncode for AdvancementProgressOperation {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_u32(match self {
+            Self::Grant => 0,
+            Self::Revoke => 1,
+        })
+    }
+}
+
+impl StableDecode for AdvancementProgressOperation {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u32()? {
+            0 => Ok(Self::Grant),
+            1 => Ok(Self::Revoke),
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("advancement progress operation code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+impl StableEncode for PlayerAdvancementProgressEvent {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_advancement_progress(self)?;
+        encoder.write_u32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encode_bounded_event_string(&self.advancement_id, encoder)?;
+        encode_bounded_event_string(&self.criterion_id, encoder)?;
+        self.operation.encode(encoder)?;
+        encoder.write_u8(u8::from(self.is_done))
+    }
+}
+
+impl StableDecode for PlayerAdvancementProgressEvent {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let version = decoder.read_u32()?;
+        if version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!("PlayerAdvancementProgressEvent schema version {version} is unsupported"),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            advancement_id: decode_bounded_event_string(decoder)?,
+            criterion_id: decode_bounded_event_string(decoder)?,
+            operation: AdvancementProgressOperation::decode(decoder)?,
+            is_done: match decoder.read_u8()? {
+                0 => false,
+                1 => true,
+                value => {
+                    return Err(SjmlError::new(
+                        ErrorCode::InvalidBoolean,
+                        format!("boolean wire value must be 0 or 1, found {value}"),
+                    ));
+                }
+            },
+        };
+        validate_advancement_progress(&event)?;
+        Ok(event)
+    }
+}
+
+fn validate_advancement_progress(event: &PlayerAdvancementProgressEvent) -> SjmlResult<()> {
+    let invalid = || {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "advancement progress event contains an invalid identity or empty criterion",
+        )
+    };
+    if !canonical_uuid(&event.player_id)
+        || !canonical_resource_location(&event.advancement_id)
+        || event.criterion_id.is_empty()
+        || event.player_id.len() > 256
+        || event.advancement_id.len() > 256
+        || event.criterion_id.len() > 256
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+fn canonical_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+            }
+        })
+}
+
+fn canonical_resource_location(value: &str) -> bool {
+    let Some((namespace, path)) = value.split_once(':') else {
+        return false;
+    };
+    !namespace.is_empty()
+        && !path.is_empty()
+        && namespace.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'.' || b == b'-'
+        })
+        && path.bytes().all(|b| {
+            b.is_ascii_lowercase()
+                || b.is_ascii_digit()
+                || b == b'_'
+                || b == b'.'
+                || b == b'-'
+                || b == b'/'
+        })
+}
+
+fn encode_bounded_event_string(value: &str, encoder: &mut Encoder) -> SjmlResult<()> {
+    if value.len() > 256 {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "advancement progress event string exceeds the 256-byte limit",
+        ));
+    }
+    encoder.write_length(value.len())?;
+    encoder.write_raw(value.as_bytes())
+}
+
+fn decode_bounded_event_string(decoder: &mut Decoder<'_>) -> SjmlResult<String> {
+    let length = decoder.read_length(256)?;
+    String::from_utf8(decoder.read_raw(length)?.to_vec()).map_err(|_| {
+        SjmlError::new(
+            ErrorCode::InvalidUtf8,
+            "advancement progress event string is not valid UTF-8",
+        )
+    })
 }
 
 /// Synchronous, observation-only snapshot of a logical-server player interaction attempt.
@@ -1642,9 +1802,10 @@ mod tests {
         ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt,
         EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
         EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned,
-        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
-        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAttackAttempt,
+        AdvancementProgressOperation, EntityTargetAttempt, EntityTick, EventPriority,
+        ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
+        ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
+        PlayerAdvancementEarned, PlayerAdvancementProgressEvent, PlayerAttackAttempt,
         PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt,
         PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt,
         PlayerTick, PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
@@ -1810,6 +1971,126 @@ mod tests {
         assert_eq!(
             from_bytes::<PlayerAdvancementEarned>(&encoded).unwrap(),
             event
+        );
+    }
+
+    #[test]
+    fn advancement_progress_round_trips_operation_and_post_change_completion() {
+        let event = PlayerAdvancementProgressEvent {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            advancement_id: "minecraft:story/root".into(),
+            criterion_id: "crafting_table".into(),
+            operation: AdvancementProgressOperation::Grant,
+            is_done: true,
+        };
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        for value in [&event.player_id, &event.advancement_id, &event.criterion_id] {
+            expected.extend_from_slice(&(value.len() as u32).to_le_bytes());
+            expected.extend_from_slice(value.as_bytes());
+        }
+        expected.extend_from_slice(&0_u32.to_le_bytes());
+        expected.push(1);
+        assert_eq!(to_bytes(&event).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<PlayerAdvancementProgressEvent>(&expected).unwrap(),
+            event
+        );
+
+        let revoked = PlayerAdvancementProgressEvent {
+            operation: AdvancementProgressOperation::Revoke,
+            is_done: false,
+            ..event
+        };
+        assert_eq!(
+            from_bytes::<PlayerAdvancementProgressEvent>(&to_bytes(&revoked).unwrap()).unwrap(),
+            revoked
+        );
+    }
+
+    #[test]
+    fn advancement_progress_codec_rejects_bad_identity_operation_boolean_utf8_and_bounds() {
+        let base = PlayerAdvancementProgressEvent {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            advancement_id: "minecraft:story/root".into(),
+            criterion_id: "criterion".into(),
+            operation: AdvancementProgressOperation::Grant,
+            is_done: false,
+        };
+        let invalid_id = PlayerAdvancementProgressEvent {
+            player_id: "not-a-uuid".into(),
+            ..base.clone()
+        };
+        assert_eq!(
+            to_bytes(&invalid_id).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let invalid_resource = PlayerAdvancementProgressEvent {
+            advancement_id: "Minecraft:root".into(),
+            ..base.clone()
+        };
+        assert_eq!(
+            to_bytes(&invalid_resource).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let oversized = PlayerAdvancementProgressEvent {
+            criterion_id: "x".repeat(257),
+            ..base
+        };
+        assert_eq!(
+            to_bytes(&oversized).unwrap_err().code(),
+            ErrorCode::PayloadTooLarge
+        );
+
+        let mut invalid_operation = to_bytes(&PlayerAdvancementProgressEvent {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            advancement_id: "minecraft:story/root".into(),
+            criterion_id: "criterion".into(),
+            operation: AdvancementProgressOperation::Grant,
+            is_done: false,
+        })
+        .unwrap();
+        let operation_offset = invalid_operation.len() - 5;
+        invalid_operation[operation_offset..operation_offset + 4]
+            .copy_from_slice(&99_u32.to_le_bytes());
+        assert_eq!(
+            from_bytes::<PlayerAdvancementProgressEvent>(&invalid_operation)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let mut invalid_boolean = to_bytes(&PlayerAdvancementProgressEvent {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            advancement_id: "minecraft:story/root".into(),
+            criterion_id: "criterion".into(),
+            operation: AdvancementProgressOperation::Grant,
+            is_done: false,
+        })
+        .unwrap();
+        let boolean_offset = invalid_boolean.len() - 1;
+        invalid_boolean[boolean_offset] = 2;
+        assert_eq!(
+            from_bytes::<PlayerAdvancementProgressEvent>(&invalid_boolean)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidBoolean
+        );
+
+        let mut invalid_utf8 = to_bytes(&PlayerAdvancementProgressEvent {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            advancement_id: "minecraft:story/root".into(),
+            criterion_id: "criterion".into(),
+            operation: AdvancementProgressOperation::Grant,
+            is_done: false,
+        })
+        .unwrap();
+        let criterion_offset = 4 + 4 + 36 + 4 + "minecraft:story/root".len() + 4;
+        invalid_utf8[criterion_offset] = 0xff;
+        assert_eq!(
+            from_bytes::<PlayerAdvancementProgressEvent>(&invalid_utf8)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidUtf8
         );
     }
 

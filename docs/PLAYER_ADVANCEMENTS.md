@@ -30,3 +30,9 @@ one criterion changed; `false` means the requested progress was already in that 
 
 Client modules do not receive these imports. Static content registration also has no live player
 authority, so calls during registration fail with `PermissionDenied`.
+
+To observe each individual criterion grant or revoke, subscribe to
+`player.advancement_progress` with `events.subscribe` and the separate
+`player.advancement.observe` permission. The callback reports operation and
+whether the advancement remains complete after the criterion change. See
+[advancement criterion progress events](PLAYER_ADVANCEMENT_PROGRESS_EVENT.md).

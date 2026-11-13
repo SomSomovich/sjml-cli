@@ -1,19 +1,24 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use sjml::{
     command, event,
-    events::{self, EventPriority, ExplosionAttempt, PlayerAdvancementEarned, PlayerSleepAttempt},
+    events::{
+        self, AdvancementProgressOperation, EventPriority, ExplosionAttempt,
+        PlayerAdvancementEarned, PlayerAdvancementProgressEvent, PlayerSleepAttempt,
+    },
     ErrorCode, SjmlError, SjmlResult, StableDecode,
 };
 
 const STORY_ROOT_ADVANCEMENT: &str = "minecraft:story/root";
 static SAW_STORY_ROOT_EARNED: AtomicBool = AtomicBool::new(false);
+static ADVANCEMENT_PROGRESS_STATES: AtomicU32 = AtomicU32::new(0);
 static SAW_EXPLOSION_VETO: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_SLEEP_VETO: AtomicBool = AtomicBool::new(false);
 
 /// Called by the GameTest guest's main module init export.
 pub(super) fn initialize() -> SjmlResult<()> {
     events::subscribe("player.advancement_earned", EventPriority::Normal)?;
+    events::subscribe("player.advancement_progress", EventPriority::Normal)?;
     events::subscribe("world.explosion_attempt", EventPriority::Normal)?;
     events::subscribe("player.sleep_attempt", EventPriority::Normal)?;
     Ok(())
@@ -23,6 +28,22 @@ pub(super) fn initialize() -> SjmlResult<()> {
 fn observe_story_root(event: PlayerAdvancementEarned) -> SjmlResult<()> {
     if event.advancement_id == STORY_ROOT_ADVANCEMENT {
         SAW_STORY_ROOT_EARNED.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[event(name = "player.advancement_progress")]
+fn observe_advancement_progress(event: PlayerAdvancementProgressEvent) -> SjmlResult<()> {
+    if event.advancement_id == STORY_ROOT_ADVANCEMENT && event.criterion_id == "crafting_table" {
+        match (event.operation, event.is_done) {
+            (AdvancementProgressOperation::Grant, true) => {
+                ADVANCEMENT_PROGRESS_STATES.fetch_or(1, Ordering::Relaxed);
+            }
+            (AdvancementProgressOperation::Revoke, false) => {
+                ADVANCEMENT_PROGRESS_STATES.fetch_or(2, Ordering::Relaxed);
+            }
+            _ => {}
+        }
     }
     Ok(())
 }
@@ -59,6 +80,21 @@ fn check_gameplay_event(_: NoArguments) -> SjmlResult<String> {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "no expected player advancement or sleep-attempt event was observed",
+        ))
+    }
+}
+
+#[command(name = "gameplay.advancement_progress.check")]
+fn check_advancement_progress(_: NoArguments) -> SjmlResult<String> {
+    if ADVANCEMENT_PROGRESS_STATES.swap(0, Ordering::Relaxed) == 3 {
+        Ok(
+            "guest observed criterion grant and revoke with post-change completion state"
+                .to_owned(),
+        )
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "guest did not observe both criterion transitions with their post-change completion states",
         ))
     }
 }

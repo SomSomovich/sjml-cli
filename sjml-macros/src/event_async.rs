@@ -270,6 +270,22 @@ mod tests {
     }
 
     #[test]
+    fn accepts_non_cancellable_advancement_progress_notifications() {
+        let generated = expand_event_async(
+            quote!(name = "player.advancement_progress"),
+            quote! {
+                async fn on_advancement_progress(event: PlayerAdvancementProgressEvent) -> SjmlResult<()> {
+                    let _operation = event.operation;
+                    Ok(())
+                }
+            },
+        ).to_string();
+
+        assert!(generated.contains("sjml_v1_event_player.advancement_progress"));
+        assert!(generated.contains("task :: spawn"));
+    }
+
+    #[test]
     fn requires_async_unit_result_and_one_typed_argument() {
         diagnostic(
             expand_event_async(
