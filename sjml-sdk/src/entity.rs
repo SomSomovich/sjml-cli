@@ -209,8 +209,8 @@ fn validate_riding_relationship(relationship: &EntityRidingRelationship) -> Sjml
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, StableEncode)]
 #[sjml(version = 1)]
-struct ActiveEffectsResponse {
-    effects: Vec<ActiveEffect>,
+pub(crate) struct ActiveEffectsResponse {
+    pub(crate) effects: Vec<ActiveEffect>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]

@@ -1,4 +1,4 @@
-//! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, and game-mode reads require
+//! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, active-effect, and game-mode reads require
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
@@ -11,6 +11,9 @@
 use crate::abi::{allocate_host_input, deallocate_host_input};
 #[cfg(target_arch = "wasm32")]
 use crate::entity::status_result;
+pub use crate::entity::ActiveEffect;
+#[cfg(target_arch = "wasm32")]
+use crate::entity::ActiveEffectsResponse;
 use crate::entity::{validate_effect_id, MAX_EFFECT_DURATION_TICKS};
 #[cfg(target_arch = "wasm32")]
 use crate::MAX_STRING_BYTES;
@@ -19,6 +22,12 @@ use crate::{to_bytes, Decoder};
 use crate::{
     ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
 };
+
+/// Maximum number of detached status effects returned for one live player session.
+pub const MAX_PLAYER_ACTIVE_EFFECTS: usize = crate::entity::MAX_ACTIVE_ENTITY_EFFECTS;
+/// Maximum response bytes reserved for one player's detached active-effect snapshot.
+pub const MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES: usize =
+    crate::entity::MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES;
 
 /// Current identity, dimension, and coordinates of one online player.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -787,6 +796,8 @@ extern "C" {
         duration_ticks: i32,
         amplifier: i32,
     ) -> i32;
+    #[link_name = "active_effects"]
+    fn imported_active_effects(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "teleport"]
     fn imported_teleport(
         handle: i32,
@@ -1738,6 +1749,41 @@ pub fn apply_effect(
     }
 }
 
+/// Reads at most 64 active status effects from the current live server-player session.
+///
+/// Requires the declared and granted `entity.read` capability and a logical-server context.
+/// Every call resolves the player handle against the active login session, so logout and runtime
+/// shutdown invalidate access while respawn and dimension changes keep the session handle valid.
+/// The detached effects are sorted by canonical registry ID and include the current remaining
+/// duration (`-1` for a vanilla infinite-duration effect). Client modules and static registration
+/// cannot read live player effects; no player or Minecraft objects cross the ABI.
+pub fn active_effects(handle: PlayerHandle) -> SjmlResult<Vec<ActiveEffect>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let response: ActiveEffectsResponse = read_output(
+            MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the handle and bounded response allocation remain live for the synchronous host read.
+                unsafe {
+                    imported_active_effects(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as u32 as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        Ok(response.effects)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 /// Teleports an online player to an absolute position in their current dimension.
 ///
 /// The module must request and receive both `entity.read` and `player.teleport`.
@@ -1995,11 +2041,47 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_effect, teleport, teleport_to_world, validate_player_title_text, vitals,
-        PlayerMotion, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
+        active_effects, apply_effect, teleport, teleport_to_world, validate_player_title_text,
+        vitals, PlayerMotion, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
+        MAX_PLAYER_ACTIVE_EFFECTS, MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES,
         MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
     };
-    use crate::{ErrorCode, PlayerHandle, WorldHandle};
+    use crate::{ActiveEffect, ErrorCode, PlayerHandle, WorldHandle};
+
+    #[test]
+    fn player_active_effects_reuse_the_bounded_entity_effect_schema() {
+        assert_eq!(MAX_PLAYER_ACTIVE_EFFECTS, 64);
+        assert_eq!(MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, 17_416);
+        let effects = vec![
+            ActiveEffect {
+                effect_id: "minecraft:speed".to_owned(),
+                amplifier: 2,
+                remaining_duration_ticks: 1_234,
+            },
+            ActiveEffect {
+                effect_id: "minecraft:strength".to_owned(),
+                amplifier: 0,
+                remaining_duration_ticks: -1,
+            },
+        ];
+        let response = crate::entity::ActiveEffectsResponse {
+            effects: effects.clone(),
+        };
+        let encoded = crate::to_bytes(&response).unwrap();
+        assert_eq!(
+            crate::from_bytes::<crate::entity::ActiveEffectsResponse>(&encoded)
+                .unwrap()
+                .effects,
+            effects,
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            active_effects(PlayerHandle::new(1, 2, 3, 4).unwrap())
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
 
     fn motion_with_rotation(yaw: f32, pitch: f32) -> PlayerMotion {
         PlayerMotion {

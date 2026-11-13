@@ -1979,6 +1979,7 @@ signatures but calls return `PERMISSION_DENIED`.
 | `online` | `out_ptr, out_capacity` | Stable `Vec<PlayerHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `PlayerSnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `profile_name`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
 | `vitals` | `handle_ptr, handle_len, out_ptr, out_capacity` | 28-byte `PlayerVitals`: u32 schema `1`, `f32 health`, `f32 max_health`, `u32 food_level`, `f32 saturation`, `u32 experience_level`, `f32 experience_progress` |
+| `active_effects` | `handle_ptr, handle_len, out_ptr, out_capacity` | Bounded schema-v1 snapshot of at most 64 sorted active effects; requires `entity.read` |
 | `equipment` | `handle_ptr, handle_len, out_ptr, out_capacity` | Stable `PlayerEquipment`: six optional slot records in main-hand, offhand, feet, legs, chest, head order |
 | `game_mode` | `handle_ptr, handle_len, out_ptr, out_capacity` | Eight bytes: u32 schema `1`, u32 mode (`0=Survival`, `1=Creative`, `2=Adventure`, `3=Spectator`) |
 | `set_game_mode` | `handle_ptr, handle_len, mode_u32` | Set the current login session's game mode; status only |

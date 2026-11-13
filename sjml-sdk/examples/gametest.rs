@@ -1516,6 +1516,34 @@ struct PlayerArguments {
     player_id: String,
 }
 
+#[command(name = "player.effects.inspect")]
+fn inspect_player_active_effects(arguments: PlayerArguments) -> SjmlResult<String> {
+    let handle = player::online()?
+        .into_iter()
+        .find(|handle| {
+            player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.player_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "requested effect-test player is not online",
+            )
+        })?;
+    let effects = player::active_effects(handle)?;
+    if effects.iter().any(|effect| {
+        effect.effect_id == "minecraft:speed"
+            && effect.amplifier == 2
+            && effect.remaining_duration_ticks > 0
+    }) {
+        Ok("player active effects returned the live speed effect".to_owned())
+    } else {
+        Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player active-effect snapshot omitted the expected live speed effect",
+        ))
+    }
+}
+
 #[derive(StableDecode)]
 #[sjml(version = 1)]
 struct MenuActionOpenArguments {
