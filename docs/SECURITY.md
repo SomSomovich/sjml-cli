@@ -42,6 +42,12 @@ synchronously veto a key press delivered to an active screen. The older
 a mouse-button press can be consumed only through its documented hook. Input
 subscriptions are module-owned and removed when their runtime closes.
 
+The physical-client `client.action_attempt` callback runs before vanilla attack,
+use-item, or pick-block keymapping handling. It requires
+`events.subscribe`, `events.cancel`, and `client.input.action_cancel`. Callbacks
+receive only the action and hand, run synchronously on the client main thread,
+and are capped at 64 per input event. An existing cancellation is preserved.
+
 The `client.item.tooltip` event passes only a registry ID, stack count, and
 durability values to a synchronous client callback. Appended output is bounded
 literal text and requires the separate `client.item.tooltip.modify` grant.
@@ -247,6 +253,22 @@ requires the requested registered block to match the current state. The host
 queues a normal Minecraft scheduled tick and limits each module to 16 requests
 per server tick; it never forces chunk loading.
 
+`world::spawn_projectile` requires `world.read` and `projectile.spawn`, a live
+module-owned world handle, and the server thread. It accepts only vanilla eggs
+and snowballs, finite positions inside the build height and world border, and
+velocity between 0.1 and 4 blocks per tick. Every intersected chunk must already
+be loaded. A module may launch at most four projectiles per server tick across
+all dimensions. Vanilla egg hatching and snowball Blaze damage remain enabled.
+
+
+Typed block-entity persistence is restricted to a module's own registered block
+entities and requires `block_entity.data.read`; writes/removals also require
+`block_entity.data.write` and `world.write`. It stores only Boolean, i32, and
+bounded printable string values, with 64 keys and 16 KiB per block entity and 64
+write/removal attempts per module/server tick. Generic NBT snapshots redact the
+private SJML data compound, so `block_entity.nbt.read` cannot bypass these
+permissions. The API never loads chunks or writes another module's entity.
+
 `player.interaction` is synchronous and may veto the current right-click
 action. It requires both `events.subscribe` and `events.cancel`. Callbacks run
 on the owning server thread and receive only detached identifiers/coordinates;
@@ -364,6 +386,12 @@ requires `entity.read` plus `entity.navigation.write`, validates a short target
 in the current loaded dimension, and invokes the vanilla Mob path navigator
 only after checking that the target corridor is loaded. It does not expose
 path nodes or allow a guest callback from inside pathfinding.
+
+`entity::target` reads the current target of a loaded Mob under `entity.read`.
+Setting or clearing a target also requires `entity.target.write`; both Mob and
+target handles must be live in the same loaded server dimension, and the target
+must be a non-player living entity. The API does not load chunks or expose the
+Mob's goal selector.
 
 `entity.projectile_impact_attempt` runs synchronously on the logical server before a projectile applies its hit. It requires `events.subscribe` and `events.cancel`; callbacks receive detached projectile and hit data, and only a successful guest veto cancels the impact. Block hit details are read only from an already-loaded chunk.
 
