@@ -1,8 +1,13 @@
-//! Read-only block-entity snapshots. NBT requires the separate `block_entity.nbt.read` grant.
+//! Block-entity snapshots and bounded persistent typed data.
+//! Raw NBT snapshots require `block_entity.nbt.read`; persistent data reads require
+//! `block_entity.data.read`. Persistent writes require `block_entity.data.write`
+//! and `world.write` and are available only for the calling module's own SJML blocks.
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::to_bytes;
 #[cfg(target_arch = "wasm32")]
 use crate::{
     abi::{allocate_host_input, deallocate_host_input},
-    to_bytes, Decoder,
+    Decoder,
 };
 use crate::{
     BlockEntityHandle, BlockPos, Direction, ErrorCode, InventorySnapshot, SjmlError, SjmlResult,
@@ -18,6 +23,19 @@ pub struct BlockEntitySnapshot {
     pub position: BlockPos,
     pub block_state: String,
 }
+
+/// A bounded persistent value stored on a block entity registered by this module.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum PersistentDataValue {
+    Boolean(bool),
+    Integer(i32),
+    String(String),
+}
+
+/// Maximum UTF-8 bytes in one persistent-data key.
+pub const MAX_PERSISTENT_DATA_KEY_BYTES: usize = 64;
+/// Maximum UTF-8 bytes in one persistent-data string value.
+pub const MAX_PERSISTENT_DATA_STRING_BYTES: usize = 2_048;
 
 /// One immutable NBT value. The encoding uses standard NBT tag numbers and a versioned root.
 #[derive(Debug, Clone, PartialEq)]
@@ -239,6 +257,18 @@ impl BlockEntity {
     pub fn nbt(self) -> SjmlResult<NbtValue> {
         nbt(self.handle)
     }
+    /// Reads this module's typed value from a live block entity that this module registered.
+    pub fn get_data(self, key: &str) -> SjmlResult<Option<PersistentDataValue>> {
+        get_data(self.handle, key)
+    }
+    /// Sets a persistent string, signed integer, or Boolean on this module's registered block entity.
+    pub fn set_data(self, key: &str, value: PersistentDataValue) -> SjmlResult<()> {
+        set_data(self.handle, key, value)
+    }
+    /// Removes one persistent value from this module's registered block entity.
+    pub fn remove_data(self, key: &str) -> SjmlResult<()> {
+        remove_data(self.handle, key)
+    }
 }
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_block_entity_v1")]
@@ -251,6 +281,12 @@ extern "C" {
     fn imported_inventory(h: i32, hl: i32, s: i32, sl: i32, o: i32, c: i32) -> i32;
     #[link_name = "nbt"]
     fn imported_nbt(h: i32, hl: i32, o: i32, c: i32) -> i32;
+    #[link_name = "get_data"]
+    fn imported_get_data(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_data"]
+    fn imported_set_data(request: i32, request_length: i32) -> i32;
+    #[link_name = "remove_data"]
+    fn imported_remove_data(request: i32, request_length: i32) -> i32;
 }
 pub fn get(world: WorldHandle, pos: BlockPos) -> SjmlResult<Option<BlockEntity>> {
     #[cfg(target_arch = "wasm32")]
@@ -336,12 +372,346 @@ fn nbt(handle: BlockEntityHandle) -> SjmlResult<NbtValue> {
         Err(unsupported())
     }
 }
+
+#[cfg(any(target_arch = "wasm32", test))]
+const DATA_SCHEMA: u32 = 1;
+#[cfg(any(target_arch = "wasm32", test))]
+const DATA_GET: u8 = 0;
+#[cfg(any(target_arch = "wasm32", test))]
+const DATA_SET: u8 = 1;
+#[cfg(any(target_arch = "wasm32", test))]
+const DATA_REMOVE: u8 = 2;
+#[cfg(any(target_arch = "wasm32", test))]
+const DATA_RESPONSE_CAPACITY: u32 = 4 + 1 + 1 + 4 + MAX_PERSISTENT_DATA_STRING_BYTES as u32;
+
+fn get_data(handle: BlockEntityHandle, key: &str) -> SjmlResult<Option<PersistentDataValue>> {
+    validate_data_key(key)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let request = encode_data_request(handle, DATA_GET, key, None)?;
+        let bytes = read_raw_data_output(DATA_RESPONSE_CAPACITY, |output, capacity| unsafe {
+            imported_get_data(
+                request.as_ptr() as i32,
+                request.len() as i32,
+                output,
+                capacity,
+            )
+        })?;
+        decode_data_response(&bytes)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported())
+    }
+}
+
+fn set_data(handle: BlockEntityHandle, key: &str, value: PersistentDataValue) -> SjmlResult<()> {
+    validate_data_key(key)?;
+    validate_data_value(&value)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let request = encode_data_request(handle, DATA_SET, key, Some(value))?;
+        let status = unsafe { imported_set_data(request.as_ptr() as i32, request.len() as i32) };
+        status_data(status, "host rejected block-entity data write")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, value);
+        Err(unsupported())
+    }
+}
+
+fn remove_data(handle: BlockEntityHandle, key: &str) -> SjmlResult<()> {
+    validate_data_key(key)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let request = encode_data_request(handle, DATA_REMOVE, key, None)?;
+        let status = unsafe { imported_remove_data(request.as_ptr() as i32, request.len() as i32) };
+        status_data(status, "host rejected block-entity data removal")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported())
+    }
+}
+
+fn validate_data_key(key: &str) -> SjmlResult<()> {
+    if key.is_empty()
+        || key.len() > MAX_PERSISTENT_DATA_KEY_BYTES
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    {
+        return Err(data_invalid("persistent data keys must contain 1..=64 lowercase ASCII letters, digits or underscores"));
+    }
+    Ok(())
+}
+
+fn validate_data_value(value: &PersistentDataValue) -> SjmlResult<()> {
+    if let PersistentDataValue::String(text) = value {
+        if text.len() > MAX_PERSISTENT_DATA_STRING_BYTES || text.chars().any(char::is_control) {
+            return Err(data_invalid(
+                "persistent data strings must be printable and at most 2048 UTF-8 bytes",
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn encode_data_request(
+    handle: BlockEntityHandle,
+    operation: u8,
+    key: &str,
+    value: Option<PersistentDataValue>,
+) -> SjmlResult<Vec<u8>> {
+    let mut output = Vec::new();
+    output.extend_from_slice(&DATA_SCHEMA.to_le_bytes());
+    output.push(operation);
+    output.extend_from_slice(&to_bytes(&handle)?);
+    put_data_string(&mut output, key.as_bytes())?;
+    match value {
+        None => output.push(0),
+        Some(PersistentDataValue::Boolean(value)) => {
+            output.push(1);
+            output.push(u8::from(value));
+        }
+        Some(PersistentDataValue::Integer(value)) => {
+            output.push(2);
+            output.extend_from_slice(&value.to_le_bytes());
+        }
+        Some(PersistentDataValue::String(value)) => {
+            validate_data_value(&PersistentDataValue::String(value.clone()))?;
+            output.push(3);
+            put_data_string(&mut output, value.as_bytes())?;
+        }
+    }
+    if output.len() > crate::MAX_PAYLOAD_BYTES {
+        return Err(data_limit());
+    }
+    Ok(output)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn put_data_string(output: &mut Vec<u8>, value: &[u8]) -> SjmlResult<()> {
+    let length = u32::try_from(value.len()).map_err(|_| data_limit())?;
+    output.extend_from_slice(&length.to_le_bytes());
+    output.extend_from_slice(value);
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn decode_data_response(bytes: &[u8]) -> SjmlResult<Option<PersistentDataValue>> {
+    let mut input = bytes;
+    let schema = take_data_u32(&mut input)?;
+    if schema != DATA_SCHEMA {
+        return Err(SjmlError::new(
+            ErrorCode::IncompatibleAbiVersion,
+            "unsupported block-entity data response",
+        ));
+    }
+    let present = take_data_byte(&mut input)?;
+    if present == 0 {
+        ensure_data_padding(input)?;
+        return Ok(None);
+    }
+    if present != 1 {
+        return Err(data_invalid("invalid block-entity data presence marker"));
+    }
+    let value = match take_data_byte(&mut input)? {
+        1 => {
+            let value = take_data_byte(&mut input)?;
+            if value > 1 {
+                return Err(data_invalid(
+                    "block-entity Boolean data must be zero or one",
+                ));
+            }
+            PersistentDataValue::Boolean(value == 1)
+        }
+        2 => PersistentDataValue::Integer(take_data_i32(&mut input)?),
+        3 => {
+            let value = take_data_string(&mut input, MAX_PERSISTENT_DATA_STRING_BYTES)?;
+            PersistentDataValue::String(value)
+        }
+        _ => return Err(data_invalid("unknown block-entity data value kind")),
+    };
+    validate_data_value(&value)?;
+    ensure_data_padding(input)?;
+    Ok(Some(value))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn take_data_u32(input: &mut &[u8]) -> SjmlResult<u32> {
+    let bytes = take_data(input, 4)?;
+    Ok(u32::from_le_bytes(
+        bytes.try_into().expect("four-byte integer"),
+    ))
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn take_data_i32(input: &mut &[u8]) -> SjmlResult<i32> {
+    let bytes = take_data(input, 4)?;
+    Ok(i32::from_le_bytes(
+        bytes.try_into().expect("four-byte integer"),
+    ))
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn take_data_byte(input: &mut &[u8]) -> SjmlResult<u8> {
+    Ok(take_data(input, 1)?[0])
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn take_data_string(input: &mut &[u8], maximum: usize) -> SjmlResult<String> {
+    let length = usize::try_from(take_data_u32(input)?).map_err(|_| data_limit())?;
+    if length > maximum {
+        return Err(data_limit());
+    }
+    String::from_utf8(take_data(input, length)?.to_vec())
+        .map_err(|_| data_invalid("block-entity data is not valid UTF-8"))
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn take_data<'a>(input: &mut &'a [u8], length: usize) -> SjmlResult<&'a [u8]> {
+    if input.len() < length {
+        return Err(data_invalid("block-entity data response is truncated"));
+    }
+    let (value, remaining) = input.split_at(length);
+    *input = remaining;
+    Ok(value)
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn ensure_data_padding(input: &[u8]) -> SjmlResult<()> {
+    if input.iter().any(|byte| *byte != 0) {
+        return Err(data_invalid(
+            "block-entity data response contains trailing bytes",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_raw_data_output(
+    capacity: u32,
+    invoke: impl FnOnce(i32, i32) -> i32,
+) -> SjmlResult<Vec<u8>> {
+    let pointer = allocate_host_input(capacity);
+    if pointer == 0 {
+        return Err(data_limit());
+    }
+    unsafe { core::ptr::write_bytes(pointer as *mut u8, 0, capacity as usize) };
+    let status = invoke(pointer as i32, capacity as i32);
+    let result = if status == 0 {
+        Ok(
+            unsafe { core::slice::from_raw_parts(pointer as *const u8, capacity as usize) }
+                .to_vec(),
+        )
+    } else {
+        Err(SjmlError::from_abi_code(
+            status as u32,
+            "host rejected block-entity data read",
+        ))
+    };
+    unsafe { deallocate_host_input(pointer, capacity) };
+    result
+}
+
+#[cfg(target_arch = "wasm32")]
+fn status_data(status: i32, message: &str) -> SjmlResult<()> {
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(SjmlError::from_abi_code(status as u32, message))
+    }
+}
+
+fn data_invalid(message: &'static str) -> SjmlError {
+    SjmlError::new(ErrorCode::InvalidArgument, message)
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn data_limit() -> SjmlError {
+    SjmlError::new(
+        ErrorCode::PayloadTooLarge,
+        "block-entity data exceeds its bounded ABI limits",
+    )
+}
 #[cfg(not(target_arch = "wasm32"))]
 fn unsupported() -> SjmlError {
     SjmlError::new(
         ErrorCode::UnknownErrorCode,
-        "block entity reads require wasm32-unknown-unknown",
+        "block entity access requires wasm32-unknown-unknown",
     )
+}
+
+#[cfg(test)]
+mod persistent_data_tests {
+    use super::*;
+
+    #[test]
+    fn request_encoder_uses_bounded_versioned_little_endian_values() {
+        let handle = BlockEntityHandle::new(1, 2, 3, 4).unwrap();
+        let get = encode_data_request(handle, DATA_GET, "active", None).unwrap();
+        let remove = encode_data_request(handle, DATA_REMOVE, "active", None).unwrap();
+        assert_eq!(get[4], DATA_GET);
+        assert_eq!(remove[4], DATA_REMOVE);
+        let bytes = encode_data_request(
+            handle,
+            DATA_SET,
+            "active",
+            Some(PersistentDataValue::Integer(-17)),
+        )
+        .unwrap();
+        assert_eq!(
+            u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
+            DATA_SCHEMA
+        );
+        assert_eq!(bytes[4], DATA_SET);
+        assert_eq!(&bytes[5..29], &to_bytes(&handle).unwrap());
+        assert_eq!(u32::from_le_bytes(bytes[29..33].try_into().unwrap()), 6);
+        assert_eq!(&bytes[33..39], b"active");
+        assert_eq!(bytes[39], 2);
+        assert_eq!(i32::from_le_bytes(bytes[40..44].try_into().unwrap()), -17);
+    }
+
+    #[test]
+    fn response_decoder_accepts_optional_boolean_integer_and_string() {
+        assert_eq!(
+            decode_data_response(&padded(&[1, 0, 0, 0, 0])).unwrap(),
+            None
+        );
+        assert_eq!(
+            decode_data_response(&padded(&[1, 0, 0, 0, 1, 1, 1])).unwrap(),
+            Some(PersistentDataValue::Boolean(true))
+        );
+        let mut integer = vec![1, 0, 0, 0, 1, 2];
+        integer.extend_from_slice(&i32::MIN.to_le_bytes());
+        assert_eq!(
+            decode_data_response(&padded(&integer)).unwrap(),
+            Some(PersistentDataValue::Integer(i32::MIN))
+        );
+        let mut string = vec![1, 0, 0, 0, 1, 3, 5, 0, 0, 0];
+        string.extend_from_slice(b"hello");
+        assert_eq!(
+            decode_data_response(&padded(&string)).unwrap(),
+            Some(PersistentDataValue::String("hello".into()))
+        );
+    }
+
+    #[test]
+    fn data_validation_rejects_noncanonical_keys_and_nonprintable_or_oversized_values() {
+        assert!(validate_data_key("valid_2").is_ok());
+        assert!(validate_data_key("Upper").is_err());
+        assert!(validate_data_key("a/b").is_err());
+        assert!(validate_data_value(&PersistentDataValue::String("line\nfeed".into())).is_err());
+        assert!(validate_data_value(&PersistentDataValue::String(
+            "x".repeat(MAX_PERSISTENT_DATA_STRING_BYTES + 1)
+        ))
+        .is_err());
+    }
+
+    fn padded(bytes: &[u8]) -> Vec<u8> {
+        let mut result = vec![0; DATA_RESPONSE_CAPACITY as usize];
+        result[..bytes.len()].copy_from_slice(bytes);
+        result
+    }
 }
 #[cfg(target_arch = "wasm32")]
 fn read_output<T: StableDecode>(

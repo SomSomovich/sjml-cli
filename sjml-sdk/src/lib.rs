@@ -138,7 +138,10 @@ pub use abi::{
     StorageScopeTag, TaskHandle, TaskTag, WorldHandle, WorldTag,
 };
 pub use batch::{Batch, BatchValue, CallResult};
-pub use block_entity::{BlockEntity, BlockEntitySnapshot, NbtValue};
+pub use block_entity::{
+    BlockEntity, BlockEntitySnapshot, NbtValue, PersistentDataValue, MAX_PERSISTENT_DATA_KEY_BYTES,
+    MAX_PERSISTENT_DATA_STRING_BYTES,
+};
 pub use chat_messages::{
     ChatClickAction, ChatMessage, ChatMessageAction, ChatMessageSource,
     ChatMessageSubscriptionHandle, ChatSpan, ChatText, MAX_CHAT_INTERACTION_BYTES,
@@ -312,7 +315,10 @@ pub mod prelude {
         StorageScopeHandle, TaskHandle, WorldHandle,
     };
     pub use crate::batch::{self, Batch, BatchValue, CallResult};
-    pub use crate::block_entity::{self, BlockEntity, BlockEntitySnapshot, NbtValue};
+    pub use crate::block_entity::{
+        self, BlockEntity, BlockEntitySnapshot, NbtValue, PersistentDataValue,
+        MAX_PERSISTENT_DATA_KEY_BYTES, MAX_PERSISTENT_DATA_STRING_BYTES,
+    };
     pub use crate::chat_messages;
     pub use crate::chat_messages::{
         ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,

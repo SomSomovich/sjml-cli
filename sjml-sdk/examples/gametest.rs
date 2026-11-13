@@ -2590,7 +2590,64 @@ fn inspect_block_entity(arguments: BlockEntityArguments) -> SjmlResult<String> {
             "block entity snapshot, inventory, NBT or absent-block contract failed",
         ));
     }
-    Ok("block entity snapshot, inventory and typed NBT are correct".to_owned())
+    Ok("block entity snapshot, inventory, and NBT are correct".to_owned())
+}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct BlockEntityDataArguments {
+    machine_x: i32,
+    machine_y: i32,
+    machine_z: i32,
+}
+
+#[command(name = "block_entity.data.inspect")]
+fn inspect_block_entity_data(arguments: BlockEntityDataArguments) -> SjmlResult<String> {
+    let world = world::get("minecraft:overworld")?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the real overworld must already be loaded",
+        )
+    })?;
+    let machine = world
+        .block_entity(BlockPos {
+            x: arguments.machine_x,
+            y: arguments.machine_y,
+            z: arguments.machine_z,
+        })?
+        .ok_or_else(|| {
+            SjmlError::new(ErrorCode::InvalidArgument, "SJML block entity is missing")
+        })?;
+    machine.set_data("active", PersistentDataValue::Boolean(true))?;
+    machine.set_data("charge", PersistentDataValue::Integer(-17))?;
+    machine.set_data(
+        "label",
+        PersistentDataValue::String("persisted label".into()),
+    )?;
+    machine.set_data("temporary", PersistentDataValue::Boolean(false))?;
+    if machine.get_data("active")? != Some(PersistentDataValue::Boolean(true))
+        || machine.get_data("charge")? != Some(PersistentDataValue::Integer(-17))
+        || machine.get_data("label")? != Some(PersistentDataValue::String("persisted label".into()))
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "typed block-entity data did not round trip through the guest API",
+        ));
+    }
+    if nbt_contains_key(&machine.nbt()?, "SjmlPersistentData") {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "generic NBT snapshots must not reveal the owner-private persistent data tag",
+        ));
+    }
+    machine.remove_data("temporary")?;
+    if machine.get_data("temporary")?.is_some() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block-entity persistent data removal did not take effect",
+        ));
+    }
+    Ok("module-owned persistent block-entity data round trips across all types".to_owned())
 }
 
 fn nbt_contains_string(value: &NbtValue, expected: &str) -> bool {
@@ -2602,6 +2659,16 @@ fn nbt_contains_string(value: &NbtValue, expected: &str) -> bool {
         NbtValue::Compound(values) => values
             .iter()
             .any(|(_, value)| nbt_contains_string(value, expected)),
+        _ => false,
+    }
+}
+
+fn nbt_contains_key(value: &NbtValue, expected: &str) -> bool {
+    match value {
+        NbtValue::Compound(values) => values
+            .iter()
+            .any(|(key, value)| key == expected || nbt_contains_key(value, expected)),
+        NbtValue::List(values) => values.iter().any(|value| nbt_contains_key(value, expected)),
         _ => false,
     }
 }
