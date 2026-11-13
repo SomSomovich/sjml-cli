@@ -22,6 +22,10 @@ pub const MAX_CRAFTED_ITEM_COUNT: i32 = 1_000_000;
 pub const MAX_FISHED_DROPS: usize = 16;
 /// Maximum count represented by one detached `player.fished_attempt` drop.
 pub const MAX_FISHED_ITEM_COUNT: u32 = 1_000_000;
+/// Separate grant required to veto `client.action_attempt` actions.
+pub const CLIENT_ACTION_CANCEL_CAPABILITY: &str = "client.input.action_cancel";
+/// Maximum callbacks invoked for one physical-client action attempt.
+pub const MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS: usize = 64;
 
 /// Synchronous, non-cancellable snapshot emitted after meaningful logical-server player movement.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -109,6 +113,87 @@ pub struct PlayerInteracted {
 pub struct ClientChatSendAttempt {
     /// Original plain text typed by the local user, before other mods change the outgoing value.
     pub message: String,
+}
+
+/// One of the supported physical-client vanilla interaction keymappings.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ClientAction {
+    /// The vanilla attack mapping (the default left-mouse action).
+    Attack,
+    /// The vanilla use-item mapping, delivered for the hand reported by NeoForge.
+    UseItem,
+    /// The vanilla pick-block mapping (the default middle-mouse action).
+    PickBlock,
+}
+
+impl StableEncode for ClientAction {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_u32(match self {
+            Self::Attack => 0,
+            Self::UseItem => 1,
+            Self::PickBlock => 2,
+        })
+    }
+}
+
+impl StableDecode for ClientAction {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u32()? {
+            0 => Ok(Self::Attack),
+            1 => Ok(Self::UseItem),
+            2 => Ok(Self::PickBlock),
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("client action code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+/// Hand reported for the action mapping; attack and pick-block normally use `Main`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ClientActionHand {
+    /// Main hand.
+    Main,
+    /// Offhand.
+    Off,
+}
+
+impl StableEncode for ClientActionHand {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_u32(match self {
+            Self::Main => 0,
+            Self::Off => 1,
+        })
+    }
+}
+
+impl StableDecode for ClientActionHand {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u32()? {
+            0 => Ok(Self::Main),
+            1 => Ok(Self::Off),
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("client action hand code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+/// Synchronous cancellable attempt to run a supported vanilla interaction action on the client.
+///
+/// This detached value contains only the action and hand, never a Minecraft key, player, world,
+/// or item. Return `Ok(true)` from a `client.action_attempt` event callback to cancel the mapping.
+/// It requires a client-side module with `events.subscribe`, `events.cancel`, and the separate
+/// `client.input.action_cancel` grant; at most 64 callbacks run for one input action.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ClientActionAttempt {
+    /// Supported vanilla action mapping that was triggered.
+    pub action: ClientAction,
+    /// Hand reported by NeoForge for this action mapping.
+    pub hand: ClientActionHand,
 }
 
 /// Synchronous, non-cancellable notification for a button click on a module-owned client screen.
@@ -1348,15 +1433,16 @@ mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
         BlockFertilizeAttempt, BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockTick,
-        BlockTickProperty, BlockUseAction, ClientChatSendAttempt, ClientItemTooltip, ClientTick,
-        EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt, EntityDamaged, EntityDeath,
-        EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt,
-        FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
-        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
-        PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt,
-        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
+        ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
+        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
+        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
+        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerDropAttempt,
+        PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
+        PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
+        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
         MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
@@ -1443,6 +1529,33 @@ mod tests {
         assert_eq!(
             from_bytes::<ClientChatSendAttempt>(&encoded).unwrap(),
             attempt
+        );
+    }
+
+    #[test]
+    fn client_action_attempt_matches_host_wire_codes_and_round_trips() {
+        let attempt = ClientActionAttempt {
+            action: ClientAction::UseItem,
+            hand: ClientActionHand::Off,
+        };
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        let encoded = to_bytes(&attempt).unwrap();
+        assert_eq!(encoded, expected);
+        assert_eq!(
+            from_bytes::<ClientActionAttempt>(&encoded).unwrap(),
+            attempt
+        );
+
+        let mut invalid_action = 1_u32.to_le_bytes().to_vec();
+        invalid_action.extend_from_slice(&9_u32.to_le_bytes());
+        invalid_action.extend_from_slice(&0_u32.to_le_bytes());
+        assert_eq!(
+            from_bytes::<ClientActionAttempt>(&invalid_action)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
         );
     }
 

@@ -657,7 +657,7 @@ the callback cannot alter the completed change.
 Guest commands are described below.
 Server event subscriptions are accepted only in integrated-server and
 dedicated-server execution contexts. `client.item.tooltip`,
-`client.chat.send_attempt`, and `client.tick` are accepted only in the
+`client.chat.send_attempt`, `client.action_attempt`, and `client.tick` are accepted only in the
 physical-client context.
 Non-cancellable notification callbacks may use
 `#[event_async]`; cancellable callbacks and callbacks that return a value to
@@ -704,18 +704,19 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
 `entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`,
-`item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`, `player.fished_attempt`, and
-`client.chat.send_attempt`.
+`item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`, `player.fished_attempt`,
+`client.chat.send_attempt`, and `client.action_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.interaction`, `player.drop_attempt`, `player.sleep_attempt`,
 `player.item_use_attempt`, `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`,
-`client.chat.send_attempt`,
+`client.chat.send_attempt`, `client.action_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`,
 `player.fished_attempt`, or `world.explosion_attempt` additionally
 requires the module to request and receive the separate `events.cancel`
-capability. Static registration instances cannot subscribe. Server event
+capability. `client.action_attempt` additionally requires the separate
+`client.input.action_cancel` capability. Static registration instances cannot subscribe. Server event
 callbacks run synchronously on the owning logical-server thread. Non-cancellable
 notifications may use the SDK's `#[event_async(name = "...")]` macro: its
 generated synchronous ABI export admits a guest task and returns without
@@ -767,6 +768,27 @@ signed-chat route when the user sends it. A veto happens before it is sent.
 Callbacks run on the client main thread and are synchronous; at most 64
 callbacks are invoked for one send attempt. A nested chat send from a guest
 callback is vetoed to prevent recursion and a callback bypass.
+
+### Client vanilla action veto
+
+The guest export is `sjml_v1_event_client.action_attempt`. It is available
+only to physical-client modules and receives the fixed schema-v1 record:
+little-endian `u32 schema_version` (`1`), `u32 action`, and `u32 hand`. Action
+codes are `0=attack`, `1=use_item`, and `2=pick_block`; hand codes are
+`0=main` and `1=off`. NeoForge fires use-item for each hand; attack and
+pick-block normally report main hand. No key code, keymapping, device, player,
+world, or item object is included.
+
+The `#[event]` callback returns one stable boolean byte: `1` cancels that
+vanilla action mapping, while `0` leaves it available to vanilla. It runs
+synchronously on the physical-client main thread, before vanilla handles the
+mapping. The host does not invoke callbacks if another mod already cancelled
+the event and does not change NeoForge's hand-swing setting. Subscriptions
+require `events.subscribe`, `events.cancel`, and the separately requested and
+granted `client.input.action_cancel` capability. This event does not require
+`client.input`. At most 64 subscribed handlers run per action attempt; a
+malformed result or guest trap closes that module and does not itself cancel
+the action. It cannot use `#[event_async]`.
 
 ## Async task and service imports
 

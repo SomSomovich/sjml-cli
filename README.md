@@ -58,7 +58,7 @@ the generated project.
 
 ## Documentation
 
-- [Rust SDK guide](docs/SDK_GUIDE.md), [registered block scheduled ticks](docs/BLOCK_TICK.md), [persistent block-entity data](docs/BLOCK_ENTITY_PERSISTENT_DATA.md), [bounded vanilla projectile launches](docs/VANILLA_PROJECTILES.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), [registered block-state properties](docs/BLOCK_STATE_PROPERTIES.md), [block-state shapes](docs/BLOCK_STATE_SHAPES.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.82.0/sjml/)
+- [Rust SDK guide](docs/SDK_GUIDE.md), [registered block scheduled ticks](docs/BLOCK_TICK.md), [persistent block-entity data](docs/BLOCK_ENTITY_PERSISTENT_DATA.md), [bounded vanilla projectile launches](docs/VANILLA_PROJECTILES.md), [client action attempts](docs/CLIENT_ACTION_ATTEMPTS.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), [registered block-state properties](docs/BLOCK_STATE_PROPERTIES.md), [block-state shapes](docs/BLOCK_STATE_SHAPES.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.82.0/sjml/)
 - [Registered block shapes](docs/WORLD_BLOCK_SHAPES.md)
 - [Registered block behavior](docs/WORLD_BLOCK_BEHAVIOR.md)
 - [Registered block use](docs/BLOCK_USE.md)

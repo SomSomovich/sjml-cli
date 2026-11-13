@@ -335,6 +335,13 @@ requires `client.chat.send.observe`; subscribing and vetoing also require
 thread; at most 64 callbacks run per attempt, and a nested send from inside a
 callback is vetoed to prevent recursion. See [outgoing client chat veto](CLIENT_CHAT_SEND.md).
 
+`client.action_attempt` is the separate physical-client callback for vanilla
+attack, use-item, and pick-block mappings. Its detached `ClientActionAttempt`
+exposes a `ClientAction` and hand; returning `Ok(true)` vetoes the action before
+vanilla handles it. It requires `events.subscribe`, `events.cancel`, and the
+separate `client.input.action_cancel` grant, and runs synchronously on the
+client main thread. See [client action attempts](CLIENT_ACTION_ATTEMPTS.md).
+
 `chat_messages::subscribe` receives bounded plain-text snapshots after
 Minecraft's secure-chat checks and before NeoForge inserts the message into
 local chat. Callbacks can return `Show`, locally hide with the separate
