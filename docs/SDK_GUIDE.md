@@ -25,10 +25,16 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.95.0
-and core ABI 1.87.0. Live
+unverified. This guide describes the private SDK workspace target 0.96.0
+and core ABI 1.88.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
+SDK 0.96.0 adds synchronous cancellable `entity.drops_attempt` for
+vetoing bounded item drops caused by a living entity's death. The callback sees
+entity identity, dimension, `recently_hit`, and up to 32 detached item
+snapshots; returning true cancels the item-drop list while the entity still
+dies. Both event capabilities are required and async handlers are rejected.
+See [living-entity drop attempts](ENTITY_DROPS_ATTEMPTS.md).
 SDK 0.95.0 adds synchronous cancellable `entity.mount_attempt` for vetoing a
 mount or dismount before Minecraft changes the riding relation. Its detached
 snapshot includes an optional target identity and action direction. Both
@@ -500,7 +506,7 @@ workspace adds the event types described above.
 | [`entity`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity/) | Loaded non-player entity snapshots and detached Mob target snapshots, same-dimension teleports that stay inside already-loaded chunks, custom names and their vanilla visibility flag, six-slot equipment snapshots, enumeration, spatial queries, bounded raycasts, active effects, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |
 | [`entity_attributes`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity_attributes/) | Bounded reads and base-value writes for 31 built-in vanilla living-entity and server-player attributes, plus module-owned transient modifiers on loaded non-player living entities with automatic owner cleanup. |
 | [`entity_data`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.92.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/respawn/advancement/sleep, registered-block/item callbacks, cancellable `block.drops_attempt`, mutable/cancellable player XP-point and level-change attempts, cancellable potion, totem, shield-block, and entity-teleport attempts, item tooltip and outgoing-chat callbacks, and crafting/inventory/resource events. |
+| [`events`](https://docs.rs/sjml-sdk/0.92.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/respawn/advancement/sleep, registered-block/item callbacks, cancellable `block.drops_attempt` and `entity.drops_attempt`, mutable/cancellable player XP-point and level-change attempts, cancellable potion, totem, shield-block, and entity-teleport attempts, item tooltip and outgoing-chat callbacks, and crafting/inventory/resource events. |
 | [`gl`](https://docs.rs/sjml-sdk/0.92.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
 | [`host`](https://docs.rs/sjml-sdk/0.92.0/sjml/host/) | ABI version query and host logging. |
 | [`inventory`](https://docs.rs/sjml-sdk/0.92.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, integer/boolean component updates, and slot transfers. Block inventories support custom names, bounded count and durability writes, preflighted moves, and enchantment reads/writes/removal on loaded stacks. |

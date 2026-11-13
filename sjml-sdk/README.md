@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.95.0"
+sjml-sdk = "0.96.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so

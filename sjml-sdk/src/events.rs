@@ -34,6 +34,16 @@ pub const MAX_BLOCK_DROPS_ATTEMPT_EXPERIENCE: u32 = 1_000_000;
 pub const MAX_BLOCK_DROPS_ATTEMPT_PAYLOAD_BYTES: usize = 16_384;
 /// Maximum callbacks invoked for one computed block-drop event.
 pub const MAX_BLOCK_DROPS_ATTEMPT_CALLBACKS: usize = 64;
+/// Maximum detached item drops included in one `entity.drops_attempt` callback.
+pub const MAX_ENTITY_DROPS_ATTEMPT_DROPS: usize = 32;
+/// Maximum count represented by one detached `entity.drops_attempt` item snapshot.
+pub const MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT: u32 = 1_000_000;
+/// Maximum durability represented by one detached `entity.drops_attempt` item snapshot.
+pub const MAX_ENTITY_DROPS_ATTEMPT_DURABILITY: u32 = 1_000_000;
+/// Maximum serialized payload size for one `entity.drops_attempt` callback.
+pub const MAX_ENTITY_DROPS_ATTEMPT_PAYLOAD_BYTES: usize = 16_384;
+/// Maximum callbacks invoked for one living-entity drop event.
+pub const MAX_ENTITY_DROPS_ATTEMPT_CALLBACKS: usize = 64;
 /// Separate grant required to veto `client.action_attempt` actions.
 pub const CLIENT_ACTION_CANCEL_CAPABILITY: &str = "client.input.action_cancel";
 /// Separate grant required to observe player advancement criterion progress.
@@ -1439,6 +1449,45 @@ pub struct EntityMountTarget {
     pub entity_type_id: String,
 }
 
+/// Synchronous cancellable snapshot of item drops caused by a living entity's death.
+///
+/// NeoForge fires `entity.drops_attempt` before spawning the bounded item list. Return `Ok(true)`
+/// to cancel those item drops; the entity still dies. The event reports only detached entity IDs,
+/// `recently_hit`, item IDs, counts and optional durability. It omits damage-source details, item
+/// components and NBT, and exposes no live Minecraft objects. At most 32 items and 16 KiB are sent
+/// per callback. Both `events.subscribe` and `events.cancel` are required, and the callback is
+/// synchronous. This event does not control experience orbs.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityDropsAttempt {
+    /// Canonical UUID of the living entity whose death is producing drops.
+    pub entity_id: String,
+    /// Registry ID of the living entity type.
+    pub entity_type_id: String,
+    /// Resource location of the dimension containing the entity.
+    pub dimension_id: String,
+    /// Up to 32 detached item stacks from NeoForge's death-drop collection.
+    pub drops: Vec<EntityDropsItemSnapshot>,
+    /// Whether the entity had recently been damaged, as reported by NeoForge.
+    pub recently_hit: bool,
+    /// Whether the original item list contained more entries than the bounded snapshot.
+    pub drops_truncated: bool,
+}
+
+/// Detached registry item and bounded stack metadata from an entity death.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityDropsItemSnapshot {
+    /// Canonical registry ID of the item, without components or NBT.
+    pub item_id: String,
+    /// Stack count, bounded by the host to `1..=1_000_000`.
+    pub count: u32,
+    /// Current item damage, present only when the item uses durability.
+    pub damage: Option<u32>,
+    /// Maximum durability, present together with `damage` for damageable items.
+    pub max_damage: Option<u32>,
+}
+
 /// Synchronous cancellable knockback attempt for a living entity on the logical server.
 ///
 /// NeoForge 21.1.265 fires this before applying knockback. The event exposes original and current
@@ -2687,25 +2736,27 @@ mod tests {
         BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockRandomTick, BlockTick,
         BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
         ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
-        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntityEffectApplicationAttempt, EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntityKnockbackAttempt, EntityMountAttempt, EntityMountTarget, EntitySpawned,
-        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
-        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
-        PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
-        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
-        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
-        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt,
-        PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction,
-        PlayerRespawned, PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt,
-        PlayerTotemUseAttemptAction, PlayerVillagerTraded, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
-        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
-        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
-        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
-        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt, EntityDropsAttempt,
+        EntityDropsItemSnapshot, EntityEffectApplicationAttempt, EntityFallAttempt,
+        EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntityMountAttempt,
+        EntityMountTarget, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
+        ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
+        ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock,
+        ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAdvancementProgressEvent,
+        PlayerAttackAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
+        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
+        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
+        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt,
+        PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned,
+        PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
+        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        WorldLifecycle, MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
+        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
+        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
+        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -3232,6 +3283,43 @@ mod tests {
             "Rust encoding must match host schema-v1 bytes"
         );
         assert_eq!(from_bytes::<BlockDropsAttempt>(&encoded).unwrap(), attempt);
+    }
+
+    #[test]
+    fn entity_drops_attempt_matches_host_schema_and_round_trips_item_snapshots() {
+        let attempt = EntityDropsAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            drops: vec![EntityDropsItemSnapshot {
+                item_id: "minecraft:porkchop".to_owned(),
+                count: 2,
+                damage: None,
+                max_damage: None,
+            }],
+            recently_hit: false,
+            drops_truncated: false,
+        };
+
+        let encoded = to_bytes(&attempt).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &attempt.entity_id);
+        append_test_string(&mut expected, &attempt.entity_type_id);
+        append_test_string(&mut expected, &attempt.dimension_id);
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_i32.to_le_bytes()); // nested item snapshot schema
+        append_test_string(&mut expected, "minecraft:porkchop");
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        expected.extend_from_slice(&[0, 0]); // optional damage and max damage
+        expected.extend_from_slice(&[0, 0]); // recently_hit and drops_truncated
+
+        assert_eq!(
+            encoded, expected,
+            "Rust bytes must match host schema-v1 layout"
+        );
+        assert_eq!(from_bytes::<EntityDropsAttempt>(&encoded).unwrap(), attempt);
+        assert_eq!(MAX_ENTITY_DROPS_ATTEMPT_DROPS, 32);
+        assert_eq!(MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, 1_000_000);
     }
 
     fn append_test_item_snapshot(output: &mut Vec<u8>, item: &BlockDropsItemSnapshot) {

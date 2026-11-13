@@ -23,6 +23,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
         "block.break"
             | "block.break_attempt"
             | "block.drops_attempt"
+            | "entity.drops_attempt"
             | "block.place_attempt"
             | "player.interaction"
             | "player.drop_attempt"
@@ -360,6 +361,13 @@ mod tests {
                 quote! { async fn drops_attempt(_: BlockDropsAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "block.drops_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.drops_attempt"),
+                quote! { async fn drops_attempt(_: EntityDropsAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.drops_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

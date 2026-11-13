@@ -52,7 +52,7 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.95.0"`; that crate must be available from a configured Cargo registry. This
+"0.96.0"`; that crate must be available from a configured Cargo registry. This
 private target version is not published yet, so use `--sdk-path` to compile the
 generated project until the matching SDK crates are released.
 
@@ -62,6 +62,7 @@ generated project until the matching SDK crates are released.
 - [Registered block shapes](docs/WORLD_BLOCK_SHAPES.md)
 - [Registered block behavior](docs/WORLD_BLOCK_BEHAVIOR.md)
 - [Entity mount and dismount vetoes](docs/ENTITY_MOUNT_ATTEMPTS.md)
+- [Living-entity drop vetoes](docs/ENTITY_DROPS_ATTEMPTS.md)
 - [Registered block use](docs/BLOCK_USE.md)
 - [Registered item use on blocks](docs/ITEM_USE_ON_BLOCK.md)
 - [Registered item use on entities](docs/ITEM_USE_ON_ENTITY.md)

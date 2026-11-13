@@ -229,12 +229,12 @@ pub use events::{
 pub use events::{
     BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
     ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
-    ClientScreenMultiSelectFormSubmit, ClientTick, EntityFallAttempt, EntityKnockbackAttempt,
-    EntityMountAttempt, EntityMountTarget, EntityTick, ItemTooltipLines, ItemUseAction,
-    ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock,
-    ModuleItemUseOnEntity, PlayerItemCrafted, PlayerItemUseAttempt, PlayerPotionUseAttempt,
-    PlayerPotionUseAttemptAction, PlayerSleepAttempt, PlayerTick, PlayerVillagerTraded,
-    CLIENT_ACTION_CANCEL_CAPABILITY, MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
+    ClientScreenMultiSelectFormSubmit, ClientTick, EntityDropsAttempt, EntityDropsItemSnapshot,
+    EntityFallAttempt, EntityKnockbackAttempt, EntityMountAttempt, EntityMountTarget, EntityTick,
+    ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse,
+    ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerItemCrafted, PlayerItemUseAttempt,
+    PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerSleepAttempt, PlayerTick,
+    PlayerVillagerTraded, CLIENT_ACTION_CANCEL_CAPABILITY, MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
     MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_POTION_USE_ATTEMPT_CALLBACKS,
     MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
     PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY, PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
@@ -516,7 +516,10 @@ pub mod prelude {
         MAX_BLOCK_DROPS_ATTEMPT_CALLBACKS, MAX_BLOCK_DROPS_ATTEMPT_DROPS,
         MAX_BLOCK_DROPS_ATTEMPT_DURABILITY, MAX_BLOCK_DROPS_ATTEMPT_EXPERIENCE,
         MAX_BLOCK_DROPS_ATTEMPT_ITEM_COUNT, MAX_BLOCK_DROPS_ATTEMPT_PAYLOAD_BYTES,
-        MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
+        MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_CRAFTED_ITEM_COUNT,
+        MAX_ENTITY_DROPS_ATTEMPT_CALLBACKS, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
+        MAX_ENTITY_DROPS_ATTEMPT_DURABILITY, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
+        MAX_ENTITY_DROPS_ATTEMPT_PAYLOAD_BYTES, MAX_INVENTORY_CHANGE_COUNT,
         MAX_INVENTORY_CHANGE_SLOT, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
         MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL,
         MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
@@ -526,6 +529,7 @@ pub mod prelude {
         PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY, PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
     };
     pub use crate::events::{BlockDropsAttempt, BlockDropsBreakerSnapshot, BlockDropsItemSnapshot};
+    pub use crate::events::{EntityDropsAttempt, EntityDropsItemSnapshot};
     pub use crate::events::{
         FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
     };

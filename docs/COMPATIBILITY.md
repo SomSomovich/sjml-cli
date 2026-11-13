@@ -16,15 +16,24 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.97.0`, Rust SDK/macros `0.95.0`, private CLI
-`0.1.27`, and ABI `1.87.0`. ABI compatibility remains major-version based: host
-0.97.0 accepts ABI `1.0.x` through `1.87.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.87.0` and host range
-`^0.97.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.98.0`, Rust SDK/macros `0.96.0`, private CLI
+`0.1.28`, and ABI `1.88.0`. ABI compatibility remains major-version based: host
+0.98.0 accepts ABI `1.0.x` through `1.88.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.88.0` and host range
+`^0.98.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.88.0
+
+`entity.drops_attempt` synchronously exposes bounded detached item snapshots
+before NeoForge spawns living-entity death drops. A handler returning true
+cancels the item's drop event while the entity remains dead. The event requires
+`events.subscribe` and `events.cancel`, runs on the logical-server thread, and
+cannot be asynchronous. It does not expose live objects, components, NBT, or a
+mutable experience result. See [living-entity drop attempts](ENTITY_DROPS_ATTEMPTS.md).
 
 ### APIs added in ABI 1.87.0
 

@@ -38,6 +38,8 @@ mod entity_ai_control;
 mod entity_attribute_modifiers;
 #[path = "gametest/entity_breed_attempt.rs"]
 mod entity_breed_attempt;
+#[path = "gametest/entity_drops_attempt.rs"]
+mod entity_drops_attempt;
 #[path = "gametest/entity_effect_application.rs"]
 mod entity_effect_application;
 #[path = "gametest/entity_equipment.rs"]
@@ -631,6 +633,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     entity_effect_application::initialize()?;
     entity_fall_attempt::initialize()?;
     entity_mount_attempt::initialize()?;
+    entity_drops_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;
     entity_breed_attempt::initialize()?;
