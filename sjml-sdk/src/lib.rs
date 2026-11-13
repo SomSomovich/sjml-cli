@@ -175,7 +175,8 @@ pub use client_music::{
 pub use client_notifications::NotificationKind;
 pub use client_screen::{
     ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition, ClientScreenFormDefinition,
-    ClientScreenListFormDefinition, ClientScreenNumericSlider, ClientScreenSelectionList,
+    ClientScreenListFormDefinition, ClientScreenMultiSelectFormDefinition,
+    ClientScreenMultiSelectionList, ClientScreenNumericSlider, ClientScreenSelectionList,
     ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
     ClientScreenSliderFormDefinition, ClientScreenTextField,
 };
@@ -204,10 +205,10 @@ pub use events::{BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockTick, Block
 pub use events::{
     BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
     ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
-    ClientTick, EntityKnockbackAttempt, EntityTick, ItemTooltipLines, ItemUseAction,
-    ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerItemCrafted,
-    PlayerItemUseAttempt, PlayerSleepAttempt, PlayerTick, CLIENT_ACTION_CANCEL_CAPABILITY,
-    MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
+    ClientScreenMultiSelectFormSubmit, ClientTick, EntityKnockbackAttempt, EntityTick,
+    ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock,
+    ModuleItemUseOnEntity, PlayerItemCrafted, PlayerItemUseAttempt, PlayerSleepAttempt, PlayerTick,
+    CLIENT_ACTION_CANCEL_CAPABILITY, MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
 };
 pub use events::{
     FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
@@ -373,9 +374,11 @@ pub mod prelude {
     pub use crate::client_screen;
     pub use crate::client_screen::{
         ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition,
-        ClientScreenFormDefinition, ClientScreenListFormDefinition, ClientScreenNumericSlider,
-        ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
-        ClientScreenSliderFormDefinition, ClientScreenTextField,
+        ClientScreenFormDefinition, ClientScreenListFormDefinition,
+        ClientScreenMultiSelectFormDefinition, ClientScreenMultiSelectionList,
+        ClientScreenNumericSlider, ClientScreenSelectionList, ClientScreenSelectionOption,
+        ClientScreenSettingsFormDefinition, ClientScreenSliderFormDefinition,
+        ClientScreenTextField,
     };
     pub use crate::command_suggestions::{
         ClientCommandSuggestionRequest, CommandSuggestionArgument, CommandSuggestionRequest,
@@ -410,17 +413,18 @@ pub mod prelude {
         BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockPlace, BlockPlaceAttempt, BlockTick,
         BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
         ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit,
-        ClientScreenFormValue, ClientTick, EffectTickEvent, EntityDamageAttempt, EntityDamaged,
-        EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
-        EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick,
-        EventPriority, ExplosionAttempt, InventoryChanged, ItemTooltipLines, ItemUseAction,
-        ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
-        PlayerAdvancementEarned, PlayerAttackAttempt, PlayerDropAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt, PlayerJoined,
-        PlayerLeft, PlayerMoved, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, CLIENT_ACTION_CANCEL_CAPABILITY,
-        DEFAULT_SERVER_TICK_INTERVAL, MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_CRAFTED_ITEM_COUNT,
-        MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        ClientScreenFormValue, ClientScreenMultiSelectFormSubmit, ClientTick, EffectTickEvent,
+        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
+        ExplosionAttempt, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
+        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        PlayerAttackAttempt, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerItemCrafted, PlayerItemUseAttempt, PlayerJoined, PlayerLeft, PlayerMoved,
+        PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        WorldLifecycle, CLIENT_ACTION_CANCEL_CAPABILITY, DEFAULT_SERVER_TICK_INTERVAL,
+        MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::events::{
         FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,

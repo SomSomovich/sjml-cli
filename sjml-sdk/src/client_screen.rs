@@ -12,6 +12,8 @@ pub const CLIENT_SCREEN_LIST_FORM_SCHEMA_VERSION: u32 = 3;
 pub const CLIENT_SCREEN_SETTINGS_FORM_SCHEMA_VERSION: u32 = 4;
 /// Schema version used by settings forms with one integer slider.
 pub const CLIENT_SCREEN_SLIDER_FORM_SCHEMA_VERSION: u32 = 5;
+/// Schema version used by bounded multi-select list forms.
+pub const CLIENT_SCREEN_MULTI_SELECT_FORM_SCHEMA_VERSION: u32 = 6;
 /// Maximum UTF-8 length of a screen or button ID.
 pub const MAX_CLIENT_SCREEN_ID_BYTES: usize = 64;
 /// Maximum UTF-8 length of a screen title.
@@ -34,6 +36,8 @@ pub const MAX_CLIENT_SCREEN_TEXT_FIELD_LABEL_BYTES: usize = MAX_CLIENT_SCREEN_BU
 pub const MAX_CLIENT_SCREEN_TEXT_FIELD_VALUE_BYTES: u32 = 128;
 /// Maximum number of options in a client selection list.
 pub const MAX_CLIENT_SCREEN_SELECTION_OPTIONS: usize = 32;
+/// Maximum number of options and initially selected IDs in a multi-select list.
+pub const MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS: usize = 32;
 /// Maximum number of checkbox fields in a client settings form.
 pub const MAX_CLIENT_SCREEN_CHECKBOXES: usize = 8;
 /// Absolute bound accepted by client numeric slider endpoints and values.
@@ -455,6 +459,163 @@ impl ClientScreenListFormDefinition {
     }
 }
 
+/// One bounded multi-select list displayed on a schema-v6 form screen.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenMultiSelectionList {
+    /// Stable lowercase key included in the submit callback.
+    pub id: String,
+    /// Literal label displayed above the list.
+    pub label: String,
+    /// One through 32 literal choices.
+    pub options: Vec<ClientScreenSelectionOption>,
+    /// Initially selected option IDs, which must refer to distinct options.
+    pub initial_selected_ids: Vec<String>,
+}
+
+impl ClientScreenMultiSelectionList {
+    /// Builds and validates one bounded multi-select list.
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        options: Vec<ClientScreenSelectionOption>,
+        initial_selected_ids: Vec<String>,
+    ) -> SjmlResult<Self> {
+        let list = Self {
+            id: id.into(),
+            label: label.into(),
+            options,
+            initial_selected_ids,
+        };
+        list.validate()?;
+        Ok(list)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        validate_id(&self.id, "multi-selection list ID")?;
+        validate_text(
+            &self.label,
+            1,
+            MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES,
+            "multi-selection list label",
+        )?;
+        if !(1..=MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS).contains(&self.options.len()) {
+            return Err(invalid(format!(
+                "a multi-selection list must contain between 1 and {MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS} options"
+            )));
+        }
+        for (index, option) in self.options.iter().enumerate() {
+            option.validate()?;
+            if self.options[..index]
+                .iter()
+                .any(|previous| previous.id == option.id)
+            {
+                return Err(invalid("multi-selection option IDs must be unique"));
+            }
+        }
+        if self.initial_selected_ids.len() > MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS {
+            return Err(too_large(format!(
+                "a multi-selection list supports at most {MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS} initially selected options"
+            )));
+        }
+        for (index, selected_id) in self.initial_selected_ids.iter().enumerate() {
+            validate_id(selected_id, "initial selected option ID")?;
+            if self.initial_selected_ids[..index]
+                .iter()
+                .any(|previous| previous == selected_id)
+                || !self.options.iter().any(|option| option.id == *selected_id)
+            {
+                return Err(invalid(
+                    "initial selected option IDs must be unique IDs from the multi-selection list",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A schema-v6 form with zero to four text fields and one multi-select list.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenMultiSelectFormDefinition {
+    /// Screen content and submit buttons.
+    pub screen: ClientScreenDefinition,
+    /// Zero to four uniquely identified text inputs.
+    pub fields: Vec<ClientScreenTextField>,
+    /// The form's bounded multi-select list.
+    pub list: ClientScreenMultiSelectionList,
+}
+
+impl ClientScreenMultiSelectFormDefinition {
+    /// Builds and validates a bounded schema-v6 multi-select form.
+    pub fn new(
+        screen: ClientScreenDefinition,
+        fields: Vec<ClientScreenTextField>,
+        list: ClientScreenMultiSelectionList,
+    ) -> SjmlResult<Self> {
+        let definition = Self {
+            screen,
+            fields,
+            list,
+        };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    fn validate(&self) -> SjmlResult<usize> {
+        let mut size = self.screen.validate()?;
+        self.list.validate()?;
+        if self.fields.len() > MAX_CLIENT_SCREEN_TEXT_FIELDS {
+            return Err(invalid(format!(
+                "a multi-select form supports at most {MAX_CLIENT_SCREEN_TEXT_FIELDS} text fields"
+            )));
+        }
+        let mut ids: Vec<String> = self
+            .screen
+            .buttons
+            .iter()
+            .map(|button| button.id.clone())
+            .collect();
+        for field in &self.fields {
+            field.validate()?;
+            if ids.contains(&field.id) {
+                return Err(invalid(
+                    "multi-select form element IDs must be unique and cannot match a button ID",
+                ));
+            }
+            ids.push(field.id.clone());
+        }
+        if ids.contains(&self.list.id) {
+            return Err(invalid(
+                "multi-selection list ID must be unique and cannot match a button or field ID",
+            ));
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for field in &self.fields {
+            size = checked_string_size(size, &field.id)?;
+            size = checked_string_size(size, &field.label)?;
+            size = checked_string_size(size, &field.initial_value)?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        size = checked_string_size(size, &self.list.id)?;
+        size = checked_string_size(size, &self.list.label)?;
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for selected_id in &self.list.initial_selected_ids {
+            size = checked_string_size(size, selected_id)?;
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for option in &self.list.options {
+            size = checked_string_size(size, &option.id)?;
+            size = checked_string_size(size, &option.label)?;
+        }
+        if size > MAX_CLIENT_SCREEN_PAYLOAD_BYTES {
+            return Err(too_large(format!(
+                "encoded client multi-select form exceeds {MAX_CLIENT_SCREEN_PAYLOAD_BYTES} bytes"
+            )));
+        }
+        Ok(size)
+    }
+}
+
 /// One literal boolean input displayed on a settings form screen.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClientScreenCheckbox {
@@ -845,6 +1006,17 @@ pub fn open_slider_form(definition: &ClientScreenSliderFormDefinition) -> SjmlRe
     open_payload(&payload)
 }
 
+/// Opens a bounded multi-select form on the local physical client.
+///
+/// List toggles and scrolling stay local. A submit button sends text fields and the selected
+/// option IDs directly to the owner through `client.screen.multi_select_form_submit`.
+pub fn open_multi_select_form(
+    definition: &ClientScreenMultiSelectFormDefinition,
+) -> SjmlResult<()> {
+    let payload = encode_multi_select_form_definition(definition)?;
+    open_payload(&payload)
+}
+
 fn open_payload(payload: &[u8]) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
     {
@@ -1019,6 +1191,39 @@ fn encode_slider_form_definition(
     Ok(payload)
 }
 
+fn encode_multi_select_form_definition(
+    definition: &ClientScreenMultiSelectFormDefinition,
+) -> SjmlResult<Vec<u8>> {
+    let capacity = definition.validate()?;
+    let mut payload = encode_definition(&definition.screen)?;
+    payload.reserve(capacity.saturating_sub(payload.len()));
+    payload[..4].copy_from_slice(&CLIENT_SCREEN_MULTI_SELECT_FORM_SCHEMA_VERSION.to_le_bytes());
+    write_u32(&mut payload, definition.fields.len() as u32);
+    for field in &definition.fields {
+        write_string(&mut payload, &field.id)?;
+        write_string(&mut payload, &field.label)?;
+        write_string(&mut payload, &field.initial_value)?;
+        write_u32(&mut payload, field.max_utf8_bytes);
+    }
+    write_u32(&mut payload, 1);
+    write_string(&mut payload, &definition.list.id)?;
+    write_string(&mut payload, &definition.list.label)?;
+    write_u32(
+        &mut payload,
+        definition.list.initial_selected_ids.len() as u32,
+    );
+    for selected_id in &definition.list.initial_selected_ids {
+        write_string(&mut payload, selected_id)?;
+    }
+    write_u32(&mut payload, definition.list.options.len() as u32);
+    for option in &definition.list.options {
+        write_string(&mut payload, &option.id)?;
+        write_string(&mut payload, &option.label)?;
+    }
+    debug_assert!(payload.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    Ok(payload)
+}
+
 fn write_string(payload: &mut Vec<u8>, value: &str) -> SjmlResult<()> {
     let length = u32::try_from(value.len()).map_err(|_| payload_overflow())?;
     write_u32(payload, length);
@@ -1080,12 +1285,15 @@ fn payload_overflow() -> SjmlError {
 mod tests {
     use super::{
         encode_definition, encode_form_definition, encode_list_form_definition,
-        encode_settings_form_definition, encode_slider_form_definition, ClientScreenButton,
-        ClientScreenCheckbox, ClientScreenDefinition, ClientScreenFormDefinition,
-        ClientScreenListFormDefinition, ClientScreenNumericSlider, ClientScreenSelectionList,
-        ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
-        ClientScreenSliderFormDefinition, ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES,
-        MAX_CLIENT_SCREEN_PAYLOAD_BYTES, MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
+        encode_multi_select_form_definition, encode_settings_form_definition,
+        encode_slider_form_definition, ClientScreenButton, ClientScreenCheckbox,
+        ClientScreenDefinition, ClientScreenFormDefinition, ClientScreenListFormDefinition,
+        ClientScreenMultiSelectFormDefinition, ClientScreenMultiSelectionList,
+        ClientScreenNumericSlider, ClientScreenSelectionList, ClientScreenSelectionOption,
+        ClientScreenSettingsFormDefinition, ClientScreenSliderFormDefinition,
+        ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES,
+        MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS, MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
+        MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
     };
 
     #[test]
@@ -1471,6 +1679,116 @@ mod tests {
             slider,
         )
         .is_err());
+    }
+
+    #[test]
+    fn encodes_schema_v6_multi_select_form_in_its_defined_wire_order() {
+        let screen = ClientScreenDefinition::new(
+            "demo:features",
+            "Features",
+            vec!["Choose any options".to_owned()],
+            vec![ClientScreenButton::new("save", "Save").unwrap()],
+        )
+        .unwrap();
+        let form = ClientScreenMultiSelectFormDefinition::new(
+            screen.clone(),
+            vec![ClientScreenTextField::new("name", "Name", "Ada", 64).unwrap()],
+            ClientScreenMultiSelectionList::new(
+                "features",
+                "Enabled features",
+                vec![
+                    ClientScreenSelectionOption::new("chat", "Chat").unwrap(),
+                    ClientScreenSelectionOption::new("homes", "Homes").unwrap(),
+                ],
+                vec!["homes".to_owned()],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let encoded = encode_multi_select_form_definition(&form).unwrap();
+        let mut expected = encode_definition(&screen).unwrap();
+        expected[..4].copy_from_slice(&6_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "name");
+        append_string(&mut expected, "Name");
+        append_string(&mut expected, "Ada");
+        expected.extend_from_slice(&64_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "features");
+        append_string(&mut expected, "Enabled features");
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "homes");
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        append_string(&mut expected, "chat");
+        append_string(&mut expected, "Chat");
+        append_string(&mut expected, "homes");
+        append_string(&mut expected, "Homes");
+        assert_eq!(encoded, expected);
+        assert!(encoded.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    }
+
+    #[test]
+    fn multi_select_form_validates_option_bounds_initial_ids_and_collisions() {
+        let screen = || {
+            ClientScreenDefinition::new(
+                "demo:features",
+                "Features",
+                Vec::new(),
+                vec![ClientScreenButton::new("save", "Save").unwrap()],
+            )
+            .unwrap()
+        };
+        let options = || {
+            vec![
+                ClientScreenSelectionOption::new("chat", "Chat").unwrap(),
+                ClientScreenSelectionOption::new("homes", "Homes").unwrap(),
+            ]
+        };
+        assert!(ClientScreenMultiSelectionList::new(
+            "features",
+            "Features",
+            options(),
+            vec!["unknown".to_owned()]
+        )
+        .is_err());
+        assert!(ClientScreenMultiSelectionList::new(
+            "features",
+            "Features",
+            options(),
+            vec!["chat".to_owned(), "chat".to_owned()]
+        )
+        .is_err());
+        assert!(ClientScreenMultiSelectionList::new(
+            "features",
+            "Features",
+            (0..=MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS)
+                .map(
+                    |index| ClientScreenSelectionOption::new(format!("option_{index}"), "Option")
+                        .unwrap()
+                )
+                .collect(),
+            Vec::new(),
+        )
+        .is_err());
+        assert!(ClientScreenMultiSelectFormDefinition::new(
+            screen(),
+            vec![ClientScreenTextField::new("features", "Name", "", 32).unwrap()],
+            ClientScreenMultiSelectionList::new("features", "Features", options(), Vec::new())
+                .unwrap(),
+        )
+        .is_err());
+        let maximum = (0..MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS)
+            .map(|index| {
+                ClientScreenSelectionOption::new(format!("option_{index}"), "Option").unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(ClientScreenMultiSelectionList::new(
+            "features",
+            "Features",
+            maximum.clone(),
+            maximum.iter().map(|option| option.id.clone()).collect(),
+        )
+        .is_ok());
     }
 
     fn append_string(target: &mut Vec<u8>, value: &str) {

@@ -761,6 +761,22 @@ mod tests {
     }
 
     #[test]
+    fn multi_select_screen_submit_generates_its_direct_owner_callback_export() {
+        let generated = expand_event(
+            quote!(name = "client.screen.multi_select_form_submit"),
+            quote! {
+                fn submit(form: ClientScreenMultiSelectFormSubmit) -> SjmlResult<()> {
+                    let _ = form;
+                    Ok(())
+                }
+            },
+        )
+        .to_string();
+        assert!(generated.contains("sjml_v1_event_client.screen.multi_select_form_submit"));
+        assert!(generated.contains("dispatch_payload"));
+    }
+
+    #[test]
     fn cancellable_entity_death_attempt_exports_the_sync_callback() {
         let generated = expand_event(
             quote!(name = "entity.death_attempt"),

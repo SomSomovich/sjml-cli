@@ -1,8 +1,13 @@
-use sjml::events::{ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue};
+use sjml::events::{
+    ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
+    ClientScreenMultiSelectFormSubmit,
+};
 use sjml::{
     client_screen, event, from_bytes, to_bytes, ClientScreenButton, ClientScreenDefinition,
-    ClientScreenFormDefinition, ClientScreenListFormDefinition, ClientScreenSelectionList,
-    ClientScreenSelectionOption, ClientScreenTextField, ErrorCode, SjmlResult,
+    ClientScreenFormDefinition, ClientScreenListFormDefinition,
+    ClientScreenMultiSelectFormDefinition, ClientScreenMultiSelectionList,
+    ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenTextField, ErrorCode,
+    SjmlResult,
 };
 
 #[event(name = "client.screen.action")]
@@ -23,6 +28,16 @@ fn on_client_screen_form_submit(form: ClientScreenFormSubmit) -> SjmlResult<()> 
             value: "Ada".to_owned(),
         }]
     );
+    Ok(())
+}
+
+#[event(name = "client.screen.multi_select_form_submit")]
+fn on_client_screen_multi_select_form_submit(
+    form: ClientScreenMultiSelectFormSubmit,
+) -> SjmlResult<()> {
+    assert_eq!(form.screen_id, "demo:features");
+    assert_eq!(form.list_id, "features");
+    assert_eq!(form.selected_option_ids, vec!["chat", "homes"]);
     Ok(())
 }
 
@@ -364,6 +379,63 @@ fn form_submit_can_encode_selection_as_a_generic_field_value() {
     assert_eq!(
         from_bytes::<ClientScreenFormSubmit>(&to_bytes(&submit).unwrap()).unwrap(),
         submit
+    );
+}
+
+#[test]
+fn multi_select_submit_callback_uses_schema_v6_and_returns_declared_option_ids() {
+    let submit = ClientScreenMultiSelectFormSubmit {
+        screen_id: "demo:features".to_owned(),
+        button_id: "save".to_owned(),
+        fields: vec![ClientScreenFormValue {
+            id: "name".to_owned(),
+            value: "Ada".to_owned(),
+        }],
+        list_id: "features".to_owned(),
+        selected_option_ids: vec!["chat".to_owned(), "homes".to_owned()],
+    };
+    let mut expected = 6_u32.to_le_bytes().to_vec();
+    append_string(&mut expected, "demo:features");
+    append_string(&mut expected, "save");
+    expected.extend_from_slice(&1_u32.to_le_bytes());
+    expected.extend_from_slice(&1_u32.to_le_bytes());
+    append_string(&mut expected, "name");
+    append_string(&mut expected, "Ada");
+    append_string(&mut expected, "features");
+    expected.extend_from_slice(&2_u32.to_le_bytes());
+    append_string(&mut expected, "chat");
+    append_string(&mut expected, "homes");
+    assert_eq!(to_bytes(&submit).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<ClientScreenMultiSelectFormSubmit>(&expected).unwrap(),
+        submit
+    );
+    assert_eq!(on_client_screen_multi_select_form_submit(submit), Ok(()));
+}
+
+#[test]
+fn multi_select_form_accepts_zero_text_fields_and_fails_closed_on_native_targets() {
+    let screen = ClientScreenDefinition::new(
+        "demo:features",
+        "Features",
+        Vec::new(),
+        vec![ClientScreenButton::new("save", "Save").unwrap()],
+    )
+    .unwrap();
+    let list = ClientScreenMultiSelectionList::new(
+        "features",
+        "Features",
+        vec![ClientScreenSelectionOption::new("chat", "Chat").unwrap()],
+        vec!["chat".to_owned()],
+    )
+    .unwrap();
+    let form = ClientScreenMultiSelectFormDefinition::new(screen, Vec::new(), list).unwrap();
+    #[cfg(not(target_arch = "wasm32"))]
+    assert_eq!(
+        client_screen::open_multi_select_form(&form)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
     );
 }
 

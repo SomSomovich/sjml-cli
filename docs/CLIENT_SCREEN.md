@@ -416,3 +416,13 @@ slider value as a canonical base-10 integer string (for example, `"35"`). The cl
 remains in `submit.button_id`; Escape closes without submitting. A maximum-size v5 form returns 14
 values. The owner must export `client.screen.form_submit` before opening the screen. The example
 exposes it as `/sjmlclient client_screen_demo screen screen.slider audio`.
+
+## Multi-select list forms
+
+Use `client_screen::open_multi_select_form` for a schema-v6 form with one bounded multi-select list and zero to four text fields. A list has one to 32 unique options, each with a stable ID and literal label. `initial_selected_ids` sets the initial checked options and every ID must refer to an option in the list.
+
+Rows toggle locally when clicked and the list scrolls inside its own viewport. Toggling or scrolling does not call guest code. On submit, the callback receives text values in declaration order, the list ID, and selected option IDs in the original option declaration order. The direct owner-only callback is `client.screen.multi_select_form_submit`, represented by `ClientScreenMultiSelectFormSubmit`; export it with synchronous `#[event]` before opening the screen.
+
+Schema v6 appends its multi-select block after the schema-v1 screen prefix and schema-v2 text-field block. Schemas v1 through v5 and their callback payloads keep their existing byte layouts. The callback payload has schema version 6 and carries the screen ID, button ID, schema-v1 text values, list ID, and zero to 32 selected option IDs. All IDs remain unique within the form, and the complete request or callback is capped at 4,096 bytes.
+
+The bounded example is also available at [`sjml-sdk/examples/client_screen_multi_select.rs`](../sjml-sdk/examples/client_screen_multi_select.rs). Its visible layout and mouse interactions still need a display-backed Minecraft client check.

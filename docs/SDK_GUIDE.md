@@ -77,6 +77,7 @@ values as `"true"` or `"false"` after the text and optional list values. The
 schema-v4 settings form is additive and preserves earlier screen payloads.
 See [interactive client screens](CLIENT_SCREEN.md) for a complete command-driven
 example.
+`client_screen::open_multi_select_form` adds a schema-v6 screen with up to four optional text fields and one local multi-select list of up to 32 options. Initial selections are declared by stable option ID. The dedicated `client.screen.multi_select_form_submit` callback returns selected IDs in declaration order directly to the screen owner. Schemas and callbacks v1–v5 keep their existing bytes. Visible controls still need a display-backed check; see [interactive client screens](CLIENT_SCREEN.md).
 
 Client modules can use `client_camera::set_fov_scale` and
 `client_camera::clear_fov_scale` under the `client.camera.fov` grant. Each
@@ -450,7 +451,7 @@ function signatures and public types there are the reference for Rust callers.
 | [`chat_messages`](https://docs.rs/sjml-sdk/0.82.0/sjml/chat_messages/) | Local chat-message snapshots, separately capability-gated filtering, and rich local replacements. |
 | [`client_notifications`](https://docs.rs/sjml-sdk/0.82.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
 | [`command_suggestions`](https://docs.rs/sjml-sdk/0.82.0/sjml/command_suggestions/) | Typed bounded input/output for synchronous server Brigadier suggestions. |
-| [`client_screen`](CLIENT_SCREEN.md) | Client-only vanilla screens with literal text, up to four buttons, bounded text fields, one scrollable choice list, and settings forms with up to eight checkboxes; callbacks go only to the owning module. |
+| [`client_screen`](CLIENT_SCREEN.md) | Client-only vanilla screens with literal text, up to four buttons, bounded text fields, one scrollable choice list, and settings forms with up to eight checkboxes, schema-v5 integer sliders, and schema-v6 multi-select lists with up to 32 options; callbacks go only to the owning module. |
 | [`client_audio`](https://docs.rs/sjml-sdk/0.82.0/sjml/client_audio/) | Bounded client-local one-shot playback, stoppable one-shot handles, and module-owned looping sounds through Minecraft's sound manager, bounded exact-handle fades, and owner-checked situational music selection. |
 | [`client_music`](CLIENT_MUSIC.md) | Synchronous physical-client selection or stopping of situational music, with module-owned replacement sounds and bounded delays. |
 | [`entity`](https://docs.rs/sjml-sdk/0.82.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, spatial queries, bounded raycasts, custom names, active-effect snapshots, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |

@@ -236,6 +236,26 @@ pub struct ClientScreenFormSubmit {
     pub fields: Vec<ClientScreenFormValue>,
 }
 
+/// Synchronous, non-cancellable submit notification for a schema-v6 multi-select form screen.
+///
+/// The host emits `client.screen.multi_select_form_submit` directly only to the owner of the open
+/// form. The list ID identifies the control and selected option IDs are reported in declaration
+/// order. Selection and scrolling remain local until a button is submitted.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 6)]
+pub struct ClientScreenMultiSelectFormSubmit {
+    /// ID of the module-owned form screen that was submitted.
+    pub screen_id: String,
+    /// ID of the button clicked on that form.
+    pub button_id: String,
+    /// Current bounded text fields in declaration order.
+    pub fields: Vec<ClientScreenFormValue>,
+    /// Stable ID of the submitted multi-select list.
+    pub list_id: String,
+    /// Selected option IDs in the order declared by the list.
+    pub selected_option_ids: Vec<String>,
+}
+
 /// Synchronous cancellable logical-server right-click attempt for a block, entity, or item use.
 ///
 /// Return `Ok(true)` from the `player.interaction` event handler to veto this attempt.

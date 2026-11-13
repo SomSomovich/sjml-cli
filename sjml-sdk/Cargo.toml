@@ -29,5 +29,9 @@ crate-type = ["cdylib"]
 name = "gui_layer_replacement"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "client_screen_multi_select"
+crate-type = ["cdylib"]
+
 [dependencies]
 sjml-macros.workspace = true

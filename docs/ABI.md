@@ -1597,6 +1597,10 @@ no callback or network traffic. The screen does not consume wheel input over
 form fields, buttons, or outside the body viewport. The visual result and live
 wheel behavior still require display-backed client verification.
 
+Schema v6 adds a dedicated multi-select list block after the schema-v1 screen prefix and schema-v2 text-field entries. It appends `u32 list_count` (exactly `1`), a stable list ID and literal label, `u32 initial_selected_count` (0–32) and that many initially selected option IDs, then `u32 option_count` (1–32) and each stable option ID and literal label. The list, field, and button IDs are unique. Initial IDs must be unique and refer to declared options. Toggling rows and scrolling the list are local client UI state; the host sends no callback until a button is clicked. Schemas v1–v5 retain their request bytes.
+
+A schema-v6 submit closes the screen and invokes the distinct direct owner export `sjml_v1_event_client.screen.multi_select_form_submit`. Its payload is `u32 schema_version` (`6`), stable `screen_id`, stable `button_id`, `u32 field_count` (0–4), each text value as a schema-v1 `ClientScreenFormValue`, stable `list_id`, `u32 selected_option_count` (0–32), then the selected option IDs in declaration order. The callback must return the unit value and is not routed through `events.subscribe`. The owner must export it before opening the screen. Existing schema-v1 through v5 forms continue using their original `client.screen.action` or `client.screen.form_submit` callback wires.
+
 ## Client toast notifications
 
 ABI 1.37.0 adds `sjml_client_ui_v1.notify(title_ptr, title_len, body_ptr,

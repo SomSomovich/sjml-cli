@@ -51,6 +51,12 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             format!("{name} is cancellable and must use a synchronous #[event] handler"),
         );
     }
+    if name == "client.screen.multi_select_form_submit" {
+        return error(
+            Span::call_site(),
+            "client.screen.multi_select_form_submit is a direct owner callback and must use a synchronous #[event] handler",
+        );
+    }
     if name == "client.item.tooltip" {
         return error(
             Span::call_site(),
@@ -463,6 +469,19 @@ mod tests {
                 quote! { async fn chat_send(_: ClientChatSendAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "client.chat.send_attempt is cancellable",
+        );
+    }
+
+    #[test]
+    fn client_multi_select_form_submit_handler_must_remain_synchronous() {
+        diagnostic(
+            expand_event_async(
+                quote!(name = "client.screen.multi_select_form_submit"),
+                quote! {
+                    async fn submit(_: ClientScreenMultiSelectFormSubmit) -> SjmlResult<()> { Ok(()) }
+                },
+            ),
+            "client.screen.multi_select_form_submit is a direct owner callback",
         );
     }
 
