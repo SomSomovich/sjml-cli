@@ -249,6 +249,8 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::register_block_entity_model("gametest_machine", block_model)?;
     registry::register_item("gametest_ruby", ItemDefinition::default())?;
+    registry::register_item("gametest_crafting_container", ItemDefinition::default())?;
+    registry::set_item_crafting_remainder("gametest_crafting_container", "minecraft:bucket")?;
     registry::register_item("gametest_epic_rarity", ItemDefinition::default())?;
     registry::set_item_rarity("gametest_epic_rarity", ItemRarity::Epic)?;
     registry::register_item("gametest_enchantable", ItemDefinition::default())?;

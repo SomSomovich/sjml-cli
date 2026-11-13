@@ -1261,6 +1261,16 @@ The host installs these as vanilla `ItemAttributeModifiers`; unknown attribute
 IDs fail during item registration. See
 [`ITEM_ATTRIBUTE_MODIFIERS.md`](ITEM_ATTRIBUTE_MODIFIERS.md).
 
+An item can also declare one static crafting remainder with
+`registry::set_item_crafting_remainder("portable_container", "minecraft:bucket")?;`
+after it is registered in this callback. The remainder ID must be canonical,
+fully qualified, at most 256 UTF-8 bytes, and already resolve in the item
+registry at this point, so another staged SJML item cannot be referenced. The
+declaration requires `content.register` and is limited to standalone items
+owned by the same module; it does not create
+stacks or expose stack components. See
+[`ITEM_CRAFTING_REMAINDER.md`](ITEM_CRAFTING_REMAINDER.md).
+
 The same `#[mod_register]` callback may stage a generic block entity attached
 to a block declared by that module, plus a `MobCategory.MISC` living entity
 type with bounded vanilla base attributes and optional vanilla AI goals:

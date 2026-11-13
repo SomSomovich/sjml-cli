@@ -31,6 +31,8 @@ pub const MAX_ITEM_FOOD_EFFECT_ID_BYTES: usize = 256;
 pub const MAX_ITEM_FOOD_EFFECT_DURATION_TICKS: u32 = 72_000;
 /// Maximum static vanilla damage capacity for one registered item.
 pub const MAX_ITEM_MAX_DAMAGE: u32 = 1_000_000;
+/// Maximum UTF-8 size of one fully qualified static item crafting remainder ID.
+pub const MAX_ITEM_CRAFTING_REMAINDER_ID_BYTES: usize = 256;
 /// Maximum number of vanilla attribute modifiers on one registered item.
 pub const MAX_ITEM_ATTRIBUTE_MODIFIERS: usize = 16;
 /// Maximum absolute static modifier amount on one registered item.
@@ -1561,6 +1563,13 @@ extern "C" {
     ) -> i32;
     #[link_name = "set_item_max_damage"]
     fn imported_set_item_max_damage(path_pointer: i32, path_length: i32, max_damage: i32) -> i32;
+    #[link_name = "set_item_crafting_remainder"]
+    fn imported_set_item_crafting_remainder(
+        item_path_pointer: i32,
+        item_path_length: i32,
+        remainder_item_id_pointer: i32,
+        remainder_item_id_length: i32,
+    ) -> i32;
     #[link_name = "set_item_food"]
     fn imported_set_item_food(
         path_pointer: i32,
@@ -2105,6 +2114,40 @@ pub fn set_item_max_damage(item_path: &str, max_damage: u32) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = max_damage;
+        Err(unsupported_target())
+    }
+}
+
+/// Assigns a static vanilla crafting remainder to a standalone item declared by this module.
+///
+/// Call this from `#[mod_register]` after [`register_item`]. The remainder must be a canonical,
+/// fully qualified item ID of at most 256 UTF-8 bytes that is already present in Minecraft's item
+/// registry before SJML's registry declarations run, such as `minecraft:bucket`. This permits safe
+/// lookup before the host creates the registered item and avoids dependencies on registry-event
+/// ordering. The API does not construct item stacks or set components, and cannot reference another
+/// item being staged by SJML. Each standalone item accepts one remainder declaration.
+pub fn set_item_crafting_remainder(item_path: &str, remainder_item_id: &str) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    validate_registry_id(
+        remainder_item_id,
+        "crafting remainder item ID",
+        MAX_ITEM_CRAFTING_REMAINDER_ID_BYTES,
+    )?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies both bounded UTF-8 slices before returning.
+        let status = unsafe {
+            imported_set_item_crafting_remainder(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                remainder_item_id.as_ptr() as usize as u32 as i32,
+                remainder_item_id.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the item crafting remainder");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
         Err(unsupported_target())
     }
 }
@@ -4422,6 +4465,10 @@ fn validate_block_state_property_name(name: &str) -> SjmlResult<()> {
 }
 
 fn validate_villager_registry_id(value: &str, label: &str) -> SjmlResult<()> {
+    validate_registry_id(value, label, MAX_VILLAGER_TRADE_ID_BYTES)
+}
+
+fn validate_registry_id(value: &str, label: &str, max_bytes: usize) -> SjmlResult<()> {
     let Some((namespace, path)) = value.split_once(':') else {
         return Err(invalid_argument(&format!(
             "{label} must be a fully qualified registry ID"
@@ -4438,9 +4485,9 @@ fn validate_villager_registry_id(value: &str, label: &str) -> SjmlResult<()> {
         && path.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_./-".contains(&byte)
         });
-    if value.len() > MAX_VILLAGER_TRADE_ID_BYTES || !valid_namespace || !valid_path {
+    if value.len() > max_bytes || !valid_namespace || !valid_path {
         return Err(invalid_argument(&format!(
-            "{label} must be a valid fully qualified registry ID of at most {MAX_VILLAGER_TRADE_ID_BYTES} bytes"
+            "{label} must be a valid fully qualified registry ID of at most {max_bytes} bytes"
         )));
     }
     Ok(())
@@ -6352,6 +6399,49 @@ mod tests {
         );
         assert_eq!(
             set_item_max_damage("../tool", 20).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_crafting_remainder_requires_a_canonical_item_id_and_valid_item_path() {
+        assert_eq!(MAX_ITEM_CRAFTING_REMAINDER_ID_BYTES, 256);
+        assert_eq!(
+            set_item_crafting_remainder("portable_container", "minecraft:bucket")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        for invalid_id in [
+            "bucket",
+            "Minecraft:bucket",
+            "minecraft:Bucket",
+            "minecraft:bucket/../milk_bucket",
+            "minecraft:",
+        ] {
+            assert_eq!(
+                set_item_crafting_remainder("portable_container", invalid_id)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument,
+                "invalid registry IDs must be rejected before the host import"
+            );
+        }
+        assert_eq!(
+            set_item_crafting_remainder("../container", "minecraft:bucket")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let too_long_id = format!(
+            "minecraft:{}",
+            "a".repeat(MAX_ITEM_CRAFTING_REMAINDER_ID_BYTES)
+        );
+        assert_eq!(
+            set_item_crafting_remainder("container", &too_long_id)
+                .unwrap_err()
+                .code(),
             ErrorCode::InvalidArgument
         );
     }
