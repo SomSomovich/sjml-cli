@@ -358,8 +358,12 @@ stale-handle calls. These flags do not expose general entity metadata or NBT.
 `entity::is_ai_enabled` and `entity::set_ai_enabled` operate only on loaded
 vanilla `Mob` instances. Reads require `entity.read`; writes additionally
 require `entity.ai.control`. The setter changes only Minecraft's existing
-no-AI flag on the logical-server thread; it does not expose goal selectors,
-navigation, or arbitrary guest AI code.
+no-AI flag on the logical-server thread; it does not expose goal selectors or
+arbitrary guest AI code. A separate bounded `entity.navigate_to` operation
+requires `entity.read` plus `entity.navigation.write`, validates a short target
+in the current loaded dimension, and invokes the vanilla Mob path navigator
+only after checking that the target corridor is loaded. It does not expose
+path nodes or allow a guest callback from inside pathfinding.
 
 `entity.projectile_impact_attempt` runs synchronously on the logical server before a projectile applies its hit. It requires `events.subscribe` and `events.cancel`; callbacks receive detached projectile and hit data, and only a successful guest veto cancels the impact. Block hit details are read only from an already-loaded chunk.
 

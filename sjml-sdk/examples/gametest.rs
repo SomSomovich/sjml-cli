@@ -26,6 +26,8 @@ mod entity_effect_application;
 mod entity_heal_attempt;
 #[path = "gametest/entity_join_attempt.rs"]
 mod entity_join_attempt;
+#[path = "gametest/entity_navigation.rs"]
+mod entity_navigation;
 #[path = "gametest/entity_riding.rs"]
 mod entity_riding;
 #[path = "gametest/entity_tick.rs"]

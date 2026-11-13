@@ -2206,6 +2206,16 @@ does not run death behavior or create drops. It never loads chunks. Static
 registration and client calls are denied. See
 [entity removal](ENTITY_REMOVAL.md).
 
+Loaded non-player Mobs also support bounded vanilla path navigation through
+`entity::navigate_to(handle: EntityHandle, target: BlockPos, speed: f32) -> SjmlResult<bool>`.
+Request and receive
+`entity.read` plus `entity.navigation.write`. The target must be within 32
+blocks in the Mob's current dimension, inside build height and the world
+border, and the path corridor must already be loaded. This server-thread call
+never loads chunks and returns whether Minecraft accepted the path. It does not
+expose path nodes or custom pathfinding callbacks. See
+[bounded entity navigation](ENTITY_NAVIGATION.md).
+
 ## Entity-attached opaque data
 
 Modules can keep small opaque byte values attached to the entity itself. Request

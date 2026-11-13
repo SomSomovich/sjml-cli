@@ -32,6 +32,12 @@ pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 /// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
 pub const AI_CONTROL_CAPABILITY: &str = "entity.ai.control";
+/// Capability required with `entity.read` to control a loaded Mob's short-range path navigation.
+pub const NAVIGATION_WRITE_CAPABILITY: &str = "entity.navigation.write";
+/// Maximum target distance accepted by [`navigate_to`], in blocks.
+pub const MAX_ENTITY_NAVIGATION_RANGE: f64 = 32.0;
+/// Maximum pathfinding speed multiplier accepted by [`navigate_to`].
+pub const MAX_ENTITY_NAVIGATION_SPEED: f32 = 4.0;
 /// Maximum UTF-8 byte length for a plain entity custom name.
 pub const MAX_ENTITY_CUSTOM_NAME_BYTES: usize = 1024;
 /// Maximum Unicode scalar count for a plain entity custom name.
@@ -308,6 +314,8 @@ extern "C" {
     fn imported_is_ai_enabled(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_ai_enabled"]
     fn imported_set_ai_enabled(handle: i32, handle_length: i32, enabled: i32) -> i32;
+    #[link_name = "navigate_to"]
+    fn imported_navigate_to(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "is_glowing"]
     fn imported_is_glowing(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_glowing"]
@@ -1078,6 +1086,80 @@ pub fn set_ai_enabled(handle: EntityHandle, enabled: bool) -> SjmlResult<()> {
     }
 }
 
+/// Starts a bounded vanilla navigation path for one loaded non-player Mob.
+///
+/// Requires `entity.read` and [`NAVIGATION_WRITE_CAPABILITY`]. The target must
+/// be within 32 blocks in the entity's current dimension and every chunk in a
+/// bounded path-search corridor must already be loaded. SJML does not load
+/// terrain. The speed multiplier must be finite and within `0.01..=4.0`.
+/// Returns `true` if Minecraft accepted a path and `false` if no path was
+/// accepted (including when the Mob has AI disabled). Calls are synchronous on
+/// the logical-server thread.
+pub fn navigate_to(handle: EntityHandle, target: BlockPos, speed: f32) -> SjmlResult<bool> {
+    validate_navigation_target(target, speed)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let request = to_bytes(&EntityNavigationRequest {
+            entity: handle,
+            x: target.x,
+            y: target.y,
+            z: target.z,
+            speed,
+        })?;
+        read_output::<EntityNavigationResult>(5, |output, capacity| {
+            // SAFETY: the stable request and output allocation remain valid through the synchronous import.
+            unsafe {
+                imported_navigate_to(
+                    request.as_ptr() as usize as u32 as i32,
+                    request.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+        .map(|result| result.accepted)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct EntityNavigationRequest {
+    entity: EntityHandle,
+    x: i32,
+    y: i32,
+    z: i32,
+    speed: f32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct EntityNavigationResult {
+    accepted: bool,
+}
+
+fn validate_navigation_target(target: BlockPos, speed: f32) -> SjmlResult<()> {
+    if i64::from(target.x).abs() > 30_000_000 || i64::from(target.z).abs() > 30_000_000 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity navigation X/Z coordinates must be within ±30000000",
+        ));
+    }
+    if !speed.is_finite() || !(0.01..=MAX_ENTITY_NAVIGATION_SPEED).contains(&speed) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity navigation speed must be finite and within 0.01..=4",
+        ));
+    }
+    Ok(())
+}
+
 /// Reads whether a loaded non-player entity is currently glowing.
 ///
 /// The module must request and receive `entity.read`. The value reflects
@@ -1457,16 +1539,18 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, apply_effect, clear_custom_name, custom_name, damage, fire_ticks, raycast,
-        remove_effect, set_custom_name, set_fire_ticks, set_velocity, validate_active_effects,
-        validate_custom_name, validate_entity_raycast, validate_spatial_query, within,
-        ActiveEffect, ActiveEffectsResponse, EntityCustomNameResponse, EntityRaycastQuery,
-        EntityRaycastResult, EntityVelocity, SpatialQuery, SpatialResults,
-        MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES,
-        MAX_ENTITY_CUSTOM_NAME_BYTES, MAX_ENTITY_CUSTOM_NAME_CODE_POINTS,
-        MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES, MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS,
-        MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
-        MAX_SPATIAL_QUERY_RESULTS,
+        active_effects, apply_effect, clear_custom_name, custom_name, damage, fire_ticks,
+        navigate_to, raycast, remove_effect, set_custom_name, set_fire_ticks, set_velocity,
+        validate_active_effects, validate_custom_name, validate_entity_raycast,
+        validate_navigation_target, validate_spatial_query, within, ActiveEffect,
+        ActiveEffectsResponse, EntityCustomNameResponse, EntityNavigationRequest,
+        EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityVelocity,
+        SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
+        MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
+        MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
+        MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
+        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT,
+        MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
     };
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
@@ -1781,6 +1865,99 @@ mod tests {
                 .code(),
             ErrorCode::InvalidArgument,
             "invalid values must fail before any host import is attempted"
+        );
+    }
+
+    #[test]
+    fn navigation_bounds_and_wire_request_match_the_host_schema() {
+        assert_eq!(MAX_ENTITY_NAVIGATION_RANGE, 32.0);
+        assert_eq!(MAX_ENTITY_NAVIGATION_SPEED, 4.0);
+        assert_eq!(NAVIGATION_WRITE_CAPABILITY, "entity.navigation.write");
+        let target = BlockPos {
+            x: -30_000_000,
+            y: -64,
+            z: 30_000_000,
+        };
+        assert!(validate_navigation_target(target, 0.01).is_ok());
+        assert!(validate_navigation_target(target, MAX_ENTITY_NAVIGATION_SPEED).is_ok());
+
+        for invalid in [
+            (
+                BlockPos {
+                    x: 30_000_001,
+                    y: 0,
+                    z: 0,
+                },
+                1.0,
+            ),
+            (
+                BlockPos {
+                    x: 0,
+                    y: 0,
+                    z: -30_000_001,
+                },
+                1.0,
+            ),
+            (BlockPos { x: 0, y: 0, z: 0 }, 0.0),
+            (BlockPos { x: 0, y: 0, z: 0 }, 4.01),
+            (BlockPos { x: 0, y: 0, z: 0 }, f32::NAN),
+            (BlockPos { x: 0, y: 0, z: 0 }, f32::INFINITY),
+        ] {
+            assert_eq!(
+                validate_navigation_target(invalid.0, invalid.1)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+
+        let request = EntityNavigationRequest {
+            entity: EntityHandle::new(1, 2, 3, 4).unwrap(),
+            x: 8,
+            y: 64,
+            z: -3,
+            speed: 1.25,
+        };
+        let encoded = to_bytes(&request).unwrap();
+        assert_eq!(encoded.len(), 44);
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(i32::from_le_bytes(encoded[28..32].try_into().unwrap()), 8);
+        assert_eq!(i32::from_le_bytes(encoded[32..36].try_into().unwrap()), 64);
+        assert_eq!(i32::from_le_bytes(encoded[36..40].try_into().unwrap()), -3);
+        assert_eq!(
+            f32::from_le_bytes(encoded[40..44].try_into().unwrap()),
+            1.25
+        );
+
+        let result_bytes = [1_u32.to_le_bytes().as_slice(), &[1]].concat();
+        assert!(
+            crate::from_bytes::<EntityNavigationResult>(&result_bytes)
+                .unwrap()
+                .accepted
+        );
+        let rejected_bytes = [1_u32.to_le_bytes().as_slice(), &[0]].concat();
+        assert!(
+            !crate::from_bytes::<EntityNavigationResult>(&rejected_bytes)
+                .unwrap()
+                .accepted
+        );
+    }
+
+    #[test]
+    fn navigation_rejects_invalid_values_before_host_access() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            navigate_to(handle, BlockPos { x: 0, y: 0, z: 0 }, f32::NAN)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            navigate_to(handle, BlockPos { x: 0, y: 0, z: 0 }, 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
         );
     }
 

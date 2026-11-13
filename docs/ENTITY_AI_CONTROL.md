@@ -2,7 +2,9 @@
 
 SJML exposes a narrow AI switch for an already loaded, non-player Minecraft
 `Mob`. It does not expose goal selectors, target selection, arbitrary
-navigation goals, or pathfinding.
+navigation goals, path inspection, or custom pathfinding hooks. A separate
+bounded command can ask vanilla navigation to follow a short path; see
+[bounded entity navigation](ENTITY_NAVIGATION.md).
 
 ## Permissions and side
 
@@ -56,10 +58,10 @@ synchronously on the owning logical-server thread. Players and non-Mob
 entities are rejected. Calls from client modules, static registration, a
 different thread, or an entity that has unloaded are denied or rejected.
 
-The host changes only Minecraft's Mob no-AI flag; it does not read, stop, or
-create a navigation path. Re-enabling AI resumes normal Mob AI on later ticks.
-The API does not request chunks or inspect positions. It operates only on the
-already-loaded entity instance identified by the handle.
+The host changes only Minecraft's Mob no-AI flag; this API does not read, stop,
+or create a navigation path. Re-enabling AI resumes normal Mob AI on later
+ticks. This call does not request chunks or inspect positions. It operates
+only on the already-loaded entity instance identified by the handle.
 
 ## ABI bounds
 

@@ -2108,6 +2108,7 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | `riding_snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | Schema-v1 `EntityRidingSnapshot` with an optional vehicle identity and up to 16 sorted passenger identities |
 | `start_riding` | `passenger_ptr, passenger_len, vehicle_ptr, vehicle_len, out_ptr, out_capacity` | Writes little-endian `u32` `0`/`1` for refused/successful non-forced mount |
 | `stop_riding` | `passenger_ptr, passenger_len, out_ptr, out_capacity` | Writes little-endian `u32` `0`/`1` for no change/successful dismount |
+| `navigate_to` | `request_ptr, request_len, out_ptr, out_capacity` | Schema-v1 44-byte request (`u32` version, 24-byte entity handle, `i32 x/y/z`, raw `f32` speed); writes schema-v1 `u32` and `u8` accepted flag |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to a loaded living non-player entity; status only |
 | `remove_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len` | Remove one registered active effect from a loaded living non-player entity; status only |
 | `discard` | `(handle_ptr: i32, handle_len: i32) -> i32` | Discard one loaded non-player entity and revoke its handle; status only |
@@ -2142,6 +2143,16 @@ both `entity.read` and `entity.mount.write`; handles must identify loaded
 non-player entities in the same world. Mounts use `force=false`, and an already
 mounted passenger is not silently moved. No operation loads chunks. See
 [entity riding](ENTITY_RIDING.md).
+`navigate_to` requires both `entity.read` and `entity.navigation.write`. Its
+exact 44-byte schema-v1 request contains the entity handle, integer target
+position, and finite speed multiplier in `0.01..=4.0`; the exact five-byte
+response contains schema `u32(1)` and a strict `u8` boolean. The target must be
+within 32 blocks, inside the current dimension build height and world border,
+and its bounded one-chunk-margin path corridor must already be loaded. The
+operation is server-thread-only, accepts loaded non-player Mobs, and never asks
+Minecraft to load a chunk. It returns `false` if the Mob's navigator rejects
+the path, including when AI is disabled. Static registration and client calls
+are denied. See [bounded entity navigation](ENTITY_NAVIGATION.md).
 Effect removal applies only to loaded living non-player entities on the owning
 server thread. Stale handles, players, nonliving targets, and unknown IDs are
 rejected. See [effect removal](ENTITY_EFFECT_REMOVAL.md).

@@ -64,6 +64,7 @@ the generated project.
 - [Registered block use](docs/BLOCK_USE.md)
 - [Registered item use on blocks](docs/ITEM_USE_ON_BLOCK.md)
 - [Registered item use on entities](docs/ITEM_USE_ON_ENTITY.md)
+- [Bounded loaded-Mob navigation](docs/ENTITY_NAVIGATION.md)
 - [WebAssembly ABI v1](docs/ABI.md)
 - [Project configuration and capability grants](docs/PROJECT_CONFIGURATION.md)
 - [Complete manifest schema](docs/MANIFEST_SCHEMA.md) and [`.sjml` archive format](docs/FORMAT.md)
