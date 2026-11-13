@@ -120,6 +120,11 @@ fn register_test_content() -> SjmlResult<()> {
         "gametest_stateful_block",
         &BlockStateProperty::integer("charge", 0, 3, 1)?,
     )?;
+    registry::set_block_state_shape(
+        "gametest_stateful_block",
+        &[("powered", "true"), ("charge", "3")],
+        BlockShape::Empty,
+    )?;
     registry::register_block("gametest_interactive_block", BlockDefinition::default())?;
     let mut block_model = BlockEntityModelDefinition::new();
     block_model.add_cuboid([0.125, 0.0, 0.125], [0.875, 0.75, 0.875], 0xFF20_C0FF)?;
@@ -1338,14 +1343,14 @@ fn inspect_and_mutate_custom_block_state(arguments: BlockMutationArguments) -> S
     })?;
     if !initial
         .iter()
-        .any(|property| property.name == "powered" && property.value == "false")
+        .any(|property| property.name == "powered" && property.value == "true")
         || !initial
             .iter()
-            .any(|property| property.name == "charge" && property.value == "1")
+            .any(|property| property.name == "charge" && property.value == "3")
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "custom block state defaults were not visible through the world API",
+            "custom block state values were not visible through the world API",
         ));
     }
     world::set_block_properties(
@@ -1355,11 +1360,11 @@ fn inspect_and_mutate_custom_block_state(arguments: BlockMutationArguments) -> S
         &[
             world::BlockProperty {
                 name: "powered".to_owned(),
-                value: "true".to_owned(),
+                value: "false".to_owned(),
             },
             world::BlockProperty {
                 name: "charge".to_owned(),
-                value: "3".to_owned(),
+                value: "1".to_owned(),
             },
         ],
     )?;
@@ -1371,10 +1376,10 @@ fn inspect_and_mutate_custom_block_state(arguments: BlockMutationArguments) -> S
     })?;
     if !changed
         .iter()
-        .any(|property| property.name == "powered" && property.value == "true")
+        .any(|property| property.name == "powered" && property.value == "false")
         || !changed
             .iter()
-            .any(|property| property.name == "charge" && property.value == "3")
+            .any(|property| property.name == "charge" && property.value == "1")
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,

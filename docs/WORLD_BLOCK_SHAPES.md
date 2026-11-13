@@ -25,5 +25,8 @@ callback.
 
 Shapes are immutable after the registry phase closes. Invalid paths, unknown
 blocks, invalid coordinates, and calls outside `#[mod_register]` are rejected.
-The API does not expose state-dependent shapes or multiple disconnected boxes.
-See the [SDK guide](SDK_GUIDE.md#static-content-and-creative-tab-declarations) and [ABI reference](ABI.md#static-registry-declarations).
+This API sets one fallback shape per block and does not expose multiple
+disconnected boxes. For per-state geometry on blocks with declared properties,
+see [registered block-state shapes](BLOCK_STATE_SHAPES.md).
+See the Rust [`registry` API guide](../sjml-cli/docs/SDK_GUIDE.md#static-content-and-creative-tab-declarations)
+and [ABI reference](ABI.md#static-registry-declarations).

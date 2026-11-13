@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.83.0`, the Rust SDK/macros are `0.81.0`, and the ABI is
-`1.73.0`. ABI compatibility remains major-version based: host 0.83.0 accepts ABI
-`1.0.x` through `1.73.0`; it rejects later contracts it does not know. Packages
-using newer APIs declare ABI `^1.73.0` and host range `^0.83.0`.
+The current host is `0.84.0`, the Rust SDK/macros are `0.82.0`, and the ABI is
+`1.74.0`. ABI compatibility remains major-version based: host 0.84.0 accepts ABI
+`1.0.x` through `1.74.0`; it rejects later contracts it does not know. Packages
+using newer APIs declare ABI `^1.74.0` and host range `^0.84.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -311,3 +311,5 @@ Host 0.81.0 / ABI 1.71.0 / SDK/macros 0.79.0 adds the synchronous, owner-scoped 
 Host 0.82.0 / ABI 1.72.0 / SDK/macros 0.80.0 adds bounded static attribute modifiers for registered items. Modifiers support fully qualified vanilla or modded attribute IDs, package/module-owned IDs, vanilla operations, and all vanilla equipment-slot groups. Java boundary tests and a dedicated-server GameTest verify registration and the equipped player's live attack-damage value. The private CLI crate is 0.1.12 locally; nothing was published to crates.io or synchronized to the public CLI repository.
 
 Host 0.83.0 / ABI 1.73.0 / SDK/macros 0.81.0 adds bounded Boolean and integer state properties to module-registered blocks. Properties are immutable after registry freeze; loaded-world reads and writes use the existing block-property APIs. Java tests check staging limits and rollback, and a dedicated-server GameTest exercises defaults, snapshots, mutation, and restoration. The private CLI crate is 0.1.13 locally; nothing was published to crates.io or synchronized to the public CLI repository.
+
+Host 0.84.0 / ABI 1.74.0 / SDK/macros 0.82.0 adds exact-state geometry overrides for registered blocks with declared properties. Each override is a fixed full cube, empty shape, or one normalized cuboid and is selected from the immutable Minecraft block state without calling guest code at runtime. Codec, staging, rollback, and live GameTest coverage verify collision behavior. The private CLI crate is 0.1.14 locally; nothing was published to crates.io or synchronized to the public CLI repository.

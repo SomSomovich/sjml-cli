@@ -41,10 +41,12 @@ The write API validates the target block ID and property values before
 changing the world. See [block-state snapshots](WORLD_BLOCK_PROPERTIES.md)
 and [guarded block-state writes](WORLD_BLOCK_PROPERTIES_WRITE.md).
 
-The declaration is static: property definitions and defaults cannot be added
-or changed after registry freeze. Supported property kinds are Boolean and
-bounded integer only. They do not define state-dependent geometry, custom
-placement rules, callbacks, synchronization code, or arbitrary Java property
-types. See [block shapes](WORLD_BLOCK_SHAPES.md) and
+Exact-state shape overrides are available for blocks with these properties; see
+[registered block-state shapes](BLOCK_STATE_SHAPES.md). The declaration is
+static: property definitions and defaults cannot be added or changed after registry freeze. Supported property kinds are Boolean and
+bounded integer only. A property declaration does not itself define geometry;
+use the separate exact-state override API to assign shapes. Custom placement
+rules, callbacks, synchronization code, and arbitrary Java property types are
+not exposed. See [block shapes](WORLD_BLOCK_SHAPES.md) and
 [block behavior](WORLD_BLOCK_BEHAVIOR.md) for the separate fixed registration
 options.

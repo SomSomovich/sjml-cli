@@ -10,6 +10,9 @@ use crate::{ErrorCode, SjmlError, SjmlResult};
 
 const MAX_CONTENT_PATH_BYTES: usize = 256;
 const MAX_BLOCK_STATE_PROPERTY_NAME_BYTES: usize = 32;
+const MAX_BLOCK_STATE_VALUE_BYTES: usize = 5;
+const BLOCK_STATE_SHAPE_SCHEMA_VERSION: u32 = 1;
+const MAX_BLOCK_STATE_SHAPE_PAYLOAD_BYTES: usize = 512;
 /// Maximum number of vanilla status effects on one registered food item.
 pub const MAX_ITEM_FOOD_EFFECTS: usize = 8;
 /// Maximum UTF-8 size of one fully qualified vanilla or modded effect ID.
@@ -1489,6 +1492,13 @@ extern "C" {
         maximum: i32,
         default_value: i32,
     ) -> i32;
+    #[link_name = "set_block_state_shape"]
+    fn imported_set_block_state_shape(
+        path_pointer: i32,
+        path_length: i32,
+        payload_pointer: i32,
+        payload_length: i32,
+    ) -> i32;
     #[link_name = "register_block_entity"]
     fn imported_register_block_entity(
         path_pointer: i32,
@@ -2078,6 +2088,86 @@ pub fn add_block_state_property(path: &str, property: &BlockStateProperty) -> Sj
         let _ = (property_type, minimum, maximum, default_value);
         Err(unsupported_target())
     }
+}
+
+/// Overrides a registered block's selection, collision, occlusion, and support shape for one exact state.
+///
+/// Call this from `#[mod_register]` after registering the block and all of its state properties. The
+/// state slice must name every declared property exactly once. States without an override keep the
+/// block's default shape. For example, a closed door state can keep its cuboid while the open state
+/// uses a rotated or empty collision approximation.
+pub fn set_block_state_shape(
+    path: &str,
+    state: &[(&str, &str)],
+    shape: BlockShape,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    shape.validate()?;
+    let payload = encode_block_state_shape(state, shape)?;
+    if payload.len() > MAX_BLOCK_STATE_SHAPE_PAYLOAD_BYTES {
+        return Err(invalid_argument(
+            "block state shape payload exceeds its supported byte limit",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded path and versioned state/shape payload before returning.
+        let status = unsafe {
+            imported_set_block_state_shape(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                payload.as_ptr() as usize as u32 as i32,
+                payload.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the block-state shape");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = payload;
+        Err(unsupported_target())
+    }
+}
+
+fn encode_block_state_shape(state: &[(&str, &str)], shape: BlockShape) -> SjmlResult<Vec<u8>> {
+    if state.is_empty() || state.len() > MAX_BLOCK_STATE_PROPERTIES {
+        return Err(invalid_argument(
+            "block-state shape must name between 1 and 7 properties",
+        ));
+    }
+    let mut payload = Vec::with_capacity(MAX_BLOCK_STATE_SHAPE_PAYLOAD_BYTES);
+    payload.extend_from_slice(&BLOCK_STATE_SHAPE_SCHEMA_VERSION.to_le_bytes());
+    let (shape_kind, shape_values) = shape.abi_values();
+    payload.extend_from_slice(&(shape_kind as u32).to_le_bytes());
+    payload.extend_from_slice(&(state.len() as u32).to_le_bytes());
+    let mut names = Vec::with_capacity(state.len());
+    for (name, value) in state {
+        validate_block_state_property_name(name)?;
+        if value.is_empty()
+            || value.len() > MAX_BLOCK_STATE_VALUE_BYTES
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
+            })
+        {
+            return Err(invalid_argument(
+                "block-state shape values must be 1..=5 lowercase ASCII letters, digits, '_' or '-'; the host validates the declared property type and range",
+            ));
+        }
+        if names.iter().any(|existing| existing == name) {
+            return Err(invalid_argument(
+                "block-state shape repeats a property name",
+            ));
+        }
+        names.push(*name);
+        payload.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        payload.extend_from_slice(name.as_bytes());
+        payload.extend_from_slice(value.as_bytes());
+    }
+    for value in shape_values {
+        payload.extend_from_slice(&value.to_bits().to_le_bytes());
+    }
+    Ok(payload)
 }
 
 /// Applies one fixed selection and collision shape to a block already staged by this module.
@@ -4126,6 +4216,56 @@ mod tests {
         ] {
             assert_eq!(invalid.unwrap_err().code(), ErrorCode::InvalidArgument);
         }
+    }
+
+    #[test]
+    fn block_state_shape_payloads_are_stable_bounded_and_canonical() {
+        let shape = BlockShape::cuboid([0.0, 0.0, 0.0], [1.0, 0.5, 1.0]).unwrap();
+        let encoded =
+            encode_block_state_shape(&[("powered", "true"), ("charge", "3")], shape).unwrap();
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 2);
+        assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 2);
+        assert!(encoded.len() <= MAX_BLOCK_STATE_SHAPE_PAYLOAD_BYTES);
+        assert!(encoded
+            .windows(b"powered".len())
+            .any(|bytes| bytes == b"powered"));
+        assert!(encoded
+            .windows(b"charge".len())
+            .any(|bytes| bytes == b"charge"));
+        assert_eq!(
+            set_block_state_shape("block", &[], BlockShape::Empty)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            encode_block_state_shape(
+                &[("powered", "true"), ("powered", "false")],
+                BlockShape::Empty
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            encode_block_state_shape(&[("powered", "perhaps")], BlockShape::Empty)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            encode_block_state_shape(&[("Upper", "true")], BlockShape::Empty)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_block_state_shape("block", &[("powered", "true")], BlockShape::Empty)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
     }
 
     #[test]
