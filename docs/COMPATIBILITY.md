@@ -131,7 +131,7 @@ changing supported versions:
 
 ```sh
 ./gradlew :sjml-core:test
-./gradlew --no-configuration-cache :test build
+./gradlew --configuration-cache test build runGameTestServer
 cargo fmt --manifest-path sjml-cli/Cargo.toml --all -- --check
 cargo clippy --manifest-path sjml-cli/Cargo.toml --workspace --all-targets --locked -- -D warnings
 cargo test --manifest-path sjml-cli/Cargo.toml --workspace --locked
@@ -321,4 +321,4 @@ Host 0.84.0 / ABI 1.74.0 / SDK/macros 0.82.0 adds exact-state geometry overrides
 Host 0.85.0 / ABI 1.75.0 / SDK/macros 0.83.0 adds module-owned vanilla boss bars for live players, detached non-player living-entity health snapshots with bounded healing, exact block-state emitted-light overrides, and cancellable `entity.knockback_attempt` vetoes. Each API has an explicit ABI boundary, capability checks, Rust wrapper, focused tests, and dedicated-server GameTest coverage. The `/sjml profiler` command also reports bounded inter-module service call, failure, elapsed-time, and queue metrics. The private CLI crate is 0.1.15 locally; nothing was published to crates.io or synchronized to the public CLI repository.
 
 
-Host 0.86.0 / ABI 1.76.0 / SDK/macros 0.84.0 adds module-owned player tab-list contributions and dummy scoreboard objectives, completed-trade notifications, ordinary item spawning into loaded chunks, exact-state block behavior predicates and sound. It also splits the compatibility test guest to keep each export below the instruction-fuel limit. The integrated Gradle `test build runGameTestServer` run passed 1,152 host tests, 434 core tests (one skipped), and all 125 required GameTests. The Cargo workspace passed 26 CLI, 43 macro, and 347 SDK tests plus doc tests and strict Clippy. The SDK and root, multi-module, world-render, and OpenGL-geometry example workspaces passed `wasm32-unknown-unknown` checks; those example workspaces also passed offline tests. The private CLI crate is 0.1.16 locally; this did not publish to crates.io or synchronize the public CLI repository.
+Host 0.86.0 / ABI 1.76.0 / SDK/macros 0.84.0 adds module-owned player tab-list contributions and dummy scoreboard objectives, completed-trade notifications, ordinary item spawning into loaded chunks, exact-state block behavior predicates and sound. It also splits the compatibility test guest to keep each export below the instruction-fuel limit. The integrated Gradle `--configuration-cache test build runGameTestServer` run passed 1,152 host tests, 434 core tests (one skipped), and all 125 required GameTests. The Cargo workspace passed 26 CLI, 43 macro, and 347 SDK tests plus doc tests and strict Clippy. The SDK and root, multi-module, world-render, and OpenGL-geometry example workspaces passed `wasm32-unknown-unknown` checks; those example workspaces also passed offline tests. The private CLI crate is 0.1.16 locally; this did not publish to crates.io or synchronize the public CLI repository.

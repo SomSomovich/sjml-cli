@@ -8,7 +8,7 @@ the repository checks from the root:
 ```sh
 rustup target add wasm32-unknown-unknown
 ./gradlew :sjml-core:test
-./gradlew --no-configuration-cache :test build
+./gradlew --configuration-cache test build runGameTestServer
 cargo fmt --manifest-path sjml-cli/Cargo.toml --all -- --check
 cargo test --manifest-path sjml-cli/Cargo.toml --workspace --locked
 cargo build --manifest-path sjml-cli/Cargo.toml -p sjml-sdk --example guest \
@@ -17,9 +17,8 @@ cargo build --manifest-path sjml-cli/Cargo.toml -p sjml-sdk --example guest \
 
 The cross-platform CI workflow also runs strict Clippy checks. See
 [Compatibility](COMPATIBILITY.md) for the versions and coverage this checkout
-supports. The portable core uses Gradle's configuration cache; the current
-NeoForge ModDev `createMinecraftArtifacts` task is not cache-serializable, so
-root adapter verification explicitly disables that cache.
+supports. The root `test`, `build`, and GameTest server tasks have been verified
+with Gradle's configuration cache enabled.
 
 In the managed Linux workspace, run `. scripts/cloud-env.sh` first. It selects
 the task-owned Rust and Gradle caches and configures Java's proxy from the
