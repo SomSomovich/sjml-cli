@@ -48,6 +48,8 @@ pub const MAX_ENTITY_EQUIPMENT_STACK_COUNT: u32 = 4096;
 pub const MAX_ENTITY_EQUIPMENT_DAMAGE: u32 = 1_000_000;
 /// Maximum response bytes reserved for the six fixed slots in schema v1.
 pub const MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES: u32 = 1666;
+/// Capability required with `entity.read` to add a default item to an empty entity equipment slot.
+pub const EQUIPMENT_WRITE_CAPABILITY: &str = "entity.equipment.write";
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 /// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
@@ -217,6 +219,42 @@ pub struct EntityEquipment {
     pub legs: Option<EntityEquipmentStack>,
     /// Feet armor slot.
     pub feet: Option<EntityEquipmentStack>,
+}
+
+/// One fixed vanilla equipment slot accepted by [`try_equip_default`].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum EntityEquipmentSlot {
+    /// Main-hand item.
+    MainHand,
+    /// Offhand item.
+    OffHand,
+    /// Head armor slot.
+    Head,
+    /// Chest armor slot.
+    Chest,
+    /// Leg armor slot.
+    Legs,
+    /// Feet armor slot.
+    Feet,
+}
+
+impl EntityEquipmentSlot {
+    const fn code(self) -> u32 {
+        match self {
+            Self::MainHand => 1,
+            Self::OffHand => 2,
+            Self::Head => 3,
+            Self::Chest => 4,
+            Self::Legs => 5,
+            Self::Feet => 6,
+        }
+    }
+}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct EntityEquipmentWriteResult {
+    equipped: bool,
 }
 
 impl EntityEquipment {
@@ -472,6 +510,8 @@ extern "C" {
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "equipment"]
     fn imported_equipment(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_equipment"]
+    fn imported_set_equipment(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "riding_snapshot"]
     fn imported_riding_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "target"]
@@ -1323,6 +1363,51 @@ pub fn equipment(handle: EntityHandle) -> SjmlResult<EntityEquipment> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Adds one registered item's default stack to an empty slot of a loaded living non-player entity.
+///
+/// The module must request and receive `entity.read` and `entity.equipment.write`. Only the six
+/// vanilla slots in [`EntityEquipmentSlot`] are supported. `item_id` must be a canonical ID for an
+/// item already present in Minecraft's item registry. The host creates exactly one default stack,
+/// with no guest-supplied NBT or data components. Returns `true` after inserting it, or `false`
+/// when the slot is occupied; occupied stacks are never replaced or discarded. The operation runs
+/// on the owning logical-server thread and never loads chunks.
+pub fn try_equip_default(
+    handle: EntityHandle,
+    slot: EntityEquipmentSlot,
+    item_id: &str,
+) -> SjmlResult<bool> {
+    // Reuse detached stack validation to reject malformed IDs before any host call.
+    EntityEquipmentStack::new(item_id, 1, 0, 0)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let item_id_bytes = item_id.as_bytes();
+        let mut request = Vec::with_capacity(4 + encoded_handle.len() + 8 + item_id_bytes.len());
+        request.extend_from_slice(&1_u32.to_le_bytes());
+        request.extend_from_slice(&encoded_handle);
+        request.extend_from_slice(&slot.code().to_le_bytes());
+        request.extend_from_slice(&(item_id_bytes.len() as u32).to_le_bytes());
+        request.extend_from_slice(item_id_bytes);
+        let result: EntityEquipmentWriteResult = read_output(5, |output, capacity| {
+            // SAFETY: the versioned request and destination remain live for the synchronous import.
+            unsafe {
+                imported_set_equipment(
+                    request.as_ptr() as usize as u32 as i32,
+                    request.len() as u32 as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        Ok(result.equipped)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, slot);
         Err(unsupported_target())
     }
 }

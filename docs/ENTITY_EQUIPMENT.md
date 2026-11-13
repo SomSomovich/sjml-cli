@@ -39,4 +39,29 @@ fn equipped_item_ids(entity_handle: sjml::EntityHandle) -> SjmlResult<Vec<String
 
 The `sjml_entity_v1.equipment` import accepts the 24-byte entity handle and a writable output span. Static registration, client execution, stale/foreign handles, non-living entities, and missing grants fail closed. The SDK reserves the full bounded output size before calling the host, so a short output buffer cannot return a partial snapshot.
 
-`EntityEquipmentCodecTest`, `EntityReadImportsTest`, `EntityHandleRegistryTest`, the SDK contract tests, and the guest-driven `EntityEquipmentGameTests` cover schema order, empty slots, values, permissions, live handles, and server execution.
+`EntityEquipmentCodecTest`, `EntityEquipmentWriteCodecTest`, `EntityReadImportsTest`, `EntityHandleRegistryTest`, the SDK contract tests, and the guest-driven `EntityEquipmentGameTests` cover schema order, empty slots, values, permissions, live handles, and server execution.
+
+## Adding one default item to an empty slot
+
+`entity::try_equip_default(handle, slot, item_id)` creates one default stack from an item already
+registered in Minecraft and places it into a fixed slot. The module must request and receive both
+`entity.read` and `entity.equipment.write`. The target must still be a loaded living non-player
+entity on the owning server thread. IDs must be canonical `namespace:path` values; unknown IDs and
+`minecraft:air` are rejected. The guest cannot provide a count, NBT, or custom data components.
+
+The call returns `true` when it equips the stack and `false` when that slot already contains an
+item. An occupied stack is never replaced or discarded.
+
+```rust
+use sjml::{entity, EntityEquipmentSlot, SjmlResult};
+
+fn equip_zombie(mob: sjml::EntityHandle) -> SjmlResult<bool> {
+    entity::try_equip_default(mob, EntityEquipmentSlot::MainHand, "minecraft:iron_sword")
+}
+```
+
+`sjml_entity_v1.set_equipment` requires both capabilities and accepts a schema-v1 request with the
+24-byte entity handle, slot code (`1` main hand, `2` offhand, `3` head, `4` chest, `5` legs, `6`
+feet), and canonical item ID capped at 256 UTF-8 bytes. Its exact five-byte result is schema
+`u32(1)` followed by a `0` or `1` boolean tag. The host checks the output span before mutation.
+Static registration binds the bounded import but denies live mutation.

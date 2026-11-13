@@ -2207,7 +2207,7 @@ read-only player-inventory snapshot.
 
 ## Loaded entity snapshots and effect application
 
-Use [`entity::equipment`](ENTITY_EQUIPMENT.md) to read the six fixed vanilla equipment slots of a loaded living non-player entity. It requires `entity.read` and returns detached item IDs, counts, and durability only.
+Use [`entity::equipment`](ENTITY_EQUIPMENT.md) to read the six fixed vanilla equipment slots of a loaded living non-player entity. It requires `entity.read` and returns detached item IDs, counts, and durability only. `entity::try_equip_default` can put one existing item's default stack into an empty fixed slot; it also requires `entity.equipment.write` and never replaces an occupied stack. See [loaded entity equipment](ENTITY_EQUIPMENT.md).
 
 Request `entity.read` in the module manifest and grant it to the same
 package/module in `config/sjml-permissions.toml`. This is a global read-only
