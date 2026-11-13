@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.76.0"
+sjml-sdk = "0.77.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -171,7 +171,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.76.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.77.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)
@@ -204,7 +204,10 @@ fluid, and entity-type tags, with typed convenience functions, plus fixed
 full-cube, empty, and single-cuboid shapes for registered blocks. Tag results
 are sorted, limited to 1,024 members, and distinguish absent tags from present
 empty tags. Block shapes are finite, normalized, and set during registration.
-SDK 0.76.0 adds bounded friction, movement factors, emitted light, lava
-ignition, piston reactions, and allowlisted sound groups for registered blocks.
+SDK 0.77.0 adds the owner-scoped synchronous `block.use` callback for
+registered blocks. ABI 1.68.0 / SDK 0.76.0 added bounded friction, movement
+factors, emitted light, lava ignition, piston reactions, and allowlisted sound
+groups for registered blocks.
 See `docs/WORLD_TAG_MEMBERS.md`, `docs/WORLD_BLOCK_SHAPES.md`, and
-`docs/WORLD_BLOCK_BEHAVIOR.md`.
+`docs/WORLD_BLOCK_BEHAVIOR.md`; see `docs/BLOCK_USE.md` in the workspace for
+the event contract.

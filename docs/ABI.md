@@ -6,11 +6,12 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.68.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.69.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.68.0 adds
-bounded physical behavior settings for registered blocks. ABI 1.67.0 adds fixed
+incompatible. Build metadata does not affect version ordering. ABI 1.69.0 adds
+the owner-scoped synchronous `block.use` callback for registered blocks. ABI
+1.68.0 adds bounded physical behavior settings for registered blocks. ABI 1.67.0 adds fixed
 full-cube, empty, and single-cuboid shapes for registered blocks. ABI
 1.66.0 adds bounded member enumeration for block, item, fluid, and entity-type
 registry tags. ABI 1.65.0 adds loaded-only block and item tag membership queries. ABI
@@ -588,11 +589,11 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
-`entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`, and
-`player.fished_attempt`, `client.chat.send_attempt`.
+`entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`,
+`item.use`, `block.use`, `player.fished_attempt`, and `client.chat.send_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.interaction`, `player.drop_attempt`, `player.sleep_attempt`,
-`player.item_use_attempt`,
+`player.item_use_attempt`, `item.use`, `block.use`,
 `client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
@@ -2487,3 +2488,23 @@ Identifiers and payload bounds are documented in
 sets the NeoForge `BonemealEvent` unsuccessful and cancels fertilizer use;
 false preserves the event's current result. Guest callbacks are synchronous
 and owner-scoped; canceled events are not dispatched.
+
+## Registered block use
+
+The synchronous `sjml_v1_event_block.use` callback is an owner-scoped behavior
+hook for right-clicks on registered blocks. Its schema-v1 payload contains
+length-prefixed UTF-8 strings for the player UUID, dimension ID, and clicked
+block ID; little-endian `i32` X/Y/Z coordinates; strings for hit face, hand,
+and held item ID; then a little-endian `i32` stack count. Strings are limited
+to 256 bytes, the count to 0–1,000,000, and the complete payload to 4 KiB.
+Only the module that declared the clicked block in its `package:module/path`
+namespace receives the callback. It runs on the logical server after the
+general `player.interaction` veto and before vanilla block use.
+
+Return exactly one action byte: `0=Pass`, `1=Success`, or `2=ConsumeOne`.
+`Pass` continues vanilla behavior; `Success` handles the click; `ConsumeOne`
+handles it and consumes one item only if the held item ID and count are
+unchanged. A handled action uses NeoForge's successful interaction result.
+The callback requires `events.subscribe` and `events.cancel`, and cannot use
+`#[event_async]`. Invalid action bytes disable the failing module callback.
+See [registered block use](BLOCK_USE.md).

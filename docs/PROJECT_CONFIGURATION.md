@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.76.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.77.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.68.0"
+abi = "^1.69.0"
 minecraft = "~1.21.1"
-sjml = "^0.78.0"
+sjml = "^0.79.0"
 
 [[modules]]
 id = "main"

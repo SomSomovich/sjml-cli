@@ -219,6 +219,38 @@ pub struct ModuleItemUse {
     pub count: u32,
 }
 
+/// Synchronous use callback for a block declared by the receiving module.
+///
+/// The host routes `block.use` only to the module that declared the target block in the package's
+/// `package:module/path` namespace. It runs on the logical server before vanilla block use and
+/// after the generic `player.interaction` veto. The payload contains detached player, block
+/// position, face, hand, and held-item values. Return [`BlockUseAction`] to pass the click through,
+/// handle it, or consume exactly one unchanged held item.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ModuleBlockUse {
+    /// Canonical UUID string of the player who attempted the use.
+    pub player_id: String,
+    /// Resource location of the level where the use occurred.
+    pub dimension_id: String,
+    /// Canonical registry ID of the module-owned block.
+    pub block_id: String,
+    /// Block X coordinate.
+    pub x: i32,
+    /// Block Y coordinate.
+    pub y: i32,
+    /// Block Z coordinate.
+    pub z: i32,
+    /// Vanilla face name: `down`, `up`, `north`, `south`, `west`, or `east`.
+    pub face: String,
+    /// `main_hand` or `off_hand`.
+    pub hand: String,
+    /// Canonical registry ID of the item held at the start of the callback.
+    pub item_id: String,
+    /// Held stack count in `0..=1_000_000`.
+    pub item_count: u32,
+}
+
 /// Server-authoritative outcome of a module-owned item use callback.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ItemUseAction {
@@ -228,6 +260,41 @@ pub enum ItemUseAction {
     Success,
     /// Handle the click and consume one item if the original stack is unchanged.
     ConsumeOne,
+}
+
+/// Server-authoritative outcome of a module-owned block use callback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlockUseAction {
+    /// Continue with Minecraft's normal block-use behavior.
+    Pass,
+    /// Handle the click without changing the held stack.
+    Success,
+    /// Handle the click and consume one item if the original stack is unchanged.
+    ConsumeOne,
+}
+
+impl StableEncode for BlockUseAction {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_u8(match self {
+            Self::Pass => 0,
+            Self::Success => 1,
+            Self::ConsumeOne => 2,
+        })
+    }
+}
+
+impl StableDecode for BlockUseAction {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u8()? {
+            0 => Ok(Self::Pass),
+            1 => Ok(Self::Success),
+            2 => Ok(Self::ConsumeOne),
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("block.use action code {value} is not supported"),
+            )),
+        }
+    }
 }
 
 impl StableEncode for ItemUseAction {
@@ -1173,16 +1240,16 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
-        BlockFertilizeAttempt, BlockGrowAttempt, BlockPlace, BlockPlaceAttempt,
+        BlockFertilizeAttempt, BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockUseAction,
         ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
         EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
         EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
         EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleItemUse, PlayerAdvancementEarned,
-        PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt,
-        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        MAX_SERVER_TICK_INTERVAL,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
+        PlayerAdvancementEarned, PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved,
+        PlayerRespawned, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -2196,6 +2263,48 @@ mod tests {
             );
         }
         assert!(from_bytes::<ItemUseAction>(&[3]).is_err());
+    }
+
+    #[test]
+    fn module_block_use_round_trips_detached_target_and_action() {
+        let use_event = ModuleBlockUse {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            block_id: "sjml_game_test:content/gametest_interactive_block".to_owned(),
+            x: -12,
+            y: 68,
+            z: 301,
+            face: "up".to_owned(),
+            hand: "main_hand".to_owned(),
+            item_id: "minecraft:diamond".to_owned(),
+            item_count: 3,
+        };
+        let encoded = to_bytes(&use_event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &use_event.player_id);
+        append_test_string(&mut expected, &use_event.dimension_id);
+        append_test_string(&mut expected, &use_event.block_id);
+        expected.extend_from_slice(&(-12_i32).to_le_bytes());
+        expected.extend_from_slice(&68_i32.to_le_bytes());
+        expected.extend_from_slice(&301_i32.to_le_bytes());
+        append_test_string(&mut expected, &use_event.face);
+        append_test_string(&mut expected, &use_event.hand);
+        append_test_string(&mut expected, &use_event.item_id);
+        expected.extend_from_slice(&3_i32.to_le_bytes());
+        assert_eq!(encoded, expected);
+        assert_eq!(from_bytes::<ModuleBlockUse>(&encoded).unwrap(), use_event);
+
+        for action in [
+            BlockUseAction::Pass,
+            BlockUseAction::Success,
+            BlockUseAction::ConsumeOne,
+        ] {
+            assert_eq!(
+                from_bytes::<BlockUseAction>(&to_bytes(&action).unwrap()).unwrap(),
+                action
+            );
+        }
+        assert!(from_bytes::<BlockUseAction>(&[3]).is_err());
     }
 
     #[test]

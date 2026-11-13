@@ -14,6 +14,8 @@ mod block_grow_attempt;
 mod block_inventory_custom_name;
 #[path = "gametest/block_inventory_move.rs"]
 mod block_inventory_move;
+#[path = "gametest/block_use.rs"]
+mod block_use;
 #[path = "gametest/entity_ai_control.rs"]
 mod entity_ai_control;
 #[path = "gametest/entity_breed_attempt.rs"]
@@ -109,6 +111,7 @@ fn register_test_content() -> SjmlResult<()> {
             .push_reaction(BlockPushReaction::PushOnly)
             .sound(BlockSound::Amethyst),
     )?;
+    registry::register_block("gametest_interactive_block", BlockDefinition::default())?;
     let mut block_model = BlockEntityModelDefinition::new();
     block_model.add_cuboid([0.125, 0.0, 0.125], [0.875, 0.75, 0.875], 0xFF20_C0FF)?;
     block_model.set_texture("sjml_game_test:textures/block/gametest_model.png")?;
@@ -379,6 +382,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     gameplay_events::initialize()?;
     player_tick::initialize()?;
     player_item_use_attempt::initialize()?;
+    block_use::initialize()?;
     player_fished_attempt::initialize()?;
     entity_heal_attempt::initialize()?;
     entity_effect_application::initialize()?;
