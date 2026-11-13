@@ -41,3 +41,44 @@ armor, and `40` for offhand. For ABI function signatures, option encoding, and h
 see [the ABI reference](ABI.md#enchantments-on-player-inventory-stacks). The dedicated server
 GameTest `PlayerInventoryEnchantmentGameTests` exercises read/set/remove, applicability and level
 validation, enchanted-book storage, and preservation of unrelated stack data.
+
+## Block inventory stacks
+
+The same bounded operations are available for an existing stack in a loaded
+block container:
+
+```rust
+let level = sjml::inventory::read_enchantment_level(
+    world,
+    BlockPos { x: 8, y: 64, z: -4 },
+    0,
+    "minecraft:sharpness",
+)?;
+
+sjml::inventory::set_enchantment_level(
+    world,
+    BlockPos { x: 8, y: 64, z: -4 },
+    0,
+    "minecraft:sharpness",
+    3,
+)?;
+sjml::inventory::remove_enchantment(
+    world,
+    BlockPos { x: 8, y: 64, z: -4 },
+    0,
+    "minecraft:sharpness",
+)?;
+```
+
+Reads require `world.read` and `inventory.read`; writes require `world.read`
+and `inventory.write`. The host checks the active enchantment registry, level
+bounds, item applicability, and conflicts. Enchanted books use stored
+enchantments. The stack's item, count, damage, lore, and unrelated components
+are preserved. The addressed chunk must already be loaded and the container's
+loot table must already be resolved. The host does not add or remove inventory
+items; it only replaces the selected stack after verifying the container kept
+the same item, count, and components.
+
+The ABI imports are `sjml_inventory_v1.read_block_enchantment_level`,
+`set_block_enchantment_level`, and `remove_block_enchantment`. See the
+[complete ABI signatures](ABI.md#enchantments-on-block-inventory-stacks).

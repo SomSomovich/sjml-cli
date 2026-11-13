@@ -15,7 +15,8 @@ fn register_trades() -> SjmlResult<()> {
         VillagerTradeItem::new("minecraft:emerald", 18)?,
         VillagerTradeItem::new("minecraft:bread", 4)?,
     )?
-    .with_economy(16, 2, 0.05)?;
+    .with_economy(16, 2, 0.05)?
+    .with_initial_demand(20)?;
 
     registry::register_villager_trade("emerald_for_bread", offer)
 }
@@ -25,10 +26,14 @@ fn register_trades() -> SjmlResult<()> {
 multiplier of `0.05`. Add a second input with
 `.with_second_cost(VillagerTradeItem::new("minecraft:book", 1)?)`. The result
 and both costs use item registry IDs; the API does not accept arbitrary NBT or
-data components.
+data components. `.with_initial_demand(value)` sets the initial vanilla demand
+from `-1,000` to `1,000`; positive demand raises the displayed first-input cost
+using the offer's price multiplier. Minecraft updates demand as the offer is
+used. Negative demand is retained in the offer but vanilla does not use it to
+discount the base cost.
 
-The host stages the declaration during `mod_register`, then appends a
-`BasicItemListing` to the requested profession and level when NeoForge fires
+The host stages the declaration during `mod_register`, then appends a bounded
+`VillagerTrades.ItemListing` to the requested profession and level when NeoForge fires
 `VillagerTradesEvent` during server data loading. NeoForge 21.1.265 fires this
 main-bus event once per registered profession after a server data/tag reload.
 Levels are 1–5, matching the mutable trade map supplied by that event. Reloads

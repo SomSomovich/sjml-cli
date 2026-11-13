@@ -6,7 +6,7 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.81.0**. Versions use SemVer. ABI 1.81.0 adds bounded server-player equipment-change notifications, plain-text lore access on existing stacks in loaded block inventories, and registration-time maximum stack sizes for module-owned standalone items. ABI 1.80.0 adds per-state friction for registered blocks, loaded-only fluid-tick scheduling, and sampled physical-client cursor-movement callbacks. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
+The current core ABI version is **1.82.0**. Versions use SemVer. ABI 1.82.0 adds bounded enchantment read/set/remove imports for existing stacks in loaded block inventories, owner-routed synchronous `item.attack_attempt` veto callbacks for registered main-hand items, and a versioned villager-trade registration import that carries bounded initial demand. Entity-scope storage now rejects nonexistent, removed, or unloaded entities with `STALE_HANDLE` without loading chunks. ABI 1.81.0 adds bounded server-player equipment-change notifications, plain-text lore access on existing stacks in loaded block inventories, and registration-time maximum stack sizes for module-owned standalone items. ABI 1.80.0 adds per-state friction for registered blocks, loaded-only fluid-tick scheduling, and sampled physical-client cursor-movement callbacks. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
 incompatible. Build metadata does not affect version ordering. ABI 1.78.0 adds owner-scoped closing for guest screens, guarded server player rotation writes, detached six-slot equipment snapshots for loaded living non-player entities, and static crafting remainders for registered standalone items. ABI 1.76.0 adds module-owned player tab-list headers/footers and dummy scoreboard objectives, post-success villager-trade notifications, bounded ordinary item spawning, and exact-state block sound and predicate overrides. ABI 1.75.0 adds owner-scoped player boss bars, loaded non-player living-entity vitals and bounded healing, and exact-state emitted-light overrides for registered blocks. ABI 1.74.0 adds per-state bounded shape overrides for
@@ -2646,6 +2646,29 @@ component. Item identity, count, damage, unrelated components, and all other
 enchantments are preserved. Client-side, static-registration, stale-handle,
 and off-thread calls fail closed. See
 [player inventory enchantments](PLAYER_INVENTORY_ENCHANTMENTS.md).
+
+## Enchantments on block-inventory stacks
+
+These synchronous operations require `world.read` plus `inventory.read` for
+reads, or `world.read` plus `inventory.write` for set and remove. They are
+available only to server and `both` modules on the owning server thread. The
+host addresses one existing slot in a loaded block entity implementing
+`Container`; it rejects unresolved random-loot containers and never loads a
+chunk. Enchantment IDs must be canonical registry IDs of at most 256 UTF-8
+bytes.
+
+| Import | WebAssembly signature | Capability and behavior |
+| --- | --- | --- |
+| `read_block_enchantment_level` | `(world_ptr, world_len, position_ptr, position_len, slot, enchantment_id_ptr, enchantment_id_len, out_ptr, out_capacity) -> i32` | Requires `world.read` and `inventory.read`; writes `Option<u32>` as tag `0`, or tag `1` followed by a little-endian u32 level. Empty slots are invalid; absent enchantments return `None`. |
+| `set_block_enchantment_level` | `(world_ptr, world_len, position_ptr, position_len, slot, enchantment_id_ptr, enchantment_id_len, level) -> i32` | Requires `world.read` and `inventory.write`; checks the registered level range, item applicability, and conflicts with other enchantments. |
+| `remove_block_enchantment` | `(world_ptr, world_len, position_ptr, position_len, slot, enchantment_id_ptr, enchantment_id_len) -> i32` | Requires `world.read` and `inventory.write`; removes only the named enchantment, and succeeds without mutation when it is absent. |
+
+Set levels are `1..=255` at the ABI boundary and must fit the active
+enchantment definition. The host copies and replaces the existing stack,
+preserving item identity, count, durability, lore, and unrelated components.
+Enchanted books use their stored-enchantment component. Static-registration,
+client-side, unloaded-chunk, off-thread, and invalid-handle calls fail closed.
+See [player and block inventory enchantments](PLAYER_INVENTORY_ENCHANTMENTS.md).
 
 ## Plain-text lore on player inventory stacks
 

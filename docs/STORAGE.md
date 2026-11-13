@@ -21,11 +21,18 @@ The SDK exposes these logical scopes:
 | `StorageScope::Save` | One record namespace for this mod in the current save, shared by the mod's modules. |
 | `StorageScope::dimension(id)` | One canonical `namespace:path` dimension ID. |
 | `StorageScope::Player(uuid)` | One player's UUID; data survives logout. |
-| `StorageScope::Entity(uuid)` | One entity UUID; survives chunk unloads and dimension transfers, and is removed when NeoForge reports permanent entity removal. |
+| `StorageScope::Entity(uuid)` | One entity UUID; the record survives chunk unloads and dimension transfers, and is removed when NeoForge reports permanent entity removal. Access is allowed only while that entity is live in an already loaded server chunk. |
 | `StorageScope::block_entity(dimension, position)` | A block entity at one dimension and block position; survives chunk unloads and is deleted when a tracked removal or replacement is observed. A moved block uses a new position and does not carry the old scope. |
 
 Dimension and block-entity constructors validate lowercase canonical resource IDs. Block positions
 use signed 32-bit coordinates. The host does not load chunks as a side effect of storage access.
+Every operation on `StorageScope::Entity(uuid)` first resolves that UUID through the server's
+already-loaded levels and verifies that its current chunk is loaded. An unknown, removed, or
+unloaded entity returns `STALE_HANDLE`; it does not cause a chunk load. The record itself remains
+in the mod's save namespace across ordinary chunk unloads and dimension transfers, so it can be
+read again when the entity is loaded. Permanent entity removal deletes the matching UUID scope.
+Entity scopes are server-side: the client-profile provider accepts only `ClientProfile` and rejects
+entity UUIDs.
 The client-profile scope is local installation data, not a client-side view of server or world-save
 storage. Server contexts reject it, while client contexts reject save, dimension, player, entity,
 and block-entity scopes. Client-profile records use the same per-mod record and total-storage limits

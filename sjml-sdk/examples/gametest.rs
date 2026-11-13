@@ -14,6 +14,8 @@ mod block_fluid_place_attempt;
 mod block_grow_attempt;
 #[path = "gametest/block_inventory_custom_name.rs"]
 mod block_inventory_custom_name;
+#[path = "gametest/block_inventory_enchantments.rs"]
+mod block_inventory_enchantments;
 #[path = "gametest/block_inventory_lore.rs"]
 mod block_inventory_lore;
 #[path = "gametest/block_inventory_move.rs"]
@@ -260,6 +262,13 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::register_block_entity_model("gametest_machine", block_model)?;
     registry::register_item("gametest_ruby", ItemDefinition::default())?;
+    registry::register_item(
+        "gametest_attack_item",
+        ItemDefinition {
+            max_stack_size: 1,
+            fire_resistant: false,
+        },
+    )?;
     registry::register_item("gametest_stack_size", ItemDefinition::default())?;
     registry::set_item_max_stack_size("gametest_stack_size", 12)?;
     registry::register_item("gametest_crafting_container", ItemDefinition::default())?;
@@ -523,7 +532,8 @@ fn register_test_content() -> SjmlResult<()> {
             1,
             VillagerTradeItem::new("minecraft:emerald", 2)?,
             VillagerTradeItem::new("minecraft:diamond", 1)?,
-        )?,
+        )?
+        .with_initial_demand(20)?,
     )?;
     Ok(())
 }

@@ -64,6 +64,7 @@ const MAX_VILLAGER_TRADE_ID_BYTES: usize = 256;
 const MAX_VILLAGER_TRADE_USES: u32 = 1_000;
 const MAX_VILLAGER_TRADE_XP: u32 = 1_000;
 const MAX_VILLAGER_TRADE_PRICE_MULTIPLIER: f32 = 100.0;
+const MAX_VILLAGER_TRADE_INITIAL_DEMAND: i32 = 1_000;
 const MAX_CUSTOM_REGISTRY_VALUE_BYTES: usize = 65_536;
 const MAX_PARTICLE_TEXTURE_ID_BYTES: usize = 256;
 const MIN_PARTICLE_SCALE: f32 = 0.05;
@@ -865,6 +866,7 @@ pub struct VillagerTradeOffer {
     max_uses: u32,
     villager_xp: u32,
     price_multiplier: f32,
+    initial_demand: i32,
 }
 
 impl VillagerTradeOffer {
@@ -891,6 +893,7 @@ impl VillagerTradeOffer {
             max_uses: 12,
             villager_xp: 1,
             price_multiplier: 0.05,
+            initial_demand: 0,
         })
     }
 
@@ -911,6 +914,17 @@ impl VillagerTradeOffer {
         self.max_uses = max_uses;
         self.villager_xp = villager_xp;
         self.price_multiplier = price_multiplier;
+        Ok(self)
+    }
+
+    /// Sets the offer's bounded initial vanilla demand value.
+    ///
+    /// Positive demand increases the first input's displayed price according to the
+    /// price multiplier. Minecraft updates demand after trades; negative values do
+    /// not discount the base price because vanilla clamps the demand surcharge at 0.
+    pub fn with_initial_demand(mut self, initial_demand: i32) -> SjmlResult<Self> {
+        validate_villager_initial_demand(initial_demand)?;
+        self.initial_demand = initial_demand;
         Ok(self)
     }
 }
@@ -1839,7 +1853,7 @@ extern "C" {
         sprint_speed_bits: i32,
         flags: i32,
     ) -> i32;
-    #[link_name = "register_villager_trade"]
+    #[link_name = "register_villager_trade_v2"]
     fn imported_register_villager_trade(
         path_pointer: i32,
         path_length: i32,
@@ -1858,6 +1872,7 @@ extern "C" {
         max_uses: i32,
         villager_xp: i32,
         price_multiplier_bits: i32,
+        initial_demand: i32,
     ) -> i32;
     #[link_name = "register_entity_model"]
     fn imported_register_entity_model(
@@ -3475,6 +3490,7 @@ pub fn register_villager_trade(path: &str, offer: VillagerTradeOffer) -> SjmlRes
         ));
     }
     validate_villager_economy(offer.max_uses, offer.villager_xp, offer.price_multiplier)?;
+    validate_villager_initial_demand(offer.initial_demand)?;
     #[cfg(target_arch = "wasm32")]
     {
         let (cost_b_pointer, cost_b_length, cost_b_count) =
@@ -3505,6 +3521,7 @@ pub fn register_villager_trade(path: &str, offer: VillagerTradeOffer) -> SjmlRes
                 offer.max_uses as i32,
                 offer.villager_xp as i32,
                 offer.price_multiplier.to_bits() as i32,
+                offer.initial_demand,
             )
         };
         return status_result(status, "host rejected a villager trade declaration");
@@ -4589,6 +4606,17 @@ fn validate_villager_economy(
     Ok(())
 }
 
+fn validate_villager_initial_demand(initial_demand: i32) -> SjmlResult<()> {
+    if !(-MAX_VILLAGER_TRADE_INITIAL_DEMAND..=MAX_VILLAGER_TRADE_INITIAL_DEMAND)
+        .contains(&initial_demand)
+    {
+        return Err(invalid_argument(
+            "villager trade initial demand must be between -1000 and 1000",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_title(title: &str) -> SjmlResult<()> {
     if title.trim().is_empty()
         || title.len() > MAX_CONTENT_PATH_BYTES
@@ -5110,6 +5138,8 @@ mod tests {
             .unwrap()
             .with_second_cost(book)
             .with_economy(8, 12, 0.2)
+            .unwrap()
+            .with_initial_demand(20)
             .unwrap();
         assert_eq!(offer.profession_id, "minecraft:librarian");
         assert_eq!(offer.level, 3);
@@ -5119,6 +5149,7 @@ mod tests {
         assert_eq!(offer.max_uses, 8);
         assert_eq!(offer.villager_xp, 12);
         assert_eq!(offer.price_multiplier, 0.2);
+        assert_eq!(offer.initial_demand, 20);
 
         assert_eq!(
             VillagerTradeItem::new("minecraft:emerald", 65)
@@ -5163,6 +5194,19 @@ mod tests {
             )
             .unwrap()
             .with_economy(12, 1, f32::NAN)
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            VillagerTradeOffer::new(
+                "minecraft:librarian",
+                1,
+                VillagerTradeItem::new("minecraft:emerald", 1).unwrap(),
+                VillagerTradeItem::new("minecraft:book", 1).unwrap(),
+            )
+            .unwrap()
+            .with_initial_demand(1_001)
             .unwrap_err()
             .code(),
             ErrorCode::InvalidArgument

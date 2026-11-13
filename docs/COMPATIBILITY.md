@@ -16,13 +16,17 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.91.0`, the Rust SDK/macros are `0.89.0`, and the ABI is
-`1.81.0`. ABI compatibility remains major-version based: host 0.91.0 accepts ABI
-`1.0.x` through `1.81.0`; it rejects later contracts it does not know. Packages
-using the current APIs declare ABI `^1.81.0` and host range `^0.91.0`.
+The current host is `0.92.0`, the Rust SDK/macros are `0.90.0`, and the ABI is
+`1.82.0`. ABI compatibility remains major-version based: host 0.92.0 accepts ABI
+`1.0.x` through `1.82.0`; it rejects later contracts it does not know. Packages
+using the current APIs declare ABI `^1.82.0` and host range `^0.92.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.82.0
+
+`inventory::read_enchantment_level`, `set_enchantment_level`, and `remove_enchantment` operate on existing stacks in already-loaded block inventories. Reads require `world.read` and `inventory.read`; writes require `world.read` and `inventory.write`. The synchronous owner-routed `item.attack_attempt` event requires `events.subscribe` and `events.cancel` and applies only to the calling module's registered main-hand item. Villager trade declarations can set an initial demand from -1,000 to 1,000 through `content.register`; ABI 1.81 clients using the earlier registration import continue to register offers with demand 0. Entity-scoped storage now returns `STALE_HANDLE` for missing or unloaded entities and never loads their chunks. See [block/player enchantments](PLAYER_INVENTORY_ENCHANTMENTS.md), [item attack callbacks](ITEM_ATTACK_EVENTS.md), [villager offers](VILLAGER_TRADES.md), and [storage scopes](STORAGE.md).
 
 ### APIs added in ABI 1.81.0
 

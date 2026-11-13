@@ -23,6 +23,10 @@ pub const MAX_BLOCK_INVENTORY_LORE_LINES: usize = 8;
 pub const MAX_BLOCK_INVENTORY_LORE_LINE_BYTES: usize = 256;
 /// Maximum Unicode scalar count of one plain-text block inventory lore line.
 pub const MAX_BLOCK_INVENTORY_LORE_LINE_CODE_POINTS: usize = 256;
+/// Maximum registry ID bytes accepted by block-inventory enchantment operations.
+pub const MAX_BLOCK_INVENTORY_ENCHANTMENT_ID_BYTES: usize = 256;
+/// Maximum enchantment level accepted by the block-inventory ABI.
+pub const MAX_BLOCK_INVENTORY_ENCHANTMENT_LEVEL: u32 = 255;
 /// Maximum stable schema-v1 bytes in one block inventory lore payload.
 pub const MAX_BLOCK_INVENTORY_LORE_BYTES: u32 = 2 * 4
     + MAX_BLOCK_INVENTORY_LORE_LINES as u32 * (4 + MAX_BLOCK_INVENTORY_LORE_LINE_BYTES as u32);
@@ -297,6 +301,42 @@ extern "C" {
         position: i32,
         position_length: i32,
         slot: i32,
+    ) -> i32;
+
+    #[link_name = "read_block_enchantment_level"]
+    fn imported_read_block_enchantment_level(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        enchantment_id: i32,
+        enchantment_id_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "set_block_enchantment_level"]
+    fn imported_set_block_enchantment_level(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        enchantment_id: i32,
+        enchantment_id_length: i32,
+        level: i32,
+    ) -> i32;
+
+    #[link_name = "remove_block_enchantment"]
+    fn imported_remove_block_enchantment(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        enchantment_id: i32,
+        enchantment_id_length: i32,
     ) -> i32;
 
     #[link_name = "read_integer_component"]
@@ -933,6 +973,167 @@ pub fn clear_lore(world: WorldHandle, position: BlockPos, slot: u32) -> SjmlResu
     }
 }
 
+/// Reads the level of one registered enchantment on an existing block-inventory stack.
+///
+/// The item must support the registered enchantment, except for enchanted books, which use
+/// Minecraft's stored-enchantments component. The host reads only a loaded block entity
+/// implementing `Container`, rejects unresolved random-loot containers, and never loads chunks.
+/// An absent enchantment returns `None`; an empty slot is an error. Requires `world.read` and
+/// `inventory.read`, and runs synchronously on the server thread.
+pub fn read_enchantment_level(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    enchantment_id: &str,
+) -> SjmlResult<Option<u32>> {
+    validate_slot(slot)?;
+    validate_inventory_position(position)?;
+    validate_enchantment_id(enchantment_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        let level: Option<u32> = read_output(|output, capacity| {
+            // SAFETY: stable input buffers and output storage remain live during this call.
+            unsafe {
+                imported_read_block_enchantment_level(
+                    world.as_ptr() as usize as u32 as i32,
+                    world.len() as i32,
+                    position.as_ptr() as usize as u32 as i32,
+                    position.len() as i32,
+                    slot as i32,
+                    enchantment_id.as_ptr() as usize as u32 as i32,
+                    enchantment_id.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if level.is_some_and(|value| value == 0 || value > MAX_BLOCK_INVENTORY_ENCHANTMENT_LEVEL) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid block inventory enchantment level",
+            ));
+        }
+        Ok(level)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, enchantment_id);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets one registered enchantment on an applicable existing block-inventory stack.
+///
+/// The host enforces the active enchantment registry's minimum and maximum level, item
+/// applicability, and conflicts with other enchantments. It changes only the requested vanilla
+/// enchantments component, preserving item identity, count, damage, lore, and unrelated
+/// components. Enchanted books use their stored-enchantments component. Requires `world.read`
+/// and `inventory.write`; it runs synchronously on the server thread and never loads chunks.
+pub fn set_enchantment_level(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    enchantment_id: &str,
+    level: u32,
+) -> SjmlResult<()> {
+    validate_slot(slot)?;
+    validate_inventory_position(position)?;
+    validate_enchantment_id(enchantment_id)?;
+    if !(1..=MAX_BLOCK_INVENTORY_ENCHANTMENT_LEVEL).contains(&level) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block inventory enchantment level must be between 1 and 255",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: stable input buffers remain live for this synchronous host call.
+        let status = unsafe {
+            imported_set_block_enchantment_level(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                enchantment_id.as_ptr() as usize as u32 as i32,
+                enchantment_id.len() as i32,
+                level as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the block inventory enchantment update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, enchantment_id, level);
+        Err(unsupported_target())
+    }
+}
+
+/// Removes one registered enchantment from an existing block-inventory stack.
+///
+/// Removing an absent enchantment succeeds without changing the stack. Other enchantments and
+/// all unrelated item components are preserved. Requires `world.read` and `inventory.write` and
+/// runs synchronously on the server thread without loading chunks.
+pub fn remove_enchantment(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    enchantment_id: &str,
+) -> SjmlResult<()> {
+    validate_slot(slot)?;
+    validate_inventory_position(position)?;
+    validate_enchantment_id(enchantment_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: stable input buffers remain live for this synchronous host call.
+        let status = unsafe {
+            imported_remove_block_enchantment(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                enchantment_id.as_ptr() as usize as u32 as i32,
+                enchantment_id.len() as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the block inventory enchantment removal",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, enchantment_id);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_enchantment_id(enchantment_id: &str) -> SjmlResult<()> {
+    if enchantment_id.len() > MAX_BLOCK_INVENTORY_ENCHANTMENT_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "block enchantment ID exceeds the 256-byte limit",
+        ));
+    }
+    if !valid_item_id(enchantment_id) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block enchantment ID must be a canonical registry ID",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_lore_lines(lines: &[String], allow_empty: bool) -> SjmlResult<()> {
     if lines.len() > MAX_BLOCK_INVENTORY_LORE_LINES {
         return Err(SjmlError::new(
@@ -1238,14 +1439,16 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_custom_name, clear_lore, move_stack, read_boolean_component, read_integer_component,
-        read_lore, set_custom_name, set_lore, transfer, validate_custom_name, validate_lore_line,
-        validate_lore_lines, validate_slot, validate_transfer_count, write_boolean_component,
-        write_integer_component, BlockPos, Direction, InventoryEndpoint, ItemStackSnapshot,
-        MAX_BLOCK_INVENTORY_LORE_BYTES, MAX_BLOCK_INVENTORY_LORE_LINES,
-        MAX_BLOCK_INVENTORY_LORE_LINE_BYTES, MAX_CUSTOM_ITEM_NAME_BYTES,
-        MAX_CUSTOM_ITEM_NAME_CHARS, MAX_INVENTORY_COORDINATE, MAX_INVENTORY_SLOTS,
-        MAX_ITEM_TRANSFER_COUNT,
+        clear_custom_name, clear_lore, move_stack, read_boolean_component, read_enchantment_level,
+        read_integer_component, read_lore, remove_enchantment, set_custom_name,
+        set_enchantment_level, set_lore, transfer, validate_custom_name, validate_enchantment_id,
+        validate_lore_line, validate_lore_lines, validate_slot, validate_transfer_count,
+        write_boolean_component, write_integer_component, BlockPos, Direction, InventoryEndpoint,
+        ItemStackSnapshot, MAX_BLOCK_INVENTORY_ENCHANTMENT_ID_BYTES,
+        MAX_BLOCK_INVENTORY_ENCHANTMENT_LEVEL, MAX_BLOCK_INVENTORY_LORE_BYTES,
+        MAX_BLOCK_INVENTORY_LORE_LINES, MAX_BLOCK_INVENTORY_LORE_LINE_BYTES,
+        MAX_CUSTOM_ITEM_NAME_BYTES, MAX_CUSTOM_ITEM_NAME_CHARS, MAX_INVENTORY_COORDINATE,
+        MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
     };
     use crate::{ErrorCode, WorldHandle};
 
@@ -1548,6 +1751,84 @@ mod tests {
                 .code(),
             ErrorCode::UnknownErrorCode
         );
+    }
+
+    #[test]
+    fn block_inventory_enchantment_ids_and_levels_are_bounded_before_host_access() {
+        assert_eq!(validate_enchantment_id("minecraft:sharpness"), Ok(()));
+        assert_eq!(
+            validate_enchantment_id("Minecraft:sharpness")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_enchantment_id(&format!(
+                "test:{}",
+                "x".repeat(MAX_BLOCK_INVENTORY_ENCHANTMENT_ID_BYTES)
+            ))
+            .unwrap_err()
+            .code(),
+            ErrorCode::PayloadTooLarge
+        );
+
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        assert_eq!(
+            read_enchantment_level(
+                world,
+                position,
+                MAX_INVENTORY_SLOTS as u32,
+                "minecraft:sharpness"
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_enchantment_level(world, position, 0, "minecraft:sharpness", 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_enchantment_level(
+                world,
+                position,
+                0,
+                "minecraft:sharpness",
+                MAX_BLOCK_INVENTORY_ENCHANTMENT_LEVEL + 1
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            remove_enchantment(world, position, 0, "../sharpness")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            read_enchantment_level(world, position, 0, "minecraft:sharpness")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            remove_enchantment(world, position, 0, "minecraft:sharpness")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn block_inventory_enchantment_levels_use_the_stable_optional_u32_format() {
+        assert_eq!(crate::to_bytes(&None::<u32>).unwrap(), [0]);
+        let encoded = crate::to_bytes(&Some(5_u32)).unwrap();
+        assert_eq!(encoded, [1, 5, 0, 0, 0]);
+        assert_eq!(crate::from_bytes::<Option<u32>>(&encoded).unwrap(), Some(5));
     }
 
     #[test]

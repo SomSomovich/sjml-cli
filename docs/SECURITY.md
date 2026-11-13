@@ -350,6 +350,15 @@ handler to guest code. `inventory.write` has no per-block or per-item ACL, so
 grant it only to modules trusted to mutate containers reachable through their
 `world.read` handle.
 
+`read_block_enchantment_level`, `set_block_enchantment_level`, and
+`remove_block_enchantment` use the same world-handle and server-thread checks.
+They address only a single existing stack in an already loaded `Container`,
+reject unresolved random-loot containers, and never load a chunk. Mutations
+copy the existing stack and commit only if the container retains its item,
+count, and complete component set apart from the requested enchantment. These
+operations inherit the broad `inventory.write` container authority; there is
+no per-block or per-item ACL.
+
 `inventory::read_stack` exposes only bounded detached fields for one slot in
 an already-loaded item handler: registry ID, counts, slot limit, optional
 durability, and a sanitized plain-text custom name. It requires

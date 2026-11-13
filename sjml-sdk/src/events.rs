@@ -718,6 +718,37 @@ pub struct ModuleItemUseOnEntity {
     pub hand: String,
 }
 
+/// Synchronous, cancellable attack attempt made with an item owned by the receiving module.
+///
+/// The host routes `item.attack_attempt` only to the module that declared the held item in its
+/// `package:module/path` namespace. It runs on the logical server after the general
+/// `player.attack_attempt` callbacks have allowed the attack and before vanilla attack processing.
+/// The snapshot contains detached player, dimension, item, and target values. Return `Ok(true)`
+/// to veto the attack. Both `events.subscribe` and `events.cancel` are required, and the callback
+/// must be synchronous because Minecraft is waiting to resolve the cancellable attack hook.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ModuleItemAttackAttempt {
+    /// Canonical UUID string of the player who initiated the attack.
+    pub player_id: String,
+    /// Resource location of the level containing the player and target.
+    pub dimension_id: String,
+    /// Canonical ID of the same-module registered item in the player's main hand.
+    pub item_id: String,
+    /// Main-hand item count at attack time, in `1..=99`.
+    pub item_count: u32,
+    /// Canonical UUID string of the targeted entity.
+    pub target_id: String,
+    /// Canonical registry ID of the targeted entity type.
+    pub target_type_id: String,
+    /// Target X coordinate when the attack hook ran.
+    pub target_x: f64,
+    /// Target Y coordinate when the attack hook ran.
+    pub target_y: f64,
+    /// Target Z coordinate when the attack hook ran.
+    pub target_z: f64,
+}
+
 /// Synchronous use callback for a block declared by the receiving module.
 ///
 /// The host routes `block.use` only to the module that declared the target block in the package's
@@ -1972,8 +2003,8 @@ mod tests {
         EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
         EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned,
         EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
-        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
+        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
         PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
         PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
         PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
@@ -2671,6 +2702,40 @@ mod tests {
             "Rust encoding must match host schema-v1 bytes"
         );
         assert_eq!(from_bytes::<PlayerAttackAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn module_item_attack_attempt_matches_host_schema_v1_bytes() {
+        let event = ModuleItemAttackAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            item_id: "test_pack:combat/sabre".to_owned(),
+            item_count: 2,
+            target_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            target_type_id: "minecraft:pig".to_owned(),
+            target_x: -4.5,
+            target_y: 72.0,
+            target_z: 19.25,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.player_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        append_test_string(&mut expected, &event.item_id);
+        expected.extend_from_slice(&event.item_count.to_le_bytes());
+        append_test_string(&mut expected, &event.target_id);
+        append_test_string(&mut expected, &event.target_type_id);
+        expected.extend_from_slice(&event.target_x.to_le_bytes());
+        expected.extend_from_slice(&event.target_y.to_le_bytes());
+        expected.extend_from_slice(&event.target_z.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust bytes must match host schema-v1 layout"
+        );
+        assert_eq!(
+            from_bytes::<ModuleItemAttackAttempt>(&encoded).unwrap(),
+            event
+        );
     }
 
     #[test]

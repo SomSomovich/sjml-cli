@@ -29,6 +29,12 @@ fn update_block_inventory_custom_name(
         z: arguments.chest_z,
     };
     match arguments.operation.as_str() {
+        "enchantment" => {
+            super::block_inventory_enchantments::verify_block_inventory_enchantments(
+                world, position,
+            )?;
+            Ok("block inventory enchantment read, set, preservation, and removal succeeded".to_owned())
+        }
         "set" => {
             inventory::set_custom_name(world, position, 0, "Café 🪨")?;
             super::block_inventory_lore::verify_block_inventory_lore(world, position, "Café 🪨")?;
@@ -40,7 +46,7 @@ fn update_block_inventory_custom_name(
         }
         _ => Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "operation must be either set or clear",
+            "operation must be set, clear, or enchantment",
         )),
     }
 }
