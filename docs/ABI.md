@@ -2762,6 +2762,31 @@ creates or changes an objective. The bounded stable codes are `List` 0,
 Unknown or negative codes return `INVALID_ARGUMENT`. The host maps this fixed
 wire range explicitly rather than accepting arbitrary Java enum ordinals.
 
+## Module-owned scoreboard objectives (NeoForge adapter)
+
+The Rust guest SDK binds the following additions in `sjml_scoreboard_v1`. They
+operate on the active logical-server scoreboard, require the listed capability,
+and run on the owning server thread:
+
+| Import | Parameters | Permission | Behavior |
+| --- | --- | --- | --- |
+| `create_objective` | `id_ptr, id_len, display_ptr, display_len` | `scoreboard.write` | Create the module's writable dummy objective or update its literal display name. |
+| `remove_objective` | `id_ptr, id_len` | `scoreboard.write` | Remove only the exact objective owned by this package/module/local ID; vanilla clears its scores and display slots. |
+| `owned_objective_score` | `id_ptr, id_len, entry_ptr, entry_len, output_ptr, output_capacity` | `scoreboard.read` | Return the existing 12-byte schema-v1 score response for this module's objective. |
+| `set_owned_objective_score` | `id_ptr, id_len, entry_ptr, entry_len, value` | `scoreboard.write` | Create or update one entry in this module's writable dummy objective. |
+| `set_owned_objective_display_slot` | `id_ptr, id_len, slot_code` | `scoreboard.write` | Assign this module's objective to one stable vanilla display slot. |
+
+Local IDs contain 1–64 lowercase ASCII letters, digits, `_`, or `-`, starting
+with a letter. Display names are nonempty literal text capped at 128 UTF-8
+bytes/64 Unicode characters without controls. The host generates a bounded
+vanilla name from the exact package/module/local-ID tuple and records that
+tuple in the world scoreboard ownership data. The generated objective uses
+only the writable vanilla `dummy` criterion and integer render type. Existing
+vanilla or foreign objectives are never adopted. Ownership data migration
+preserves prior module-owned team records; corrupt data disables these writes.
+Each module is limited to 128 owned objectives and each save to 16,384 owner
+records.
+
 ## Module-owned scoreboard teams (NeoForge adapter)
 
 The Rust guest SDK binds the following imports in `sjml_scoreboard_v1`.

@@ -1,9 +1,9 @@
 # Scoreboard API
 
 SJML exposes bounded reads and writes for entries in existing vanilla
-scoreboard objectives, guarded display-slot assignment for existing objectives,
-and a separate API for teams owned by one SJML module. Modules cannot create or
-change objectives or vanilla and other-module teams.
+scoreboard objectives, module-owned dummy objective creation and removal,
+guarded display-slot assignment, and a separate API for teams owned by one
+SJML module. Modules cannot alter vanilla or other-module objectives and teams.
 
 ## Permissions and bounds
 
@@ -11,6 +11,12 @@ change objectives or vanilla and other-module teams.
 - `scoreboard.write` grants `sjml::scoreboard::set_score(objective, entry, value)`.
 - `scoreboard.write` also grants `set_display_slot(objective, slot)` and
   `clear_display_slot(slot)`.
+- `scoreboard.write` grants `create_objective(id, display_name)`,
+  `set_objective_score(id, entry, value)`,
+  `set_objective_display_slot(id, slot)`, and `remove_objective(id)` for this
+  module's generated dummy objectives.
+- `scoreboard.read` grants `objective_score(id, entry)` for this module's
+  generated dummy objectives.
 - `scoreboard.read` also grants `sjml::scoreboard::team(id)`.
 - `scoreboard.write` grants module-owned team creation, removal, options, and
   player membership operations.
@@ -27,6 +33,25 @@ change objectives or vanilla and other-module teams.
 `set_score` creates or updates only the named entry within an existing,
 writable objective. It does not create objectives or change objective
 criteria, display names, display slots, teams, or other entries.
+
+## Module-owned objectives
+
+`create_objective(id, display_name)` creates a writable dummy objective or
+updates the literal display name of the exact objective already owned by this
+package/module and local ID. IDs contain 1–64 lowercase ASCII letters, digits,
+`_`, or `-`, starting with a letter. Display names contain at most 128 UTF-8
+bytes and 64 Unicode characters and reject control characters. The host
+generates the bounded vanilla name and stores the owner tuple in the world's
+SJML scoreboard ownership data. A collision with an unowned vanilla objective
+is denied; the host never adopts it.
+
+`objective_score`, `set_objective_score`, and `set_objective_display_slot`
+address only that module-owned dummy objective. `remove_objective` removes only
+the exact owned objective. Vanilla clears its scores and any display slots
+pointing to it. Arbitrary criteria, custom number formats, and edits to foreign
+objectives remain unavailable through these methods. Ownership data migrates
+the existing team-owner format and fails closed if corrupted. See
+[`SCOREBOARD_OBJECTIVES.md`](SCOREBOARD_OBJECTIVES.md) for the Rust example.
 
 `set_display_slot` assigns an existing objective to one fixed vanilla display
 slot, replacing the objective currently shown there. `clear_display_slot`

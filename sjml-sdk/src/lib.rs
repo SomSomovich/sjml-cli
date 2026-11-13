@@ -286,10 +286,15 @@ pub use render::{
     MAX_WORLD_MODEL_VERTICES,
 };
 pub use scoreboard::{
-    clear_display_slot as scoreboard_clear_display_slot, score as scoreboard_score,
-    set_display_slot as scoreboard_set_display_slot, set_score as scoreboard_set_score,
-    DisplaySlot, DISPLAY_SLOT_COUNT, MAX_SCOREBOARD_ENTRY_BYTES, MAX_SCOREBOARD_OBJECTIVE_BYTES,
-    MAX_SCORE_VALUE,
+    clear_display_slot as scoreboard_clear_display_slot,
+    create_objective as scoreboard_create_objective, objective_score as scoreboard_objective_score,
+    remove_objective as scoreboard_remove_objective, score as scoreboard_score,
+    set_display_slot as scoreboard_set_display_slot,
+    set_objective_display_slot as scoreboard_set_objective_display_slot,
+    set_objective_score as scoreboard_set_objective_score, set_score as scoreboard_set_score,
+    DisplaySlot, DISPLAY_SLOT_COUNT, MAX_OWNED_OBJECTIVE_DISPLAY_BYTES,
+    MAX_OWNED_OBJECTIVE_DISPLAY_CODE_POINTS, MAX_OWNED_OBJECTIVE_ID_BYTES,
+    MAX_SCOREBOARD_ENTRY_BYTES, MAX_SCOREBOARD_OBJECTIVE_BYTES, MAX_SCORE_VALUE,
 };
 pub use screen_input::{
     unsubscribe_key_pressed, ScreenInputEvent, ScreenInputSubscriptionHandle,
@@ -542,8 +547,13 @@ pub mod prelude {
     };
     pub use crate::scoreboard;
     pub use crate::scoreboard::{
-        clear_display_slot as scoreboard_clear_display_slot, score as scoreboard_score,
-        set_display_slot as scoreboard_set_display_slot, set_score as scoreboard_set_score,
+        clear_display_slot as scoreboard_clear_display_slot,
+        create_objective as scoreboard_create_objective,
+        objective_score as scoreboard_objective_score,
+        remove_objective as scoreboard_remove_objective, score as scoreboard_score,
+        set_display_slot as scoreboard_set_display_slot,
+        set_objective_display_slot as scoreboard_set_objective_display_slot,
+        set_objective_score as scoreboard_set_objective_score, set_score as scoreboard_set_score,
         DisplaySlot,
     };
     pub use crate::screen_input;

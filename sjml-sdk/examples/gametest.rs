@@ -80,6 +80,8 @@ mod player_villager_trade;
 mod scoreboard;
 #[path = "gametest/scoreboard_display_slot.rs"]
 mod scoreboard_display_slot;
+#[path = "gametest/scoreboard_objectives.rs"]
+mod scoreboard_objectives;
 #[path = "gametest/scoreboard_teams.rs"]
 mod scoreboard_teams;
 #[path = "gametest/world_block_tag.rs"]

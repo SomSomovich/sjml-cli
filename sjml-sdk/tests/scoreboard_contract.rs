@@ -1,6 +1,7 @@
 use sjml::{
-    scoreboard, DisplaySlot, ErrorCode, DISPLAY_SLOT_COUNT, MAX_SCOREBOARD_ENTRY_BYTES,
-    MAX_SCOREBOARD_OBJECTIVE_BYTES, MAX_SCORE_VALUE,
+    scoreboard, DisplaySlot, ErrorCode, DISPLAY_SLOT_COUNT, MAX_OWNED_OBJECTIVE_DISPLAY_BYTES,
+    MAX_OWNED_OBJECTIVE_DISPLAY_CODE_POINTS, MAX_OWNED_OBJECTIVE_ID_BYTES,
+    MAX_SCOREBOARD_ENTRY_BYTES, MAX_SCOREBOARD_OBJECTIVE_BYTES, MAX_SCORE_VALUE,
 };
 
 #[test]
@@ -33,6 +34,71 @@ fn scoreboard_limits_are_explicit_and_match_the_host_contract() {
     assert_eq!(
         slots.map(|slot| slot as u32),
         std::array::from_fn(|index| index as u32)
+    );
+}
+
+#[test]
+fn owned_objective_ids_and_display_names_are_bounded_before_host_access() {
+    assert_eq!(MAX_OWNED_OBJECTIVE_ID_BYTES, 64);
+    assert_eq!(MAX_OWNED_OBJECTIVE_DISPLAY_BYTES, 128);
+    assert_eq!(MAX_OWNED_OBJECTIVE_DISPLAY_CODE_POINTS, 64);
+
+    let long_id = "x".repeat(MAX_OWNED_OBJECTIVE_ID_BYTES + 1);
+    for id in ["", "Upper", "bad id", "_start", long_id.as_str()] {
+        assert_eq!(
+            scoreboard::create_objective(id, "Objective")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            scoreboard::remove_objective(id).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+    let long_display = "x".repeat(MAX_OWNED_OBJECTIVE_DISPLAY_BYTES + 1);
+    for display_name in ["", "line\nbreak", long_display.as_str()] {
+        assert_eq!(
+            scoreboard::create_objective("score", display_name)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    assert_eq!(
+        scoreboard::create_objective("score", "Valid")
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        scoreboard::remove_objective("score").unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        scoreboard::objective_score("score", "#hidden")
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        scoreboard::set_objective_score("score", "Alice", MAX_SCORE_VALUE + 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        scoreboard::set_objective_score("score", "Alice", 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        scoreboard::set_objective_display_slot("score", DisplaySlot::Sidebar)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
     );
 }
 
