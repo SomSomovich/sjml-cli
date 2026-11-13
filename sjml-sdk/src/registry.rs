@@ -17,6 +17,10 @@ pub const MAX_ITEM_FOOD_EFFECT_ID_BYTES: usize = 256;
 pub const MAX_ITEM_FOOD_EFFECT_DURATION_TICKS: u32 = 72_000;
 /// Maximum static vanilla damage capacity for one registered item.
 pub const MAX_ITEM_MAX_DAMAGE: u32 = 1_000_000;
+/// Maximum number of vanilla attribute modifiers on one registered item.
+pub const MAX_ITEM_ATTRIBUTE_MODIFIERS: usize = 16;
+/// Maximum absolute static modifier amount on one registered item.
+pub const MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT: f32 = 1024.0;
 const MAX_FLUID_PATH_BYTES: usize = MAX_CONTENT_PATH_BYTES - "_flowing".len();
 const MAX_FLUID_TEXTURE_ID_BYTES: usize = 256;
 const MAX_COMPONENT_VALUE_BYTES: usize = 4096;
@@ -66,6 +70,86 @@ pub enum ItemRarity {
     Uncommon = 1,
     Rare = 2,
     Epic = 3,
+}
+
+/// Equipment-slot group for a static registered-item attribute modifier.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ItemAttributeSlot {
+    Any = 0,
+    Mainhand = 1,
+    Offhand = 2,
+    Hand = 3,
+    Feet = 4,
+    Legs = 5,
+    Chest = 6,
+    Head = 7,
+    Armor = 8,
+    Body = 9,
+}
+
+/// One static vanilla or modded attribute modifier for a registered item.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemAttributeModifier {
+    attribute_id: String,
+    modifier_path: String,
+    amount: f32,
+    operation: AttributeModifierOperation,
+    slot: ItemAttributeSlot,
+}
+
+impl ItemAttributeModifier {
+    /// Creates a modifier for a fully qualified attribute ID and a module-local modifier path.
+    ///
+    /// Amounts must be finite and within `-1024..=1024`. The modifier's final resource ID is
+    /// namespaced to this package and module during static registration.
+    pub fn new(
+        attribute_id: impl Into<String>,
+        modifier_path: impl Into<String>,
+        amount: f32,
+        operation: AttributeModifierOperation,
+        slot: ItemAttributeSlot,
+    ) -> SjmlResult<Self> {
+        let attribute_id = attribute_id.into();
+        let modifier_path = modifier_path.into();
+        validate_villager_registry_id(&attribute_id, "item attribute ID")?;
+        validate_path(&modifier_path)?;
+        if !amount.is_finite()
+            || !(-MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT..=MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT)
+                .contains(&amount)
+        {
+            return Err(invalid_argument(
+                "item attribute modifier amount must be finite and between -1024 and 1024",
+            ));
+        }
+        Ok(Self {
+            attribute_id,
+            modifier_path,
+            amount,
+            operation,
+            slot,
+        })
+    }
+
+    pub fn attribute_id(&self) -> &str {
+        &self.attribute_id
+    }
+
+    pub fn modifier_path(&self) -> &str {
+        &self.modifier_path
+    }
+
+    pub const fn amount(&self) -> f32 {
+        self.amount
+    }
+
+    pub const fn operation(&self) -> AttributeModifierOperation {
+        self.operation
+    }
+
+    pub const fn slot(&self) -> ItemAttributeSlot {
+        self.slot
+    }
 }
 
 /// Bounded vanilla food behavior for a registered item.
@@ -1251,6 +1335,18 @@ extern "C" {
     fn imported_set_item_rarity(path_pointer: i32, path_length: i32, rarity: i32) -> i32;
     #[link_name = "set_item_enchantment_value"]
     fn imported_set_item_enchantment_value(path_pointer: i32, path_length: i32, value: i32) -> i32;
+    #[link_name = "set_item_attribute_modifier"]
+    fn imported_set_item_attribute_modifier(
+        item_path_pointer: i32,
+        item_path_length: i32,
+        attribute_id_pointer: i32,
+        attribute_id_length: i32,
+        modifier_path_pointer: i32,
+        modifier_path_length: i32,
+        amount_bits: i32,
+        operation: i32,
+        slot: i32,
+    ) -> i32;
     #[link_name = "set_item_max_damage"]
     fn imported_set_item_max_damage(path_pointer: i32, path_length: i32, max_damage: i32) -> i32;
     #[link_name = "set_item_food"]
@@ -1681,6 +1777,43 @@ pub fn set_item_enchantment_value(item_path: &str, value: u32) -> SjmlResult<()>
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = value;
+        Err(unsupported_target())
+    }
+}
+
+/// Adds one static vanilla attribute modifier to an item declared by this module.
+///
+/// Call this from `#[mod_register]`, after `register_item` or after registering a block with an
+/// item form. The attribute ID must be fully qualified, for example
+/// `minecraft:generic.attack_damage`; modifier paths are scoped to the declaring package/module.
+/// Each item accepts at most [`MAX_ITEM_ATTRIBUTE_MODIFIERS`] entries. The host resolves the
+/// attribute against Minecraft's active registry during item registration.
+pub fn set_item_attribute_modifier(
+    item_path: &str,
+    modifier: &ItemAttributeModifier,
+) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies all bounded strings and validates the stable scalar codes.
+        let status = unsafe {
+            imported_set_item_attribute_modifier(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                modifier.attribute_id.as_ptr() as usize as u32 as i32,
+                modifier.attribute_id.len() as u32 as i32,
+                modifier.modifier_path.as_ptr() as usize as u32 as i32,
+                modifier.modifier_path.len() as u32 as i32,
+                modifier.amount.to_bits() as i32,
+                modifier.operation as i32,
+                modifier.slot as i32,
+            )
+        };
+        return status_result(status, "host rejected the item attribute modifier");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = modifier;
         Err(unsupported_target())
     }
 }
@@ -5180,6 +5313,86 @@ mod tests {
         );
         assert_eq!(
             set_item_enchantment_value("../ruby", 1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_attribute_modifier_codes_bounds_and_ids_are_stable() {
+        assert_eq!(MAX_ITEM_ATTRIBUTE_MODIFIERS, 16);
+        assert_eq!(ItemAttributeSlot::Any as i32, 0);
+        assert_eq!(ItemAttributeSlot::Mainhand as i32, 1);
+        assert_eq!(ItemAttributeSlot::Offhand as i32, 2);
+        assert_eq!(ItemAttributeSlot::Hand as i32, 3);
+        assert_eq!(ItemAttributeSlot::Feet as i32, 4);
+        assert_eq!(ItemAttributeSlot::Legs as i32, 5);
+        assert_eq!(ItemAttributeSlot::Chest as i32, 6);
+        assert_eq!(ItemAttributeSlot::Head as i32, 7);
+        assert_eq!(ItemAttributeSlot::Armor as i32, 8);
+        assert_eq!(ItemAttributeSlot::Body as i32, 9);
+
+        let modifier = ItemAttributeModifier::new(
+            "minecraft:generic.attack_damage",
+            "attack_bonus",
+            3.5,
+            AttributeModifierOperation::AddValue,
+            ItemAttributeSlot::Mainhand,
+        )
+        .unwrap();
+        assert_eq!(modifier.attribute_id(), "minecraft:generic.attack_damage");
+        assert_eq!(modifier.modifier_path(), "attack_bonus");
+        assert_eq!(modifier.amount(), 3.5);
+        assert_eq!(modifier.operation(), AttributeModifierOperation::AddValue);
+        assert_eq!(modifier.slot(), ItemAttributeSlot::Mainhand);
+        assert_eq!(
+            set_item_attribute_modifier("ruby", &modifier)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_attribute_modifier("../ruby", &modifier)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            ItemAttributeModifier::new(
+                "generic.attack_damage",
+                "attack_bonus",
+                1.0,
+                AttributeModifierOperation::AddValue,
+                ItemAttributeSlot::Any,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        for amount in [f32::NAN, f32::INFINITY, 1024.01, -1024.01] {
+            assert_eq!(
+                ItemAttributeModifier::new(
+                    "minecraft:generic.attack_damage",
+                    "attack_bonus",
+                    amount,
+                    AttributeModifierOperation::AddValue,
+                    ItemAttributeSlot::Any,
+                )
+                .unwrap_err()
+                .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            ItemAttributeModifier::new(
+                "minecraft:generic.attack_damage",
+                "../attack_bonus",
+                1.0,
+                AttributeModifierOperation::AddValue,
+                ItemAttributeSlot::Any,
+            )
+            .unwrap_err()
+            .code(),
             ErrorCode::InvalidArgument
         );
     }

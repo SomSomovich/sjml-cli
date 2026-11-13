@@ -154,6 +154,23 @@ fn register_test_content() -> SjmlResult<()> {
     registry::set_item_rarity("gametest_epic_rarity", ItemRarity::Epic)?;
     registry::register_item("gametest_enchantable", ItemDefinition::default())?;
     registry::set_item_enchantment_value("gametest_enchantable", 31)?;
+    registry::register_item(
+        "gametest_attribute_item",
+        ItemDefinition {
+            max_stack_size: 1,
+            fire_resistant: false,
+        },
+    )?;
+    registry::set_item_attribute_modifier(
+        "gametest_attribute_item",
+        &ItemAttributeModifier::new(
+            "minecraft:generic.attack_damage",
+            "attack_bonus",
+            3.5,
+            AttributeModifierOperation::AddValue,
+            ItemAttributeSlot::Mainhand,
+        )?,
+    )?;
     registry::register_item("gametest_food", ItemDefinition::default())?;
     let food_effects = registry::ItemFoodEffects::new().with_effect(
         registry::ItemFoodEffect::new("minecraft:poison", 1200, 1, 1.0)?,

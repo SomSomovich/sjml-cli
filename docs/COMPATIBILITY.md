@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.81.0`, the Rust SDK/macros are `0.79.0`, and the ABI is
-`1.71.0`. ABI compatibility remains major-version based: host 0.81.0 accepts ABI
-`1.0.x` through `1.71.0`; it rejects later contracts it does not know. Packages
-using newer APIs declare ABI `^1.71.0` and host range `^0.81.0`.
+The current host is `0.82.0`, the Rust SDK/macros are `0.80.0`, and the ABI is
+`1.72.0`. ABI compatibility remains major-version based: host 0.82.0 accepts ABI
+`1.0.x` through `1.72.0`; it rejects later contracts it does not know. Packages
+using newer APIs declare ABI `^1.72.0` and host range `^0.82.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -306,3 +306,6 @@ consumption. The private CLI crate is 0.1.10 locally; nothing was published to
 crates.io or synchronized to the public CLI repository.
 
 Host 0.81.0 / ABI 1.71.0 / SDK/macros 0.79.0 adds the synchronous, owner-scoped `item.use_on_entity` callback for registered items. It runs on the general `EntityInteract` hook only after the more specific `interactAt` stage passes and after the `player.interaction` veto; it can pass through, handle the interaction, or consume one unchanged item. The dedicated-server GameTest posts the NeoForge event bus hook with a live cow and registered item. The private CLI crate is 0.1.11 locally; nothing was published to crates.io or synchronized to the public CLI repository.
+
+
+Host 0.82.0 / ABI 1.72.0 / SDK/macros 0.80.0 adds bounded static attribute modifiers for registered items. Modifiers support fully qualified vanilla or modded attribute IDs, package/module-owned IDs, vanilla operations, and all vanilla equipment-slot groups. Java boundary tests and a dedicated-server GameTest verify registration and the equipped player's live attack-damage value. The private CLI crate is 0.1.12 locally; nothing was published to crates.io or synchronized to the public CLI repository.

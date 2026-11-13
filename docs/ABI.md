@@ -6,10 +6,11 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.71.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.72.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.71.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.72.0 adds
+static bounded vanilla and modded attribute modifiers to registered items. ABI 1.71.0 adds
 an owner-scoped synchronous `item.use_on_entity` callback for registered items.
 ABI 1.70.0 adds
 an owner-scoped synchronous `item.use_on_block` callback for registered items.
@@ -194,8 +195,10 @@ stonecutting recipe declarations.
 
 The core instruments guest WASM functions with a basic-block instruction
 counter. Each exported callback receives a fresh budget; the runtime default is
-1,000,000 guest instructions per export and trusted host code may configure a
-limit up to 100,000,000. An exhausted budget traps that callback and follows
+1,000,000 guest instructions per export, while the one-time static
+`sjml_v1_mod_register` callback receives a separate 2,000,000-instruction
+ceiling. Trusted host code may configure a limit up to 100,000,000. An exhausted
+budget traps that callback and follows
 the normal module callback failure path. Modules exceeding the instrumentation
 limits (2,000,000 decoded instructions or 500,000 basic blocks) are rejected.
 This limits guest instruction work, not elapsed time: execution inside a host
@@ -837,6 +840,7 @@ The Rust SDK's registration wrappers use these imports during the
 | --- | --- | --- |
 | `sjml_registry_v1.register_item` | `(path_ptr: i32, path_len: i32, max_stack: i32, fire_resistant: i32) -> i32` | Stage an item under `<package>/<module>/<path>`. |
 | `sjml_registry_v1.set_item_enchantment_value` | `(item_path_ptr: i32, item_path_len: i32, value: i32) -> i32` | Set vanilla enchantability from 0 to 255 on a previously declared item owned by the same module. |
+| `sjml_registry_v1.set_item_attribute_modifier` | `(item_path_ptr: i32, item_path_len: i32, attribute_id_ptr: i32, attribute_id_len: i32, modifier_path_ptr: i32, modifier_path_len: i32, amount_bits: i32, operation: i32, slot: i32) -> i32` | Add one static vanilla or modded item attribute modifier to an item declared by the same module. Attribute IDs are canonical registry IDs, modifier paths are package/module scoped, amounts are finite `-1024..=1024`, operation codes are `0 add_value`, `1 add_multiplied_base`, `2 add_multiplied_total`, and slot codes are `0 any`, `1 mainhand`, `2 offhand`, `3 hand`, `4 feet`, `5 legs`, `6 chest`, `7 head`, `8 armor`, `9 body`; each item accepts at most 16 entries. |
 | `sjml_registry_v1.set_item_food` | `(item_path_ptr: i32, item_path_len: i32, nutrition: i32, saturation_modifier_bits: i32, flags: i32) -> i32` | Set nutrition 1–20, finite saturation modifier 0–10, and vanilla `fast` (bit 0) / `always_eat` (bit 1) flags on a previously declared item owned by the same module. |
 | `sjml_registry_v1.set_item_max_damage` | `(item_path_ptr: i32, item_path_len: i32, max_damage: i32) -> i32` | Set vanilla maximum durability from 1 through 1,000,000 on a same-module standalone item declared with stack size 1. |
 | `sjml_registry_v1.register_block` | `(path_ptr: i32, path_len: i32, strength_bits: i32, resistance_bits: i32, requires_tool: i32, has_item: i32) -> i32` | Stage a basic block and optionally its `BlockItem`. |
