@@ -117,6 +117,7 @@ pub mod model_animation;
 pub mod network;
 pub mod player;
 pub mod player_advancement;
+pub mod player_bossbar;
 pub mod player_inventory;
 pub mod player_statistics;
 pub mod recipe;

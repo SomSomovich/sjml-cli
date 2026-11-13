@@ -245,3 +245,8 @@ SDK 0.81.0 adds bounded Boolean and integer state properties for registered bloc
 SDK 0.80.0 adds bounded static vanilla and modded attribute modifiers for registered items, including operation and equipment-slot selection. See `docs/ITEM_ATTRIBUTE_MODIFIERS.md` in the workspace.
 The block-entity API also supports a bounded typed persistent key/value store for block entities registered by the calling module. It requires separate data read/write grants; see `docs/BLOCK_ENTITY_PERSISTENT_DATA.md` in the workspace.
 The world API also supports capability-gated launches of vanilla snowballs and eggs with bounded velocity; see `docs/VANILLA_PROJECTILES.md` in the workspace. Vanilla collision behavior is preserved.
+
+Server-side modules can create one module-owned vanilla boss bar per live player with
+`player_bossbar::create`, update it through its `PlayerBossBarId`, and remove it explicitly.
+The API requires `entity.read` and `player.bossbar.write`, and cleans bars on logout, module
+deactivation, and server stop. See `docs/PLAYER_BOSS_BARS.md` in the workspace.

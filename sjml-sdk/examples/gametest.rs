@@ -52,6 +52,8 @@ mod gameplay_events;
 mod player_advancements;
 #[path = "gametest/player_attack_attempt.rs"]
 mod player_attack_attempt;
+#[path = "gametest/player_bossbar.rs"]
+mod player_bossbar;
 #[path = "gametest/player_fished_attempt.rs"]
 mod player_fished_attempt;
 #[path = "gametest/player_inventory_custom_name.rs"]
