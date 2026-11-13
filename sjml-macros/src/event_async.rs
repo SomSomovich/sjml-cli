@@ -35,6 +35,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "client.chat.send_attempt"
             | "entity.death_attempt"
             | "entity.damage_attempt"
+            | "entity.fall_attempt"
             | "entity.knockback_attempt"
             | "entity.shield_block_attempt"
             | "entity.teleport_attempt"
@@ -45,6 +46,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.breed_attempt"
             | "block.grow_attempt"
             | "block.fertilize_attempt"
+            | "block.farmland_trample_attempt"
             | "block.fluid_place_attempt"
             | "player.attack_attempt"
             | "player.experience_change_attempt"
@@ -455,6 +457,13 @@ mod tests {
                 quote! { async fn fertilize_attempt(_: BlockFertilizeAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "block.fertilize_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "block.farmland_trample_attempt"),
+                quote! { async fn trample_attempt(_: BlockFarmlandTrampleAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.farmland_trample_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

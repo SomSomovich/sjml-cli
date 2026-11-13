@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[path = "gametest/block_drops_attempt.rs"]
 mod block_drops_attempt;
+#[path = "gametest/block_farmland_trample_attempt.rs"]
+mod block_farmland_trample_attempt;
 #[path = "gametest/block_fertilize_attempt.rs"]
 mod block_fertilize_attempt;
 #[path = "gametest/block_fluid_place_attempt.rs"]
@@ -40,6 +42,8 @@ mod entity_breed_attempt;
 mod entity_effect_application;
 #[path = "gametest/entity_equipment.rs"]
 mod entity_equipment;
+#[path = "gametest/entity_fall_attempt.rs"]
+mod entity_fall_attempt;
 #[path = "gametest/entity_heal_attempt.rs"]
 mod entity_heal_attempt;
 #[path = "gametest/entity_health.rs"]
@@ -623,11 +627,13 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     player_attack_attempt::initialize()?;
     entity_heal_attempt::initialize()?;
     entity_effect_application::initialize()?;
+    entity_fall_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;
     entity_breed_attempt::initialize()?;
     block_grow_attempt::initialize()?;
     block_fertilize_attempt::initialize()?;
+    block_farmland_trample_attempt::initialize()?;
     block_fluid_place_attempt::initialize()?;
     entity_tick::initialize()?;
     Ok(())

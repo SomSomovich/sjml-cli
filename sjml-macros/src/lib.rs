@@ -988,7 +988,11 @@ mod tests {
 
     #[test]
     fn cancellable_entity_shield_block_and_teleport_attempts_require_synchronous_handlers() {
-        for name in ["entity.shield_block_attempt", "entity.teleport_attempt"] {
+        for name in [
+            "entity.shield_block_attempt",
+            "entity.teleport_attempt",
+            "entity.fall_attempt",
+        ] {
             let generated = expand_event_async(
                 quote!(name = #name),
                 quote! {

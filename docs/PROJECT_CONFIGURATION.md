@@ -31,9 +31,8 @@ mymod/
 ```
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
-native `rlib` for tests. The private CLI target defaults to `sjml-sdk =
-"0.93.0"`; that version must be published or replaced with `--sdk-path` before
-the generated project can compile. `--sdk-path` writes a local path dependency. Keep the
+native `rlib` for tests. The default registry dependency is `sjml-sdk =
+"0.94.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -60,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.85.0"
+abi = "^1.86.0"
 minecraft = "~1.21.1"
-sjml = "^0.95.0"
+sjml = "^0.96.0"
 
 [[modules]]
 id = "main"
@@ -203,7 +202,6 @@ capabilities = ["entity.read", "entity.glowing.write"]
 | `client.command` | Register and execute bounded local commands on the physical client; does not send commands to the server. |
 | `client.command.suggest` | Invoke bounded synchronous suggestions for declared physical-client command arguments; also requires `client.command` and the local client thread. |
 | `events.subscribe` | Subscribing to supported host events. |
-| `player.advancement.observe` | Receiving `player.advancement_progress` criterion grant/revoke notifications; also requires `events.subscribe`. |
 | `client.item.tooltip.modify` | Appending bounded literal lines from synchronous `client.item.tooltip` callbacks on the physical client; also requires `events.subscribe`. |
 | `client.chat.send.observe` | Reading original outgoing chat text from the local client's synchronous `client.chat.send_attempt` callback; also requires `events.subscribe` and `events.cancel`. |
 | `events.cancel` | Vetoing cancellable block break/place/growth, fluid block placement, right-click `player.interaction`, `player.drop_attempt`, `player.fished_attempt`, `player.attack_attempt`, `client.chat.send_attempt`, `client.action_attempt`, `entity.death_attempt`, `entity.damage_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`, `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`, `entity.breed_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; also permits result callbacks for module-owned `block.use`, `item.use`, `item.use_on_block`, and `item.use_on_entity`, which also require `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. `client.action_attempt` additionally requires `client.input.action_cancel`. |
@@ -211,7 +209,6 @@ capabilities = ["entity.read", "entity.glowing.write"]
 | `entity.read`, `entity.spawn`, `entity.effect.apply`, `entity.effect.remove` | Reading player/entity snapshots including bounded living-entity equipment, spawning registered entities, or applying/removing registered effects; effect mutation also requires `entity.read`. |
 | `entity.equipment.write` | Adding one registered item's default stack to an empty slot of a loaded living non-player entity; also requires `entity.read`. Occupied slots are left unchanged. |
 | `entity.mount.write` | Starting or stopping a non-forced ride between two loaded non-player entities; also requires `entity.read` and same-world live handles. |
-| `entity.teleport` | Moving one live, unmounted non-player entity within its current dimension; also requires `entity.read`, the destination bounding box to be inside build height and world border, and all touched chunks to be loaded already. |
 | `entity.glowing.write` | Changing the glowing flag on a loaded non-player entity; also requires `entity.read`. |
 | `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write`, `entity.custom_name.write`, `entity.ai.control`, `entity.navigation.write` | Removing loaded non-player entities, changing bounded velocity, fire duration, the silent flag, literal custom names, or the enabled-AI flag on loaded Mob entities, starting a bounded path for a loaded Mob, and reading/writing allowlisted living-entity and server-player attribute base values; entity writes also require `entity.read`. Navigation also requires a loaded target corridor and server execution. |
 | `player.teleport`, `player.respawn.write`, `player.vitals.write`, `player.game_mode.write`, `player.motion.write`, `player.rotation.write`, `player.abilities.write`, `player.cooldown.write`, `player.advancement.write`, `player.statistics.write` | Teleporting a live player, changing their saved respawn position, bounded vitals, game mode, velocity, yaw/pitch, flight state, vanilla item cooldowns, advancement progress, or vanilla custom statistics; player writes also require `entity.read` and logical-server execution. |

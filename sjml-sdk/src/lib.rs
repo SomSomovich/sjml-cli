@@ -223,19 +223,21 @@ pub use events::PlayerItemPickupAttempt;
 pub use events::{AdvancementProgressOperation, PlayerAdvancementProgressEvent};
 pub use events::{BlockDropsAttempt, BlockDropsBreakerSnapshot, BlockDropsItemSnapshot};
 pub use events::{
-    BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty,
+    BlockFarmlandTrampleAttempt, BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockRandomTick,
+    BlockTick, BlockTickProperty,
 };
 pub use events::{
     BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
     ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
-    ClientScreenMultiSelectFormSubmit, ClientTick, EntityKnockbackAttempt, EntityTick,
-    ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse,
-    ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerItemCrafted, PlayerItemUseAttempt,
-    PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerSleepAttempt, PlayerTick,
-    PlayerVillagerTraded, CLIENT_ACTION_CANCEL_CAPABILITY, MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
-    MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_POTION_USE_ATTEMPT_CALLBACKS,
-    MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
-    PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY, PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
+    ClientScreenMultiSelectFormSubmit, ClientTick, EntityFallAttempt, EntityKnockbackAttempt,
+    EntityTick, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
+    ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerItemCrafted,
+    PlayerItemUseAttempt, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerSleepAttempt,
+    PlayerTick, PlayerVillagerTraded, CLIENT_ACTION_CANCEL_CAPABILITY,
+    MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+    MAX_PLAYER_POTION_USE_ATTEMPT_CALLBACKS, MAX_PLAYER_POTION_USE_DURATION_TICKS,
+    MAX_PLAYER_POTION_USE_ITEM_COUNT, PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY,
+    PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
 };
 pub use events::{
     FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
@@ -492,16 +494,16 @@ pub mod prelude {
     pub use crate::events::EntityBreedAttempt;
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
-        BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockPlace, BlockPlaceAttempt,
-        BlockRandomTick, BlockTick, BlockTickProperty, BlockUseAction, ClientAction,
-        ClientActionAttempt, ClientActionHand, ClientChatSendAttempt, ClientItemTooltip,
-        ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
+        BlockFarmlandTrampleAttempt, BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockPlace,
+        BlockPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty, BlockUseAction,
+        ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
+        ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
         ClientScreenMultiSelectFormSubmit, ClientTick, EffectTickEvent, EntityDamageAttempt,
         EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
-        EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned,
-        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, InventoryChanged,
-        ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse,
-        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt,
+        EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
+        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
         PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
         PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
         PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,

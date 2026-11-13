@@ -25,10 +25,15 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.93.0
-and core ABI 1.85.0. Live
+unverified. This guide describes the private SDK workspace target 0.94.0
+and core ABI 1.86.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
+SDK 0.94.0 adds synchronous cancellable `block.farmland_trample_attempt` and
+`entity.fall_attempt`. A true farmland callback result preserves farmland after an
+eligible landing; a true fall callback prevents fall damage from being applied.
+See [farmland trampling attempts](BLOCK_FARMLAND_TRAMPLE_ATTEMPT.md) and
+[living-entity fall attempts](ENTITY_FALL_ATTEMPTS.md).
 SDK 0.93.0 adds synchronous cancellable `player.totem_use_attempt`,
 `entity.shield_block_attempt`, and `entity.teleport_attempt` callbacks. These
 callbacks run on the logical server thread, require `events.subscribe` and
@@ -454,7 +459,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.93.0"
+sjml-sdk = "0.94.0"
 ```
 
 For development against this checkout, use
@@ -467,7 +472,7 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.92.0/sjml/). Those links cover the latest registry release (0.92.0); the private 0.93.0
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.92.0/sjml/). Those links cover the latest registry release (0.92.0); the private 0.94.0
 workspace adds the event types described above.
 
 | Module | Main API |
@@ -836,11 +841,11 @@ criterion-level `player.advancement_progress`; entity
 death/spawn/effect/damage, target and projectile-impact events; block
 break/place; world load/unload and explosion-attempt; server tick, inventory
 changes, resource reloads, menu actions, and completed villager trades. Synchronous cancellable callbacks include `block.break`,
-`block.break_attempt`, `block.place_attempt`, `block.grow_attempt`, `player.interaction`,
+`block.break_attempt`, `block.place_attempt`, `block.grow_attempt`, `block.farmland_trample_attempt`, `player.interaction`,
 `player.drop_attempt`, `player.item_pickup_attempt`, `player.sleep_attempt`, `player.item_use_attempt`, `block.use`,
 `player.potion_use_attempt`,
 `item.use`, `item.use_on_block`, `item.use_on_entity`,
-`entity.death_attempt`, `entity.damage_attempt`,
+`entity.death_attempt`, `entity.damage_attempt`, `entity.fall_attempt`,
 `entity.target_attempt`, `entity.breed_attempt`, `entity.projectile_impact_attempt`,
 `player.fished_attempt`, `player.attack_attempt`, and
 `world.explosion_attempt`. Server event callbacks run on the owning
@@ -888,6 +893,18 @@ parents and the proposed child, plus the dimension ID. See
 result and never forces growth. Its detached `BlockGrowAttempt` contains the
 dimension ID, block position, and block ID. See
 [cancellable block growth](BLOCK_GROW_ATTEMPTS.md).
+
+`block.farmland_trample_attempt` synchronously cancels NeoForge's logical-server
+`BlockEvent.FarmlandTrampleEvent`. A true return preserves farmland; false leaves
+vanilla behavior unchanged. `BlockFarmlandTrampleAttempt` exposes detached block,
+dimension, entity, position, and fall-distance values. Both event capabilities are
+required. See [farmland trampling attempts](BLOCK_FARMLAND_TRAMPLE_ATTEMPT.md).
+
+`entity.fall_attempt` synchronously vetoes fall damage before Minecraft applies it.
+The detached `EntityFallAttempt` includes entity identity, position, fall distance,
+and the current damage multiplier, but handlers cannot change those values. Both
+event capabilities are required, and the callback cannot be asynchronous. See
+[living-entity fall attempts](ENTITY_FALL_ATTEMPTS.md).
 
 `block.fluid_place_attempt` synchronously vetoes one fluid-driven block-state
 placement through NeoForge's `BlockEvent.FluidPlaceBlockEvent`. Its detached

@@ -1380,6 +1380,34 @@ pub struct EntityDamageAttempt {
     pub amount: f32,
 }
 
+/// Synchronous cancellable fall attempt for a loaded living entity on the logical server.
+///
+/// NeoForge 21.1.265 fires this before applying fall damage. Return `Ok(true)` from an
+/// `entity.fall_attempt` handler to cancel the fall, which sets NeoForge's fall distance to zero.
+/// The snapshot contains detached entity identity, position, fall distance, and the current damage
+/// multiplier; it cannot change the multiplier or any other fall fields. Both `events.subscribe`
+/// and `events.cancel` are required.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityFallAttempt {
+    /// Canonical UUID of the living entity that is about to take fall damage.
+    pub entity_id: String,
+    /// Registry ID of the living entity type.
+    pub entity_type_id: String,
+    /// Resource location of the dimension containing the entity.
+    pub dimension_id: String,
+    /// Entity X coordinate at the time the attempt was dispatched.
+    pub x: f64,
+    /// Entity Y coordinate at the time the attempt was dispatched.
+    pub y: f64,
+    /// Entity Z coordinate at the time the attempt was dispatched.
+    pub z: f64,
+    /// Fall distance passed to NeoForge's damage hook.
+    pub fall_distance: f32,
+    /// Current multiplier applied to fall distance to calculate damage.
+    pub damage_multiplier: f32,
+}
+
 /// Synchronous cancellable knockback attempt for a living entity on the logical server.
 ///
 /// NeoForge 21.1.265 fires this before applying knockback. The event exposes original and current
@@ -1909,6 +1937,31 @@ pub struct BlockFertilizeAttempt {
     pub fertilizer_count: u32,
     /// Whether Minecraft considered this block a valid bone-meal target.
     pub valid_target: bool,
+}
+
+/// Synchronous cancellable attempt to trample farmland on the logical server.
+///
+/// Return `Ok(true)` from a `block.farmland_trample_attempt` handler to cancel
+/// NeoForge's `FarmlandTrampleEvent`, preserving the farmland block. Returning
+/// false leaves vanilla's result unchanged. The detached snapshot carries the
+/// dimension, position, block ID, entity UUID and type ID, and fall distance;
+/// it exposes no live Minecraft objects or block-state properties. Both
+/// `events.subscribe` and `events.cancel` are required.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockFarmlandTrampleAttempt {
+    /// Resource location of the dimension where the entity landed.
+    pub dimension_id: String,
+    /// Position of the farmland block that may be trampled.
+    pub position: BlockPos,
+    /// Registry ID of the block at `position` when the attempt was captured.
+    pub block_id: String,
+    /// Canonical UUID of the entity that landed on the farmland.
+    pub entity_id: String,
+    /// Registry ID of the entity type that attempted to trample the farmland.
+    pub entity_type_id: String,
+    /// Fall distance reported by NeoForge for this attempt.
+    pub fall_distance: f32,
 }
 
 /// Synchronous cancellable attempt by a fluid to place or replace a block on the logical server.
@@ -2599,28 +2652,29 @@ mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, AdvancementProgressOperation, BlockBreak,
         BlockBreakAttempt, BlockDropsAttempt, BlockDropsBreakerSnapshot, BlockDropsItemSnapshot,
-        BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockGrowAttempt, BlockPlace,
-        BlockPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty, BlockUseAction,
-        ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
-        ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt,
-        EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
-        EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned,
-        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
-        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
-        PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
-        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
-        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
-        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt,
-        PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction,
-        PlayerRespawned, PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt,
-        PlayerTotemUseAttemptAction, PlayerVillagerTraded, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
-        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
-        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
-        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
-        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        BlockFarmlandTrampleAttempt, BlockFertilizeAttempt, BlockFluidPlaceAttempt,
+        BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockRandomTick, BlockTick,
+        BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
+        ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
+        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntityEffectApplicationAttempt, EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
+        ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
+        ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock,
+        ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAdvancementProgressEvent,
+        PlayerAttackAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
+        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
+        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
+        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt,
+        PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned,
+        PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
+        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
+        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
+        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -3327,6 +3381,41 @@ mod tests {
     }
 
     #[test]
+    fn block_farmland_trample_attempt_matches_host_schema_v1_bytes() {
+        let event = BlockFarmlandTrampleAttempt {
+            dimension_id: "minecraft:overworld".to_owned(),
+            position: BlockPos {
+                x: -4,
+                y: 72,
+                z: 19,
+            },
+            block_id: "minecraft:farmland".to_owned(),
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            fall_distance: 5.0,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&event.position.x.to_le_bytes());
+        expected.extend_from_slice(&event.position.y.to_le_bytes());
+        expected.extend_from_slice(&event.position.z.to_le_bytes());
+        append_test_string(&mut expected, &event.block_id);
+        append_test_string(&mut expected, &event.entity_id);
+        append_test_string(&mut expected, &event.entity_type_id);
+        expected.extend_from_slice(&event.fall_distance.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<BlockFarmlandTrampleAttempt>(&encoded).unwrap(),
+            event
+        );
+    }
+
+    #[test]
     fn block_fluid_place_attempt_matches_host_schema_v1_bytes() {
         let event = BlockFluidPlaceAttempt {
             dimension_id: "minecraft:overworld".to_owned(),
@@ -3752,6 +3841,35 @@ mod tests {
         };
         let encoded = to_bytes(&event).unwrap();
         assert_eq!(from_bytes::<EntityHealAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn cancellable_entity_fall_attempt_matches_host_schema_v1_bytes() {
+        let event = EntityFallAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: -1.5,
+            y: 64.0,
+            z: 2.25,
+            fall_distance: 7.5,
+            damage_multiplier: 1.0,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.entity_id);
+        append_test_string(&mut expected, &event.entity_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
+        expected.extend_from_slice(&(64.0_f64).to_le_bytes());
+        expected.extend_from_slice(&(2.25_f64).to_le_bytes());
+        expected.extend_from_slice(&(7.5_f32).to_le_bytes());
+        expected.extend_from_slice(&(1.0_f32).to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust bytes must match host schema-v1 layout"
+        );
+        assert_eq!(from_bytes::<EntityFallAttempt>(&encoded).unwrap(), event);
     }
 
     #[test]
