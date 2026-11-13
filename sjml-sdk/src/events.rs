@@ -219,6 +219,38 @@ pub struct ModuleItemUse {
     pub count: u32,
 }
 
+/// Synchronous use callback for a module-owned item right-clicked on a block.
+///
+/// The host routes `item.use_on_block` only to the module that declared the held item under its
+/// `package:module/path` namespace. It runs on the logical server after `block.use` has passed and
+/// before vanilla `Item::useOn`; the snapshot contains detached player, item, block, position,
+/// face, and hand values. Return [`ItemUseAction`] to pass through, handle the interaction, or
+/// consume one item if the held item ID and count remain unchanged.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct ModuleItemUseOnBlock {
+    /// Canonical UUID string of the player who attempted the use.
+    pub player_id: String,
+    /// Resource location of the level where the interaction occurred.
+    pub dimension_id: String,
+    /// Canonical registry ID of the module-owned held item.
+    pub item_id: String,
+    /// Stack count in `0..=1_000_000` at the start of the callback.
+    pub item_count: u32,
+    /// Canonical registry ID of the clicked block.
+    pub block_id: String,
+    /// Clicked block X coordinate.
+    pub x: i32,
+    /// Clicked block Y coordinate.
+    pub y: i32,
+    /// Clicked block Z coordinate.
+    pub z: i32,
+    /// Vanilla face name: `down`, `up`, `north`, `south`, `west`, or `east`.
+    pub face: String,
+    /// `main_hand` or `off_hand`.
+    pub hand: String,
+}
+
 /// Synchronous use callback for a block declared by the receiving module.
 ///
 /// The host routes `block.use` only to the module that declared the target block in the package's
@@ -1246,9 +1278,9 @@ mod tests {
         EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
         EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
         InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
-        PlayerAdvancementEarned, PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved,
-        PlayerRespawned, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
+        ModuleItemUseOnBlock, PlayerAdvancementEarned, PlayerDropAttempt, PlayerFishedAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt,
+        PlayerMoved, PlayerRespawned, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
         ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
@@ -2263,6 +2295,43 @@ mod tests {
             );
         }
         assert!(from_bytes::<ItemUseAction>(&[3]).is_err());
+    }
+
+    #[test]
+    fn module_item_use_on_block_round_trips_held_item_and_target() {
+        let use_event = ModuleItemUseOnBlock {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            item_id: "sjml_game_test:content/gametest_ruby".to_owned(),
+            item_count: 2,
+            block_id: "minecraft:stone".to_owned(),
+            x: -2,
+            y: 64,
+            z: 17,
+            face: "north".to_owned(),
+            hand: "main_hand".to_owned(),
+        };
+        let encoded = to_bytes(&use_event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &use_event.player_id);
+        append_test_string(&mut expected, &use_event.dimension_id);
+        append_test_string(&mut expected, &use_event.item_id);
+        expected.extend_from_slice(&2_i32.to_le_bytes());
+        append_test_string(&mut expected, &use_event.block_id);
+        expected.extend_from_slice(&(-2_i32).to_le_bytes());
+        expected.extend_from_slice(&64_i32.to_le_bytes());
+        expected.extend_from_slice(&17_i32.to_le_bytes());
+        append_test_string(&mut expected, &use_event.face);
+        append_test_string(&mut expected, &use_event.hand);
+        assert_eq!(encoded, expected);
+        assert_eq!(
+            from_bytes::<ModuleItemUseOnBlock>(&encoded).unwrap(),
+            use_event
+        );
+        assert_eq!(
+            from_bytes::<ItemUseAction>(&to_bytes(&ItemUseAction::ConsumeOne).unwrap()).unwrap(),
+            ItemUseAction::ConsumeOne
+        );
     }
 
     #[test]

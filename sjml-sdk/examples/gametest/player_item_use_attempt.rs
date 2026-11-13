@@ -1,6 +1,9 @@
 use sjml::{
     command, event,
-    events::{self, EventPriority, ItemUseAction, ModuleItemUse, PlayerItemUseAttempt},
+    events::{
+        self, EventPriority, ItemUseAction, ModuleItemUse, ModuleItemUseOnBlock,
+        PlayerItemUseAttempt,
+    },
     ErrorCode, SjmlError, SjmlResult, StableDecode,
 };
 use std::sync::Mutex;
@@ -24,6 +27,7 @@ pub(super) fn initialize() -> SjmlResult<()> {
     })? = None;
     events::subscribe("player.item_use_attempt", EventPriority::Normal)?;
     events::subscribe("item.use", EventPriority::Normal)?;
+    events::subscribe("item.use_on_block", EventPriority::Normal)?;
     Ok(())
 }
 
@@ -52,6 +56,19 @@ fn handle_module_item_use(attempt: ModuleItemUse) -> SjmlResult<ItemUseAction> {
     if attempt.hand == "main_hand"
         && attempt.item_id == "sjml_game_test:content/gametest_ruby"
         && attempt.count == 3
+    {
+        Ok(ItemUseAction::ConsumeOne)
+    } else {
+        Ok(ItemUseAction::Pass)
+    }
+}
+
+#[event(name = "item.use_on_block")]
+fn handle_module_item_use_on_block(attempt: ModuleItemUseOnBlock) -> SjmlResult<ItemUseAction> {
+    if attempt.hand == "main_hand"
+        && attempt.item_id == "sjml_game_test:content/gametest_ruby"
+        && attempt.item_count == 2
+        && attempt.block_id == "minecraft:stone"
     {
         Ok(ItemUseAction::ConsumeOne)
     } else {

@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.79.0`, the Rust SDK/macros are `0.77.0`, and the ABI is
-`1.69.0`. ABI compatibility remains major-version based: host 0.79.0 accepts ABI
-`1.0.x` through `1.69.0`; it rejects later contracts it does not know. Packages
-using newer APIs declare ABI `^1.69.0` and host range `^0.79.0`.
+The current host is `0.80.0`, the Rust SDK/macros are `0.78.0`, and the ABI is
+`1.70.0`. ABI compatibility remains major-version based: host 0.80.0 accepts ABI
+`1.0.x` through `1.70.0`; it rejects later contracts it does not know. Packages
+using newer APIs declare ABI `^1.70.0` and host range `^0.80.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -252,17 +252,29 @@ guides for contracts and bounds.
 Host 0.70.0 / ABI 1.60.0 / SDK/macros 0.68.0 adds bounded input-state reads,
 tracked client one-shot sounds, loaded-entity riding snapshots and guarded
 non-forced mount/dismount operations, observational `entity.tick`, and loaded-only
-world neighbor notifications.
+world neighbor notifications. The server-side inbound network quota now uses
+per-authenticated-player token buckets with a bounded bucket count. The CLI parser
+accepts up to 128 combined server/client commands. Dedicated-server GameTests
+cover entity riding, entity ticks, and neighbor updates; actual display-backed
+input/audio and remote multiplayer behavior still need the user's Minecraft
+client/server.
 
 Host 0.71.0 / ABI 1.61.0 / SDK/macros 0.69.0 adds criterion-level advancement
-progress and mutation, six typed vanilla statistic families, periodic keyframe
-rotations, and schema-v4 client forms with up to eight checkboxes.
+progress snapshots and single-criterion grant/revoke, typed reads/increments
+for vanilla block-mined, item-used/broken/crafted, and entity-killed/killed-by
+statistics, and periodic keyframe rotations for registered entity and block-
+entity models. Client settings forms accept up to eight checkboxes and return
+up to thirteen bounded values to their owning module. Dedicated-server
+GameTests exercise player APIs and model registration; headless checks do not
+establish visible animated-model or screen behavior.
 
-Host 0.72.0 / ABI 1.62.0 / SDK/macros 0.70.0 adds the successful-crafting
-`player.item_crafted` event and bounded live reads/base-value updates for all 31
-built-in vanilla living-entity attributes. All writes retain per-attribute
-ranges and require `entity.attributes.write`. Client visuals, actual crafting
-interaction, and remote multiplayer remain for live assembly testing.
+Host 0.72.0 / ABI 1.62.0 / SDK/macros 0.70.0 adds `player.item_crafted`, a
+bounded recipe-aware notification for successful crafting, and expands live
+attribute reads/base-value updates from six to all 31 built-in vanilla
+attributes. Attribute writes retain per-ID value bounds and require
+`entity.attributes.write`. The GameTest guest exercises player block
+interaction range, while codec and host tests cover crafted recipe/output
+snapshots; actual crafting interaction still needs the client/server assembly.
 
 Host 0.73.0 / ABI 1.63.0 / SDK/macros 0.71.0 adds bounded dynamic server-command suggestions, same-module registered item-use callbacks, cropped package sprite rendering, vanilla brewing mixes and one-effect potions, player-inventory enchantment read/set/remove, exact tracked-sound fades and owner-checked client music selection, and module-owned scoreboard teams. It also adds synchronous cancellable `entity.breed_attempt`, `block.grow_attempt`, and `player.fished_attempt` events. Server GameTests cover the new event, brewing, inventory, and team contracts; client music, audio, and rendering still need display-backed verification. The CLI crate is 0.1.3 locally; no crates.io release or public-repository sync was made.
 
@@ -283,3 +295,12 @@ click, or consume one held item when its registry ID and count remain
 unchanged. The GameTest server verifies live event routing and item consumption.
 The private CLI crate is 0.1.9 locally; no crates.io publication or
 public-repository sync was made.
+
+Host 0.80.0 / ABI 1.70.0 / SDK/macros 0.78.0 adds the synchronous,
+owner-scoped `item.use_on_block` callback. After the clicked block's own
+`block.use` callback passes, the callback goes only to the module that declared
+the held item; it receives a bounded detached snapshot and can pass through,
+handle the click, or consume one unchanged held item before vanilla
+`Item.useOn`. The dedicated-server GameTest checks real routing and
+consumption. The private CLI crate is 0.1.10 locally; nothing was published to
+crates.io or synchronized to the public CLI repository.

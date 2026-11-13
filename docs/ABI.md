@@ -6,16 +6,17 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.69.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.70.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.69.0 adds
-the owner-scoped synchronous `block.use` callback for registered blocks. ABI
+incompatible. Build metadata does not affect version ordering. ABI 1.70.0 adds
+an owner-scoped synchronous `item.use_on_block` callback for registered items.
+ABI 1.69.0 adds
+the owner-scoped, synchronous `block.use` callback for registered blocks. ABI
 1.68.0 adds bounded physical behavior settings for registered blocks. ABI 1.67.0 adds fixed
 full-cube, empty, and single-cuboid shapes for registered blocks. ABI
-1.66.0 adds bounded member enumeration for block, item, fluid, and entity-type
-registry tags. ABI 1.65.0 adds loaded-only block and item tag membership queries. ABI
-1.64.0 adds bounded physical-client
+1.66.0 adds bounded block, item, fluid, and entity-type tag-member enumeration.
+ABI 1.65.0 adds loaded-only block and item tag membership queries. ABI 1.64.0 adds bounded physical-client
 translation lookup, loaded-only structure queries, and synchronous cancellable
 bonemeal/fertilization attempts. ABI 1.63.0 adds
 bounded Brigadier command suggestions, owner-scoped registered-item use
@@ -348,6 +349,21 @@ existing target, including preserving `None` when a clear-target attempt is
 vetoed. Already-cancelled events do not reach guest callbacks. This callback is
 synchronous and cannot use `#[event_async]`.
 
+The synchronous cancellable `sjml_v1_event_entity.breed_attempt` callback
+receives schema-v1 `EntityBreedAttempt`: little-endian `u32(1)`, followed by
+length-prefixed UTF-8 strings `parent_a_id`, `parent_a_type_id`, `parent_b_id`,
+`parent_b_type_id`, `child_id`, `child_type_id`, and `dimension_id` in that
+order. Entity type and dimension values are canonical lowercase resource
+locations. Each string is limited to 256 bytes and the complete payload to
+2 KiB. NeoForge's cancellable `BabyEntitySpawnEvent` supplies the proposed
+child before it is added to the level. The host dispatches once on the owning
+logical-server thread, skips events already canceled by another listener, and
+routes only to subscribed owner modules. The callback must return exactly one
+stable boolean byte and requires `events.subscribe` plus `events.cancel`;
+returning true cancels the proposed child spawn. The callback cannot replace
+the child, does not undo the parents' completed breeding interaction, and
+cannot use `#[event_async]`.
+
 The synchronous cancellable `sjml_v1_event_entity.projectile_impact_attempt`
 callback receives schema-v1 `ProjectileImpactAttempt`: little-endian `u32(1)`;
 length-prefixed strings `projectile_id`, `projectile_type_id`, `dimension_id`,
@@ -392,7 +408,33 @@ successful callback payload after its `u32` status prefix must be exactly one
 stable boolean byte (`0` or `1`); any authorized `true` vetoes the break, while
 `false` does not. An invalid result or callback failure disables only that
 module and does not veto the break. Existing cancellation by another handler
-remains in effect. The `entity.death` callback receives a schema-v1
+remains in effect. The synchronous cancellable `sjml_v1_event_block.grow_attempt`
+callback receives schema-v1 `BlockGrowAttempt`: little-endian `u32(1)`, a
+length-prefixed UTF-8 `dimension_id`, nested schema-v1 `BlockPos` (`i32` `x`,
+`y`, and `z`), then a length-prefixed UTF-8 `block_id`. Both identifiers must
+be canonical lowercase resource locations, each string is limited to 256
+bytes, and the full payload is limited to 2 KiB. It is captured from NeoForge's
+logical-server-only `CropGrowEvent.Pre` on the server owner thread. A true
+callback result sets `DO_NOT_GROW`; false leaves the event's current result
+unchanged, so `DEFAULT` retains vanilla behavior and guest code never forces
+growth. It requires `events.subscribe` and `events.cancel` and must use
+synchronous `#[event]`. The payload omits crop age because this hook also
+covers growing-age blocks with different state properties, including cactus
+and chorus plants. The synchronous cancellable
+`sjml_v1_event_block.fertilize_attempt` callback receives schema-v1
+`BlockFertilizeAttempt`: little-endian `u32(1)`, optional player UUID encoded
+as a stable `u8` 0/1 tag followed by a length-prefixed UTF-8 string when
+present, length-prefixed `dimension_id`, nested schema-v1 `BlockPos` (`i32`
+`x`, `y`, and `z`), length-prefixed `block_id` and `fertilizer_item_id`,
+little-endian `u32` fertilizer stack count, and a stable boolean byte for
+`valid_target`. IDs must be canonical lowercase resource locations and the
+optional actor must be a canonical UUID; strings are limited to 256 bytes, the
+count to 0–99, and the full payload to 2 KiB. NeoForge's `BonemealEvent` is
+captured on the logical-server owner thread. Returning true invokes
+`setSuccessful(false)` and cancels vanilla application without consuming the
+fertilizer stack; false leaves the current event result unchanged. Already
+canceled events are not delivered. The callback requires `events.subscribe`
+and `events.cancel` and must be synchronous. The `entity.death` callback receives a schema-v1
 `EntityDeath` snapshot: little-endian version `1`, stable UTF-8 strings in
 order (`entity_id` canonical UUID, `entity_type_id`, and `dimension_id`), then
 little-endian IEEE-754 `f64` coordinates `x`, `y`, and `z`. Coordinates must be
@@ -486,13 +528,61 @@ little-endian `f64` hook X/Y/Z coordinates, `u32` requested rod damage, a
 (each has `u32(1)`, a stable item registry ID string, and `u32` count), and a
 strict boolean byte indicating whether source drops were truncated. Strings
 are limited to 256 UTF-8 bytes, coordinates to finite values within ±30,000,000,
-rod damage to `0..=1,000,000`, each count to `1..=1,000,000`, and the drop list
-to 16 entries; the complete payload is limited to 8 KiB. NeoForge emits this
-only for a logical-server `ItemFishedEvent` on the owning server thread. Return
-exactly one stable boolean byte after the status prefix; `true` cancels the
-catch drops, while requested rod damage remains unchanged. Drop snapshots
-contain only item IDs and counts, with no components or NBT. The callback
-requires `events.subscribe` and `events.cancel` and cannot be asynchronous.
+rod damage and each count to `0..=1,000,000` and `1..=1,000,000` respectively,
+and the drop list to 16 entries; the complete payload is limited to 8 KiB.
+NeoForge emits this only for a logical-server `ItemFishedEvent` on the owning
+server thread. Return exactly one stable boolean byte after the status prefix;
+`true` cancels delivery of the catch drops, while requested rod damage remains
+unchanged. Drop snapshots contain only item IDs and counts, with no components
+or NBT. The callback requires `events.subscribe` and `events.cancel` and cannot
+be asynchronous.
+
+The synchronous `sjml_v1_event_item.use` callback is an owner-scoped item
+behavior hook. Its payload has the same schema-v1 detached fields as
+`PlayerItemUseAttempt`: version, player UUID, dimension, hand, canonical item
+ID, and count. The host dispatches it only to a module whose declared item ID
+uses that package and module path. The response is exactly one stable action
+byte: `0=Pass`, `1=Success`, or `2=ConsumeOne`; other values disable the failing
+module callback. `Pass` continues normal vanilla use. `Success` handles the
+click without changing the stack. `ConsumeOne` handles the click and consumes
+one item only if the same held item and count remain after the callback. A
+handled result uses NeoForge's successful cancellation result. It runs after
+`player.item_use_attempt`, requires `events.subscribe` and `events.cancel`, and
+cannot be asynchronous.
+
+The synchronous `sjml_v1_event_block.use` callback is an owner-scoped block
+behavior hook. Its schema-v1 payload contains stable strings for the player
+UUID, dimension ID, and clicked block ID; little-endian `i32` X/Y/Z block
+coordinates; stable strings for the hit face, hand, and held item ID; and a
+little-endian `i32` held stack count. Strings are limited to 256 UTF-8 bytes,
+the count is `0..=1,000,000`, and the complete payload is limited to 4 KiB.
+The host invokes it only for the module that declared the clicked block under
+its `package:module/path` namespace. It runs on the logical server after the
+generic `player.interaction` veto and before vanilla block use. Return exactly
+one action byte: `0=Pass`, `1=Success`, or `2=ConsumeOne`; other values disable
+the failing module callback. `Pass` leaves the click for vanilla behavior.
+`Success` handles the click. `ConsumeOne` handles it and consumes one item only
+if the held item ID and count still match the snapshot. A handled action sets
+NeoForge's successful cancellation result. The callback requires
+`events.subscribe` and `events.cancel` and cannot be asynchronous.
+
+The synchronous `sjml_v1_event_item.use_on_block` callback is an owner-scoped
+registered-item behavior hook. Its schema-v1 payload contains stable strings
+for the player UUID, dimension ID, held item ID, clicked block ID, hit face,
+and hand; a little-endian `i32` stack count; and little-endian `i32` X/Y/Z
+block coordinates. Strings are limited to 256 UTF-8 bytes, the count is
+`0..=1,000,000`, and the complete payload is limited to 4 KiB. The host routes
+the callback only to the module that declared the held item under its
+`package:module/path` namespace. On a right-click block, the host first gives
+the registered block's `block.use` callback the chance to handle the click;
+this item callback runs only if the block callback passes, before vanilla
+`Item.useOn`. Return exactly one action byte: `0=Pass`, `1=Success`, or
+`2=ConsumeOne`; invalid results disable the failing module callback. `Pass`
+continues normal vanilla block and item behavior. `Success` handles the click.
+`ConsumeOne` handles it and consumes one item only if the held item ID and
+count still match the snapshot. A handled action sets NeoForge's successful
+cancellation result. It requires `events.subscribe` and `events.cancel` and
+cannot be asynchronous.
 
 The `entity.damaged` callback receives schema-v1 `EntityDamaged` data: version
 `1`, stable strings for `entity_id`, `entity_type_id`, `dimension_id`, and
@@ -584,21 +674,22 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.sleep_attempt`, `player.item_use_attempt`, `entity.death`, `entity.death_attempt`,
 `entity.damage_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
-`entity.projectile_impact_attempt`, `entity.heal_attempt`, `block.break`,
-`block.break_attempt`, `block.place`, `block.place_attempt`, `player.interacted`,
+`entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
+`block.break_attempt`, `block.place`, `block.place_attempt`, `block.grow_attempt`, `player.interacted`,
 `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
 `entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`,
-`item.use`, `block.use`, `player.fished_attempt`, and `client.chat.send_attempt`.
+`item.use`, `block.use`, `item.use_on_block`, `player.fished_attempt`, and
+`client.chat.send_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.interaction`, `player.drop_attempt`, `player.sleep_attempt`,
-`player.item_use_attempt`, `item.use`, `block.use`,
+`player.item_use_attempt`, `item.use`, `block.use`, `item.use_on_block`,
 `client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
-`entity.projectile_impact_attempt`, `player.fished_attempt`, or
-`world.explosion_attempt` additionally
+`entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`,
+`player.fished_attempt`, or `world.explosion_attempt` additionally
 requires the module to request and receive the separate `events.cancel`
 capability. Static registration instances cannot subscribe. Server event
 callbacks run synchronously on the owning logical-server thread. Non-cancellable
@@ -736,6 +827,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_block_entity_model` | `(path_ptr: i32, path_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded colored model for a block entity declared by the same module, with optional model-wide and per-cuboid sine rotations. |
 | `sjml_registry_v1.register_entity_textured_model` | `(path_ptr: i32, path_len: i32, texture_ptr: i32, texture_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded entity cuboid model using a PNG resource in the owning package namespace; the model may include host-evaluated animation. |
 | `sjml_registry_v1.register_block_entity_textured_model` | `(path_ptr: i32, path_len: i32, texture_ptr: i32, texture_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded block-entity cuboid model using a PNG resource in the owning package namespace; the model may include host-evaluated animation. |
+| `sjml_registry_v1.register_model_keyframe_track` | `(path_ptr: i32, path_len: i32, track_ptr: i32, track_len: i32) -> i32` | Stage one bounded host-evaluated periodic keyframe rotation on a previously registered same-module entity or block-entity model/cuboid. |
 | `sjml_registry_v1.register_entity` | `(path_ptr: i32, path_len: i32, width_bits: i32, height_bits: i32, tracking_range: i32, update_interval: i32, fire_immune: i32) -> i32` | Stage a generic living `MobCategory.MISC` entity type. |
 | `sjml_registry_v1.register_entity_ai_goal` | `(path_ptr: i32, path_len: i32, goal: i32, priority: i32, value_bits: i32, flags: i32) -> i32` | Add one bounded vanilla goal to an entity declared by the same module. |
 | `sjml_registry_v1.register_fluid` | `(path_ptr: i32, path_len: i32, tick_rate: i32, level_decrease_per_block: i32, slope_find_distance: i32, explosion_resistance_bits: i32) -> i32` | Stage a flowing fluid pair, liquid block, and bucket with vanilla water visuals. |
@@ -810,6 +902,17 @@ must remain inside `[0,1]`. Models can only target an entity or block entity
 declared by the same module, and one model can be registered per type. The
 client draws them through Minecraft's buffered vertex pipeline; the model API
 does not grant raw GL access.
+`register_model_keyframe_track` takes a schema-v1 byte record: little-endian
+u32 schema (`1`), target kind (`0=entity`, `1=block entity`), cuboid index,
+axis (`0=X`, `1=Y`, `2=Z`), three f32 pivot coordinates, u32 loop duration,
+u32 frame count, then 2–32 pairs of `u32 tick` and `f32 angle_degrees`. Use
+cuboid index `0xffffffff` for the whole model. Frame zero is required; later
+ticks must increase and stay below the 2–12,000 tick loop duration. The host
+linearly interpolates and wraps the last frame to the first. Each model target
+permits one track per axis across sine and keyframe tracks; registration is
+capped at 512 tracks/8,192 frames per module and 8,192 tracks/65,536 frames
+total. The type and cuboid index must belong to the same module. Rendering
+performs no guest call.
 Custom registry IDs use `<package-id>:custom/<module-id>/<path>` and entry IDs
 use the module's normal `<package-id>:<module-id>/<path>` namespace. Registry
 declarations and entries are staged only during `mod_register`; NeoForge
@@ -1604,6 +1707,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `collides` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<bool>` for one bounded axis-aligned box |
 | `set_block` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len` | Replace one loaded position with the registered block's default state; status only |
 | `schedule_block_tick` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len, delay_ticks` | Schedule one normal tick for the matching registered block at an already-loaded position; status only |
+| `notify_neighbors_at` | `handle_ptr, handle_len, x, y, z` | Run the ordinary vanilla neighbor update at a loaded position; status only |
 | `spawn_entity` | `query_ptr, query_len` | Spawn one registered, non-player entity from a bounded schema-v1 world/type/position record; status only |
 | `spawn_particle` | `handle_ptr, handle_len, x, y, z, particle_id_ptr, particle_id_len` | Spawn one registered simple particle at the center of a loaded block; status only |
 | `play_sound` | `handle_ptr, handle_len, x, y, z, sound_id_ptr, sound_id_len, volume_bits, pitch_bits` | Play one registered sound at the center of a loaded block; status only |
@@ -1625,6 +1729,12 @@ for writes. `schedule_block_tick` requires a delay of 1–72,000 ticks, a
 position inside build height, and the canonical ID of the block currently at
 that position. It never loads chunks and is limited to 16 requests per module
 on each logical-server tick. See [scheduled block ticks](WORLD_SCHEDULED_TICKS.md).
+`notify_neighbors_at` additionally requires both `world.read` and `world.write`,
+an in-height position inside the world border, and the target plus every
+in-height direct-neighbor chunk to already be loaded. It uses non-loading chunk
+checks and calls vanilla `ServerLevel.updateNeighborsAt`; it never requests
+chunks. A vanilla callback failure returns `UNKNOWN_ERROR_CODE`. See
+[explicit vanilla neighbor updates](WORLD_NEIGHBOR_UPDATES.md).
 
 `handle_len` must be 24. `get` takes raw UTF-8, limited to 65,536 bytes,
 and requires a canonical `namespace:path` (no implicit `minecraft:` namespace).
@@ -1836,6 +1946,9 @@ signatures but calls return `PERMISSION_DENIED`.
 | `has_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len, out_ptr, out_capacity` | Write one stable boolean byte for the live player's cooldown state; requires `entity.read` |
 | `set_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len, ticks` | Set the vanilla cooldown to 1–72,000 server ticks; requires `entity.read` and `player.cooldown.write` |
 | `clear_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len` | Remove the vanilla item cooldown; requires `entity.read` and `player.cooldown.write` |
+| `advancement_progress` | `handle_ptr, handle_len, advancement_id_ptr, advancement_id_len, out_ptr, out_capacity` | Write a stable schema-v1 snapshot of at most 256 sorted criteria and their achieved flags; requires `entity.read`. |
+| `grant_advancement_criterion` | `handle_ptr, handle_len, advancement_id_ptr, advancement_id_len, criterion_id_ptr, criterion_id_len, changed_out_ptr, changed_out_capacity` | Award one exact registered criterion; requires `entity.read` and `player.advancement.write`. |
+| `revoke_advancement_criterion` | `handle_ptr, handle_len, advancement_id_ptr, advancement_id_len, criterion_id_ptr, criterion_id_len, changed_out_ptr, changed_out_capacity` | Revoke one exact registered criterion; requires `entity.read` and `player.advancement.write`. |
 
 `handle_len` must be 24. UUIDs are canonical lowercase UUID text, and
 dimension IDs are canonical `namespace:path`. Each stable string is limited to
@@ -1895,7 +2008,10 @@ rotation of the active login session. `set_velocity` additionally requires the
 separately requested and granted `player.motion.write` capability and accepts
 only finite components within ±64 blocks per tick. The host synchronizes
 motion to the player and validates the owning server thread and live session.
-Static registration and client calls fail closed. See
+Static registration and client calls fail closed. The Rust SDK's
+`PlayerMotion::look_direction()` derives a normalized `[f64; 3]` vector locally
+from the decoded yaw and pitch using Minecraft's look-direction convention; it
+adds no host import and does not alter the 36-byte schema-v1 record. See
 [player motion](PLAYER_MOTION.md).
 `abilities` requires `entity.read` and returns four strict boolean bytes after
 schema version 1. `set_flying` additionally requires `player.abilities.write`,
@@ -1918,6 +2034,38 @@ blank, while the subtitle may be empty. Each animation timing must be in
 server thread, and are limited to ten sends per module per five seconds. See
 [player title and subtitle messages](PLAYER_TITLES.md).
 
+Criterion-level advancement imports use `sjml_player_v1`. The optional progress
+read requires `entity.read`; the two criterion mutation imports additionally
+require `player.advancement.write`. Advancement IDs must resolve in the active
+server registry, and criterion IDs must exactly match one of the at most 256
+declared keys. `advancement_progress` writes little-endian schema-v1
+`PlayerAdvancementProgress`: a versioned length-prefixed advancement ID, a u32
+criterion count, then sorted versioned length-prefixed criterion IDs and one
+strict achieved byte per criterion. Grant/revoke write a single strict boolean
+byte to a one-byte output buffer. These server-thread operations run only for
+the current live login session; completing a criterion may invoke vanilla
+rewards, while revoking it does not reverse rewards or dependent advancements.
+See [player advancements](PLAYER_ADVANCEMENTS.md).
+
+## Registry-backed player statistics
+
+This API uses the separate `sjml_player_statistics_v1` import module and a
+typed family selector:
+
+| Import | Parameters | Success output |
+| --- | --- | --- |
+| `read_registry_stat` | `player_ptr, player_len, family, statistic_id_ptr, statistic_id_len, out_ptr, out_capacity` | Four-byte little-endian nonnegative vanilla counter. |
+| `increment_registry_stat` | `player_ptr, player_len, family, statistic_id_ptr, statistic_id_len, amount` | Status only; amount is 0–1,000,000 and zero is a no-op. |
+
+Family codes are `0=BLOCK_MINED` (block ID), `1=ITEM_USED`, `2=ITEM_BROKEN`,
+`3=ITEM_CRAFTED` (item IDs), `4=ENTITY_KILLED`, and `5=ENTITY_KILLED_BY`
+(entity type IDs). The host validates IDs against the registry selected by the
+family and rejects signed-counter overflow. Reads require `entity.read`;
+increments also require `player.statistics.write`. Calls resolve the active
+server-player session on its owning server thread. `ITEM_PICKED_UP` and
+`ITEM_DROPPED` are not exposed. The `player` module separately covers
+`Stats.CUSTOM`. See [player statistics](PLAYER_STATISTICS.md).
+
 ## Loaded non-player entities
 
 ABI v1 provides synchronous `sjml_entity_v1` imports. All parameters and
@@ -1932,6 +2080,9 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | --- | --- | --- |
 | `loaded` | `out_ptr, out_capacity` | Stable `Vec<EntityHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `EntitySnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `entity_type_id`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
+| `riding_snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | Schema-v1 `EntityRidingSnapshot` with an optional vehicle identity and up to 16 sorted passenger identities |
+| `start_riding` | `passenger_ptr, passenger_len, vehicle_ptr, vehicle_len, out_ptr, out_capacity` | Writes little-endian `u32` `0`/`1` for refused/successful non-forced mount |
+| `stop_riding` | `passenger_ptr, passenger_len, out_ptr, out_capacity` | Writes little-endian `u32` `0`/`1` for no change/successful dismount |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to a loaded living non-player entity; status only |
 | `remove_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len` | Remove one registered active effect from a loaded living non-player entity; status only |
 | `discard` | `(handle_ptr: i32, handle_len: i32) -> i32` | Discard one loaded non-player entity and revoke its handle; status only |
@@ -1956,6 +2107,16 @@ uses Minecraft's generic damage source and normal `LivingEntity.hurt` path;
 the guest cannot choose an attacker or damage type, and vanilla mitigation
 and cancellation remain in effect. See
 [generic entity damage](ENTITY_DAMAGE.md).
+Riding reads require `entity.read`. `riding_snapshot` uses a little-endian
+schema-v1 record: `u32` version, `u8` vehicle-presence tag, the optional
+relationship record, `u32` passenger count, then sorted relationship records;
+each relationship contains schema `u32(1)`, a length-prefixed canonical UUID,
+a length-prefixed canonical entity type ID, and an `is_player` byte. The guest
+response is bounded to 16 passenger records. Mount and dismount imports require
+both `entity.read` and `entity.mount.write`; handles must identify loaded
+non-player entities in the same world. Mounts use `force=false`, and an already
+mounted passenger is not silently moved. No operation loads chunks. See
+[entity riding](ENTITY_RIDING.md).
 Effect removal applies only to loaded living non-player entities on the owning
 server thread. Stale handles, players, nonliving targets, and unknown IDs are
 rejected. See [effect removal](ENTITY_EFFECT_REMOVAL.md).
@@ -2488,23 +2649,3 @@ Identifiers and payload bounds are documented in
 sets the NeoForge `BonemealEvent` unsuccessful and cancels fertilizer use;
 false preserves the event's current result. Guest callbacks are synchronous
 and owner-scoped; canceled events are not dispatched.
-
-## Registered block use
-
-The synchronous `sjml_v1_event_block.use` callback is an owner-scoped behavior
-hook for right-clicks on registered blocks. Its schema-v1 payload contains
-length-prefixed UTF-8 strings for the player UUID, dimension ID, and clicked
-block ID; little-endian `i32` X/Y/Z coordinates; strings for hit face, hand,
-and held item ID; then a little-endian `i32` stack count. Strings are limited
-to 256 bytes, the count to 0–1,000,000, and the complete payload to 4 KiB.
-Only the module that declared the clicked block in its `package:module/path`
-namespace receives the callback. It runs on the logical server after the
-general `player.interaction` veto and before vanilla block use.
-
-Return exactly one action byte: `0=Pass`, `1=Success`, or `2=ConsumeOne`.
-`Pass` continues vanilla behavior; `Success` handles the click; `ConsumeOne`
-handles it and consumes one item only if the held item ID and count are
-unchanged. A handled action uses NeoForge's successful interaction result.
-The callback requires `events.subscribe` and `events.cancel`, and cannot use
-`#[event_async]`. Invalid action bytes disable the failing module callback.
-See [registered block use](BLOCK_USE.md).

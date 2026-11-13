@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.77.0"
+sjml-sdk = "0.78.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -171,7 +171,7 @@ fn initialize() -> SjmlResult<()> {
 
 See the [SDK guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/SDK_GUIDE.md)
 for callback macros, API modules, capability requirements, bounds, and examples;
-the [docs.rs API reference](https://docs.rs/sjml-sdk/0.77.0/sjml/) lists the
+the [docs.rs API reference](https://docs.rs/sjml-sdk/0.78.0/sjml/) lists the
 public Rust types and functions. The [ABI v1 specification](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ABI.md)
 describes the raw WebAssembly interface. For `sjml.toml`, project layout, and
 administrator grants, see the [project configuration guide](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PROJECT_CONFIGURATION.md)
@@ -211,3 +211,5 @@ groups for registered blocks.
 See `docs/WORLD_TAG_MEMBERS.md`, `docs/WORLD_BLOCK_SHAPES.md`, and
 `docs/WORLD_BLOCK_BEHAVIOR.md`; see `docs/BLOCK_USE.md` in the workspace for
 the event contract.
+
+SDK 0.78.0 adds an owner-scoped synchronous `item.use_on_block` callback for registered items. The block owner gets first refusal through `block.use`; if it passes, only the held item owner receives the detached item and block snapshot. See `docs/ITEM_USE_ON_BLOCK.md` in the workspace.

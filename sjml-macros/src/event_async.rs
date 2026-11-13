@@ -27,6 +27,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "player.drop_attempt"
             | "player.sleep_attempt"
             | "item.use"
+            | "item.use_on_block"
             | "client.chat.send_attempt"
             | "entity.death_attempt"
             | "entity.damage_attempt"
@@ -332,6 +333,13 @@ mod tests {
                 quote! { async fn item_use(_: ModuleItemUse) -> SjmlResult<()> { Ok(()) } },
             ),
             "item.use is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "item.use_on_block"),
+                quote! { async fn item_use_on_block(_: ModuleItemUseOnBlock) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "item.use_on_block is cancellable",
         );
         diagnostic(
             expand_event_async(

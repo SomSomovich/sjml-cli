@@ -51,13 +51,26 @@ is `minecraft:air` with count zero. It exposes no live stack, cannot change the
 stack, and requires `events.subscribe` plus `events.cancel`. See
 [item-use attempts](PLAYER_ITEM_USE_ATTEMPT.md).
 
-Server modules can inspect and veto fishing catches through
-`player.fished_attempt`. The bounded `PlayerFishedAttempt` snapshot includes
-player UUID, dimension, hook position, requested rod damage, and up to 16 item
-ID/count pairs without item components or NBT. Returning `Ok(true)` suppresses
-the catch drops while retaining the requested rod damage. It requires both
-`events.subscribe` and `events.cancel`; see
-[cancellable fishing catches](PLAYER_FISHED_ATTEMPTS.md).
+The separate `item.use` callback lets a module handle right-click use of its
+own registered items. It returns `Pass`, `Success`, or `ConsumeOne`; the last
+option consumes one item only when the held stack still matches the captured
+item ID and count. Other modules never receive or control this item callback.
+See [module-owned item behavior](CUSTOM_ITEM_BEHAVIOR.md).
+
+`item.use_on_block` handles a module's registered item when a player uses it
+on a block. The clicked block's owner-scoped `block.use` callback runs first;
+the item callback runs only if that handler passes, before vanilla `Item.useOn`.
+It returns the same bounded `ItemUseAction` as `item.use`, requires
+`events.subscribe` and `events.cancel`, and routes only to the held item's
+declaring module. See [registered item use on blocks](ITEM_USE_ON_BLOCK.md).
+
+Server modules can observe a successful ordinary crafting result with
+`player.item_crafted`. The non-cancellable `PlayerItemCrafted` payload contains
+the player UUID, matched recipe ID, output item ID, and output count. The host
+emits it after the crafting result is taken, alongside the existing
+`inventory.changed` notification; it does not expose the ingredient grid,
+change the output, or cancel crafting. It requires `events.subscribe` and runs
+on the logical-server thread.
 
 Server modules can also observe `player.tick` after each live player's logical
 server tick. Its `PlayerTick` snapshot contains the player UUID, dimension ID,
@@ -77,3 +90,24 @@ cadence is every 20 entity ticks; `subscribe_with_interval` accepts 1–1,200.
 The host caps this event at 4,096 guest callbacks per logical-server tick.
 Only subscribed server modules receive it; it is observational and does not
 load chunks. See [entity tick](ENTITY_TICK_EVENT.md).
+
+Server modules can veto a proposed animal offspring through
+`entity.breed_attempt`. `EntityBreedAttempt` contains detached UUIDs and
+registry type IDs for both parents and the child, plus its dimension. Return
+`Ok(true)` to cancel that child spawn. This requires both `events.subscribe`
+and `events.cancel`; see [cancellable breeding attempts](ENTITY_BREED_ATTEMPTS.md).
+
+Server modules can veto a crop or other growing-age block's `CropGrowEvent.Pre`
+through `block.grow_attempt`. Its `BlockGrowAttempt` snapshot contains the
+dimension ID, position, and block ID. Return `Ok(true)` to set `DO_NOT_GROW`;
+false leaves the current result intact and never forces growth. The event
+requires both `events.subscribe` and `events.cancel`; see
+[cancellable block growth](BLOCK_GROW_ATTEMPTS.md).
+
+Server modules can inspect and veto a fishing catch through
+`player.fished_attempt`. The bounded `PlayerFishedAttempt` snapshot includes
+player UUID, dimension, hook position, requested rod damage, and up to 16 item
+ID/count pairs without item components or NBT. Returning `Ok(true)` suppresses
+the catch drops while retaining the requested rod damage. It requires both
+`events.subscribe` and `events.cancel`; see
+[cancellable fishing catches](PLAYER_FISHED_ATTEMPTS.md).

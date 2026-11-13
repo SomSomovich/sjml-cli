@@ -192,8 +192,8 @@ pub use events::EntityBreedAttempt;
 pub use events::{
     BlockUseAction, ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction,
     ClientScreenFormSubmit, ClientScreenFormValue, ClientTick, EntityTick, ItemTooltipLines,
-    ItemUseAction, ModuleBlockUse, ModuleItemUse, PlayerItemCrafted, PlayerItemUseAttempt,
-    PlayerSleepAttempt, PlayerTick,
+    ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, PlayerItemCrafted,
+    PlayerItemUseAttempt, PlayerSleepAttempt, PlayerTick,
 };
 pub use events::{
     FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
@@ -385,12 +385,12 @@ pub mod prelude {
         EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
         EntityJoinAttempt, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
         ExplosionAttempt, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
-        ModuleItemUse, PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt, PlayerJoined,
-        PlayerLeft, PlayerMoved, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
-        MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT,
-        MAX_SERVER_TICK_INTERVAL,
+        ModuleItemUse, ModuleItemUseOnBlock, PlayerAdvancementEarned, PlayerDropAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt,
+        PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt, PlayerTick,
+        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        DEFAULT_SERVER_TICK_INTERVAL, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::events::{
         FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
