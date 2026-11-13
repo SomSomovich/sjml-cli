@@ -64,8 +64,10 @@ Client modules can open a bounded vanilla screen with
 title and body text, with up to four vanilla buttons. Button clicks close the
 screen and dispatch `ClientScreenAction { screen_id, button_id }` through
 `client.screen.action`; opening requires `client.ui.screen`, and actions are
-dispatched directly to the owning module without `events::subscribe`. Form
-screens can use `open_form` with up to four bounded text fields and receive
+dispatched directly to the owning module without `events::subscribe`. The owner
+can close only its currently active screen with `client_screen::close(screen_id)`;
+a stale ID returns `false` and cannot close another module's or a vanilla screen.
+Form screens can use `open_form` with up to four bounded text fields and receive
 their values in `ClientScreenFormSubmit` through `client.screen.form_submit`.
 Long bodies scroll locally under the mouse wheel when the pointer is in the
 body viewport; this emits no callback or network traffic. Wheel input over
@@ -342,13 +344,6 @@ requires `client.chat.send.observe`; subscribing and vetoing also require
 thread; at most 64 callbacks run per attempt, and a nested send from inside a
 callback is vetoed to prevent recursion. See [outgoing client chat veto](CLIENT_CHAT_SEND.md).
 
-`client.action_attempt` is the separate physical-client callback for vanilla
-attack, use-item, and pick-block mappings. Its detached `ClientActionAttempt`
-exposes a `ClientAction` and hand; returning `Ok(true)` vetoes the action before
-vanilla handles it. It requires `events.subscribe`, `events.cancel`, and the
-separate `client.input.action_cancel` grant, and runs synchronously on the
-client main thread. See [client action attempts](CLIENT_ACTION_ATTEMPTS.md).
-
 `chat_messages::subscribe` receives bounded plain-text snapshots after
 Minecraft's secure-chat checks and before NeoForge inserts the message into
 local chat. Callbacks can return `Show`, locally hide with the separate
@@ -455,10 +450,10 @@ function signatures and public types there are the reference for Rust callers.
 | [`chat_messages`](https://docs.rs/sjml-sdk/0.85.0/sjml/chat_messages/) | Local chat-message snapshots, separately capability-gated filtering, and rich local replacements. |
 | [`client_notifications`](https://docs.rs/sjml-sdk/0.85.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
 | [`command_suggestions`](https://docs.rs/sjml-sdk/0.85.0/sjml/command_suggestions/) | Typed bounded input/output for synchronous server Brigadier suggestions. |
-| [`client_screen`](CLIENT_SCREEN.md) | Client-only vanilla screens with literal text, up to four buttons, bounded text fields, one scrollable choice list, and settings forms with up to eight checkboxes, schema-v5 integer sliders, and schema-v6 multi-select lists with up to 32 options; callbacks go only to the owning module. |
+| [`client_screen`](CLIENT_SCREEN.md) | Client-only vanilla screens with literal text, up to four buttons, bounded text fields, one scrollable choice list, settings forms with up to eight checkboxes, schema-v5 integer sliders, schema-v6 multi-select lists with up to 32 options, and owner-checked programmatic close; callbacks go only to the owning module. |
 | [`client_audio`](https://docs.rs/sjml-sdk/0.85.0/sjml/client_audio/) | Bounded client-local one-shot playback, stoppable one-shot handles, and module-owned looping sounds through Minecraft's sound manager, bounded exact-handle fades, and owner-checked situational music selection. |
 | [`client_music`](CLIENT_MUSIC.md) | Synchronous physical-client selection or stopping of situational music, with module-owned replacement sounds and bounded delays. |
-| [`entity`](https://docs.rs/sjml-sdk/0.85.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, spatial queries, bounded raycasts, custom names, active-effect and health snapshots, bounded healing, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |
+| [`entity`](https://docs.rs/sjml-sdk/0.85.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, spatial queries, bounded raycasts, custom names, active-effect snapshots, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |
 | [`entity_attributes`](https://docs.rs/sjml-sdk/0.85.0/sjml/entity_attributes/) | Bounded reads and base-value writes for 31 built-in vanilla living-entity and server-player attributes, plus module-owned transient modifiers on loaded non-player living entities with automatic owner cleanup. |
 | [`entity_data`](https://docs.rs/sjml-sdk/0.85.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
 | [`events`](https://docs.rs/sjml-sdk/0.85.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/respawn/advancement/sleep, owner-scoped registered-block and registered-item use callbacks, including block/entity targets, client outgoing-chat veto and item-tooltip callbacks, completed villager-trade notifications, cancellable block break/place/grow/fertilization, entity breed/damage/death/target/projectile-impact, player fishing, outgoing-chat, drop/sleep/item-use, and world-explosion attempts, plus crafting, inventory, and resource events. |
@@ -469,7 +464,7 @@ function signatures and public types there are the reference for Rust callers.
 | [`menu`](https://docs.rs/sjml-sdk/0.85.0/sjml/menu/) | Bounded read-only menus with owner-scoped replacement and action callbacks, plus editable menus with allowlisted slots and bounded transfers of existing items. |
 | [`network`](https://docs.rs/sjml-sdk/0.85.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
 | [`scoreboard`](https://docs.rs/sjml-sdk/0.85.0/sjml/scoreboard/) | Bounded reads and writes to existing vanilla objectives; module-owned dummy objective creation, display-name updates, scores and fixed-slot assignment; and owner-scoped teams, display options, prefixes/suffixes, and online-player membership. |
-| [`player`](https://docs.rs/sjml-sdk/0.85.0/sjml/player/) | Online player handles, detached snapshots, selected-hotbar-slot control, respawn-point control, equipment, abilities, vitals, game mode, motion, effects, item cooldowns, same- and cross-dimension teleport, action-bar messages, bounded titles/subtitles, owner-scoped vanilla boss bars, and module-composed tab-list header/footer text. Whole-advancement and criterion-level progress control are also available. |
+| [`player`](https://docs.rs/sjml-sdk/0.85.0/sjml/player/) | Online player handles, detached snapshots, selected-hotbar-slot control, respawn-point control, equipment, abilities, vitals, game mode, motion, effects, item cooldowns, same- and cross-dimension teleport, action-bar messages, bounded titles/subtitles, owner-scoped vanilla boss bars, and module-owned tab-list header/footer text. Whole-advancement and criterion-level progress control are also available. |
 | [`player_advancement`](https://docs.rs/sjml-sdk/0.85.0/sjml/player_advancement/) | Bounded snapshots of registered advancement criteria and owner-checked grant/revoke of one exact criterion. |
 | [`player_statistics`](https://docs.rs/sjml-sdk/0.85.0/sjml/player_statistics/) | Typed reads, bounded increments, and exact-value writes for vanilla block, item, and entity statistic families; `player` also exposes vanilla custom counters. |
 | [`recipe`](https://docs.rs/sjml-sdk/0.85.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
@@ -1253,14 +1248,6 @@ lighting queries. See [`BLOCK_STATE_LIGHT.md`](BLOCK_STATE_LIGHT.md),
 [`BLOCK_STATE_PROPERTIES.md`](BLOCK_STATE_PROPERTIES.md) and
 [`BLOCK_STATE_SHAPES.md`](BLOCK_STATE_SHAPES.md) for bounds, permissions, and
 examples.
-
-Registered blocks can opt into vanilla random-tick selection during the same
-callback with `registry::set_block_random_ticking(path, true)`. Subscribe to
-`block.random_tick` to receive the separate `BlockRandomTick` snapshot. The
-owner-only synchronous callback runs on the logical server thread; scheduled
-`block.tick` and random-tick callbacks share a total limit of 512 per server
-tick. See [`BLOCK_TICK.md`](BLOCK_TICK.md) for the registration and event
-contract.
 
 Registered items may declare up to 16 static attribute modifiers during the
 same callback. Use `ItemAttributeModifier::new` with a fully qualified

@@ -99,6 +99,19 @@ owning module a `ClientScreenAction` containing the screen's `screen_id` and the
 `events::subscribe`. The callback can then update module state, open another screen, or run
 another local client action. Closing a screen with Escape does not represent a button action.
 
+The owner can also close its currently displayed screen by stable ID:
+
+```rust
+if client_screen::close("welcome")? {
+    // This module's matching screen was active and is now closed.
+}
+```
+
+`close` returns `false` when the ID is stale, the screen was already replaced, or this module has
+no active screen. The host checks the runtime owner and exact screen instance on the client thread,
+so a no-op cannot close a vanilla screen or another module's screen. Closing this way uses the
+existing `client.ui.screen` grant and emits no button-action callback.
+
 ## Text-entry forms
 
 Use `client_screen::open_form` when a screen needs bounded text input. A form keeps the same

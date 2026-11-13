@@ -1563,6 +1563,15 @@ Only one screen per runtime module may be open; the module may replace its own
 screen. If another screen owns the display, the call returns `SERVICE_BUSY`.
 Module teardown closes only that module's current screen.
 
+The additive `sjml_client_ui_v1.close_screen(screen_id_ptr, screen_id_len, result_ptr,
+result_capacity) -> i32` import closes only the calling runtime's displayed screen when both its
+owner and stable screen ID match. It uses the same capability and client-context checks as
+`open_screen`, requires a strict UTF-8 screen ID and an exact one-byte result span, and writes `1`
+when it closed the screen or `0` when the ID is stale or no owned screen is active. The host also
+checks that the displayed Minecraft screen is still the exact owned instance, so a replaced screen
+is left alone. A no-op does not close a vanilla screen or another module's screen, and no
+button-action callback is emitted.
+
 The exact payload is little-endian schema-v1 data:
 
 1. `u32 schema_version` (`1`)

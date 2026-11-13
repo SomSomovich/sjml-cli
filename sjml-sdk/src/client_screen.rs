@@ -1,5 +1,7 @@
 //! Bounded, module-owned interactive screens on the physical client.
 
+#[cfg(target_arch = "wasm32")]
+use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
 /// Schema version used by client screen definitions sent to the host.
@@ -46,6 +48,8 @@ pub const MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE: i32 = 1_000_000;
 pub const MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES: usize = 96;
 /// Maximum encoded size of a complete screen definition.
 pub const MAX_CLIENT_SCREEN_PAYLOAD_BYTES: usize = 4096;
+#[cfg(target_arch = "wasm32")]
+const CLOSE_RESULT_BYTES: u32 = 1;
 
 /// One bounded action button displayed by a client screen.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -958,6 +962,14 @@ impl ClientScreenSettingsFormDefinition {
 extern "C" {
     #[link_name = "open_screen"]
     fn imported_open_screen(payload_pointer: i32, payload_length: i32) -> i32;
+
+    #[link_name = "close_screen"]
+    fn imported_close_screen(
+        screen_id_pointer: i32,
+        screen_id_length: i32,
+        result_pointer: i32,
+        result_capacity: i32,
+    ) -> i32;
 }
 
 /// Opens the screen on the local physical client.
@@ -1015,6 +1027,81 @@ pub fn open_multi_select_form(
 ) -> SjmlResult<()> {
     let payload = encode_multi_select_form_definition(definition)?;
     open_payload(&payload)
+}
+
+/// Closes this module's currently open screen when its stable ID still matches.
+///
+/// Returns `true` only when the host closed that exact screen. A stale screen ID or a screen
+/// replaced by another UI returns `false`; the host never closes another module's or a vanilla
+/// screen. The operation requires the same physical-client context and `client.ui.screen` grant
+/// as [`open`].
+pub fn close(screen_id: &str) -> SjmlResult<bool> {
+    validate_id(screen_id, "screen ID")?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let screen_id_bytes = screen_id.as_bytes();
+        let screen_id_pointer = allocate_host_input(screen_id_bytes.len() as u32);
+        let result_pointer = allocate_host_input(CLOSE_RESULT_BYTES);
+        if screen_id_pointer == 0 || result_pointer == 0 {
+            // SAFETY: each non-zero pointer is a live allocation with the exact size supplied.
+            unsafe {
+                deallocate_host_input(screen_id_pointer, screen_id_bytes.len() as u32);
+                deallocate_host_input(result_pointer, CLOSE_RESULT_BYTES);
+            }
+            return Err(SjmlError::new(
+                ErrorCode::UnknownErrorCode,
+                "could not allocate client screen close buffers",
+            ));
+        }
+        // SAFETY: both pointers refer to allocations with the documented live bounds.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                screen_id_bytes.as_ptr(),
+                screen_id_pointer as *mut u8,
+                screen_id_bytes.len(),
+            );
+            core::ptr::write_bytes(result_pointer as *mut u8, 0, CLOSE_RESULT_BYTES as usize);
+        }
+        // SAFETY: the host synchronously copies the ID and writes one boolean byte to the output.
+        let status = unsafe {
+            imported_close_screen(
+                screen_id_pointer as i32,
+                screen_id_bytes.len() as i32,
+                result_pointer as i32,
+                CLOSE_RESULT_BYTES as i32,
+            )
+        };
+        let result = if status != 0 {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the client screen close request",
+            ))
+        } else {
+            // SAFETY: the host initialized the one-byte result on success.
+            match unsafe { core::ptr::read(result_pointer as *const u8) } {
+                0 => Ok(false),
+                1 => Ok(true),
+                _ => Err(SjmlError::new(
+                    ErrorCode::InvalidTransfer,
+                    "host returned an invalid client screen close result",
+                )),
+            }
+        };
+        // SAFETY: release both exact live allocations after the synchronous import returns.
+        unsafe {
+            deallocate_host_input(screen_id_pointer, screen_id_bytes.len() as u32);
+            deallocate_host_input(result_pointer, CLOSE_RESULT_BYTES);
+        }
+        result
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = screen_id;
+        Err(SjmlError::new(
+            ErrorCode::UnknownErrorCode,
+            "interactive screens require the wasm32-unknown-unknown target",
+        ))
+    }
 }
 
 fn open_payload(payload: &[u8]) -> SjmlResult<()> {
@@ -1284,17 +1371,38 @@ fn payload_overflow() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_definition, encode_form_definition, encode_list_form_definition,
+        close, encode_definition, encode_form_definition, encode_list_form_definition,
         encode_multi_select_form_definition, encode_settings_form_definition,
         encode_slider_form_definition, ClientScreenButton, ClientScreenCheckbox,
         ClientScreenDefinition, ClientScreenFormDefinition, ClientScreenListFormDefinition,
         ClientScreenMultiSelectFormDefinition, ClientScreenMultiSelectionList,
         ClientScreenNumericSlider, ClientScreenSelectionList, ClientScreenSelectionOption,
         ClientScreenSettingsFormDefinition, ClientScreenSliderFormDefinition,
-        ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES,
+        ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES, MAX_CLIENT_SCREEN_ID_BYTES,
         MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS, MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
         MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
     };
+    use crate::ErrorCode;
+
+    #[test]
+    fn close_validates_screen_ids_before_host_access() {
+        assert_eq!(close("").unwrap_err().code(), ErrorCode::InvalidArgument);
+        assert_eq!(
+            close("Demo:Settings").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            close(&"a".repeat(MAX_CLIENT_SCREEN_ID_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            close("demo:settings").unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
 
     #[test]
     fn encodes_schema_v1_fields_in_the_documented_order() {
