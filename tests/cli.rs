@@ -976,6 +976,18 @@ fn client_command_declarations_validate_side_arguments_and_cross_list_names() {
     ];
     ok(run(&package));
 
+    let suggestions_base = base.replace(
+        "path = 'modules/main.wasm'",
+        "path = 'modules/main.wasm'\npermissions = ['client.command', 'client.command.suggest']",
+    );
+    let suggestions_manifest = format!(
+        "{}{}[[modules.client_commands.arguments]]\nname = 'target'\ntype = 'word'\nsuggestions = true\n",
+        suggestions_base,
+        command_block("client_commands", "tools.lookup")
+    );
+    fs::write(tmp.path().join("sjml.toml"), suggestions_manifest).unwrap();
+    ok(run(&package));
+
     let invalid_manifests = vec![
         // Client commands are forbidden on server-only modules.
         format!(
@@ -1019,6 +1031,21 @@ fn client_command_declarations_validate_side_arguments_and_cross_list_names() {
             "{}{}[[modules.client_commands.arguments]]\nname = 'count'\ntype = 'integer'\nmin = 8\nmax = 2\n",
             base,
             command_block("client_commands", "tools.invalid_argument_bounds")
+        ),
+        // Client suggestions require their separate requested permission.
+        format!(
+            "{}{}[[modules.client_commands.arguments]]\nname = 'target'\ntype = 'word'\nsuggestions = true\n",
+            base,
+            command_block("client_commands", "tools.needs_suggest_permission")
+        ),
+        // Suggestion flags must be booleans.
+        format!(
+            "{}{}[[modules.client_commands.arguments]]\nname = 'target'\ntype = 'word'\nsuggestions = 'yes'\n",
+            base.replace(
+                "path = 'modules/main.wasm'",
+                "path = 'modules/main.wasm'\npermissions = ['client.command.suggest']"
+            ),
+            command_block("client_commands", "tools.invalid_suggestion_flag")
         ),
         format!(
             "{}{}[[modules.client_commands.arguments]]\nname = 'count'\ntype = 'word'\nmin = 1\n",

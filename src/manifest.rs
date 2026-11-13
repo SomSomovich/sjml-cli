@@ -225,6 +225,8 @@ fn validate_command_declarations(
     declarations: &[Value],
     key: &str,
     names: &mut BTreeSet<String>,
+    client_command: bool,
+    requested_permissions: &[&str],
 ) -> Result<()> {
     let context = format!("modules.{key}");
     for value in declarations {
@@ -252,7 +254,7 @@ fn validate_command_declarations(
             let argument = table(value, "command argument")?;
             keys(
                 argument,
-                &["name", "type", "min", "max"],
+                &["name", "type", "min", "max", "suggestions"],
                 "command argument",
             )?;
             let name = text(argument, "name")?;
@@ -273,6 +275,18 @@ fn validate_command_declarations(
                 kind == "integer"
                     || (!argument.contains_key("min") && !argument.contains_key("max")),
                 "only integer arguments accept min/max",
+            )?;
+            let suggestions = match argument.get("suggestions") {
+                Some(value) => value
+                    .as_bool()
+                    .ok_or_else(|| invalid("argument.suggestions: expected boolean"))?,
+                None => false,
+            };
+            require(
+                !client_command
+                    || !suggestions
+                    || requested_permissions.contains(&"client.command.suggest"),
+                "client command suggestions require the requested client.command.suggest capability",
             )?;
             let low = if argument.contains_key("min") {
                 integer(argument, "min", i32::MIN as i64, i32::MAX as i64)?
@@ -437,13 +451,16 @@ impl Manifest {
                 require(identifier(name), "modules.depends: invalid identifier")?;
                 dependencies.push(name.to_owned());
             }
-            for key in ["permissions", "provides"] {
-                for name in strings(m, key)? {
-                    require(
-                        named(name),
-                        format!("modules.{key}: invalid capability/service name"),
-                    )?;
-                }
+            let requested_permissions = strings(m, "permissions")?;
+            for name in requested_permissions
+                .iter()
+                .copied()
+                .chain(strings(m, "provides")?)
+            {
+                require(
+                    named(name),
+                    "modules.permissions/provides: invalid capability/service name",
+                )?;
             }
             let mut exports = BTreeSet::new();
             for v in array(m, "exports", 256)? {
@@ -479,8 +496,20 @@ impl Manifest {
                 "modules.commands: server and client commands combined exceed 128 entries per module",
             )?;
             let mut names = BTreeSet::new();
-            validate_command_declarations(commands, "commands", &mut names)?;
-            validate_command_declarations(client_commands, "client_commands", &mut names)?;
+            validate_command_declarations(
+                commands,
+                "commands",
+                &mut names,
+                false,
+                &requested_permissions,
+            )?;
+            validate_command_declarations(
+                client_commands,
+                "client_commands",
+                &mut names,
+                true,
+                &requested_permissions,
+            )?;
             modules.push(Module {
                 id: module_id.to_owned(),
                 path: path.to_owned(),

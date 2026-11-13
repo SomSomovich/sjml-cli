@@ -112,6 +112,12 @@ callback uses `#[client_command(name = "...")]` and returns
 `SjmlResult<String>`. The module must request and receive `client.command` on
 that local installation. Commands are registered beneath
 `/sjmlclient <package> <module> <command>` and never invoke server commands.
+Client command arguments may set `suggestions = true`; those modules must also
+request and receive the separate `client.command.suggest` capability. The
+synchronous `#[client_command_suggestions(name = "...")]` callback receives a
+detached request with at most 256 UTF-8 bytes of partial text and prior parsed
+arguments, without a server source or world context. It returns at most 64
+suggestions of 256 UTF-8 bytes each on the physical-client main thread.
 The 128-command per-module limit is shared with `[[modules.commands]]`; names
 must be unique across both arrays. Client-only modules cannot declare server
 commands, and server-only modules cannot declare client commands.

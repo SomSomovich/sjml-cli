@@ -53,6 +53,12 @@ pub fn command_suggestions(attribute: TokenStream, item: TokenStream) -> TokenSt
     expand_command_suggestions(attribute.into(), item.into()).into()
 }
 
+/// Defines a bounded synchronous suggestion callback for a physical-client command.
+#[proc_macro_attribute]
+pub fn client_command_suggestions(attribute: TokenStream, item: TokenStream) -> TokenStream {
+    expand_client_command_suggestions(attribute.into(), item.into()).into()
+}
+
 /// Defines a callback for a manifest-declared, physical-client command.
 #[proc_macro_attribute]
 pub fn client_command(attribute: TokenStream, item: TokenStream) -> TokenStream {
@@ -211,6 +217,10 @@ fn expand_command_suggestions(attribute: TokenStream2, item: TokenStream2) -> To
     expand_callback(attribute, item, "command_suggestions")
 }
 
+fn expand_client_command_suggestions(attribute: TokenStream2, item: TokenStream2) -> TokenStream2 {
+    expand_callback(attribute, item, "client_command_suggestions")
+}
+
 fn expand_service(attribute: TokenStream2, item: TokenStream2) -> TokenStream2 {
     expand_callback(attribute, item, "service")
 }
@@ -264,6 +274,15 @@ fn expand_callback(attribute: TokenStream2, item: TokenStream2, kind: &str) -> T
         return error(
             function.sig.ident.span(),
             "#[command_suggestions] must accept CommandSuggestionRequest and return SjmlResult<CommandSuggestions>",
+        );
+    }
+    if kind == "client_command_suggestions"
+        && (!is_named_type(input_type, "ClientCommandSuggestionRequest")
+            || !is_named_type(output_type, "CommandSuggestions"))
+    {
+        return error(
+            function.sig.ident.span(),
+            "#[client_command_suggestions] must accept ClientCommandSuggestionRequest and return SjmlResult<CommandSuggestions>",
         );
     }
 
@@ -1008,6 +1027,33 @@ mod tests {
                 },
             ),
             "must accept CommandSuggestionRequest",
+        );
+    }
+
+    #[test]
+    fn client_command_suggestions_macro_generates_a_detached_local_export() {
+        let generated = expand_client_command_suggestions(
+            quote!(name = "tools.lookup"),
+            quote! {
+                fn suggestions(request: ClientCommandSuggestionRequest) -> SjmlResult<CommandSuggestions> {
+                    CommandSuggestions::new([request.partial])
+                }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_client_command_suggestions_tools.lookup"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+        diagnostic(
+            expand_client_command_suggestions(
+                quote!(name = "tools.lookup"),
+                quote! {
+                    fn invalid(request: CommandSuggestionRequest) -> SjmlResult<CommandSuggestions> {
+                        CommandSuggestions::new([request.partial])
+                    }
+                },
+            ),
+            "must accept ClientCommandSuggestionRequest",
         );
     }
 

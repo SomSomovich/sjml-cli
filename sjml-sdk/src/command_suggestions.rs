@@ -8,6 +8,10 @@ pub const MAX_COMMAND_SUGGESTIONS: usize = 64;
 pub const MAX_COMMAND_SUGGESTION_BYTES: usize = 256;
 /// Maximum UTF-8 byte length of the unfinished argument supplied by Brigadier.
 pub const MAX_COMMAND_SUGGESTION_PARTIAL_BYTES: usize = 65_536;
+/// Maximum UTF-8 byte length of partial text from a physical-client command.
+pub const MAX_CLIENT_COMMAND_SUGGESTION_PARTIAL_BYTES: usize = 256;
+/// Manifest and local-grant capability required for physical-client suggestions.
+pub const CLIENT_COMMAND_SUGGEST_CAPABILITY: &str = "client.command.suggest";
 
 /// One already parsed command argument provided to a dynamic suggestion callback.
 #[derive(Clone, Debug, Eq, PartialEq, StableDecode, StableEncode)]
@@ -34,6 +38,25 @@ pub struct CommandSuggestionRequest {
     /// Argument name from the module manifest.
     pub argument_name: String,
     /// Unfinished text currently being typed for this argument.
+    pub partial: String,
+    /// Arguments parsed before the argument being suggested.
+    pub previous_arguments: Vec<CommandSuggestionArgument>,
+}
+
+/// Context passed to a synchronous physical-client command-suggestion callback.
+///
+/// This request intentionally contains no server command source, player identity,
+/// world, or live Minecraft object.
+#[derive(Clone, Debug, Eq, PartialEq, StableDecode, StableEncode)]
+#[sjml(version = 1)]
+pub struct ClientCommandSuggestionRequest {
+    /// Command callback ID declared in `[[modules.client_commands]]`.
+    pub command_name: String,
+    /// Zero-based index of the argument being suggested.
+    pub argument_index: u32,
+    /// Argument name from the module manifest.
+    pub argument_name: String,
+    /// Unfinished local text, limited by the host to 256 UTF-8 bytes.
     pub partial: String,
     /// Arguments parsed before the argument being suggested.
     pub previous_arguments: Vec<CommandSuggestionArgument>,
@@ -108,8 +131,9 @@ impl StableDecode for CommandSuggestions {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandSuggestionArgument, CommandSuggestionRequest, CommandSuggestions,
-        MAX_COMMAND_SUGGESTIONS, MAX_COMMAND_SUGGESTION_BYTES,
+        ClientCommandSuggestionRequest, CommandSuggestionArgument, CommandSuggestionRequest,
+        CommandSuggestions, MAX_CLIENT_COMMAND_SUGGESTION_PARTIAL_BYTES, MAX_COMMAND_SUGGESTIONS,
+        MAX_COMMAND_SUGGESTION_BYTES,
     };
     use crate::{from_bytes, to_bytes, ErrorCode};
 
@@ -154,5 +178,40 @@ mod tests {
         );
         assert!(CommandSuggestions::new(["line\nbreak"]).is_err());
         assert!(CommandSuggestions::new([""]).is_err());
+    }
+
+    #[test]
+    fn client_request_uses_local_detached_arguments_and_bounded_partial_input() {
+        let request = ClientCommandSuggestionRequest {
+            command_name: "tools.lookup".into(),
+            argument_index: 1,
+            argument_name: "target".into(),
+            partial: "Al".into(),
+            previous_arguments: vec![CommandSuggestionArgument {
+                name: "dimension".into(),
+                kind: "word".into(),
+                value: "overworld".into(),
+            }],
+        };
+        let encoded = to_bytes(&request).unwrap();
+        assert_eq!(request, from_bytes(&encoded).unwrap());
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "tools.lookup");
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "target");
+        append_string(&mut expected, "Al");
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_string(&mut expected, "dimension");
+        append_string(&mut expected, "word");
+        append_string(&mut expected, "overworld");
+        assert_eq!(encoded, expected);
+        assert_eq!(MAX_CLIENT_COMMAND_SUGGESTION_PARTIAL_BYTES, 256);
+    }
+
+    fn append_string(output: &mut Vec<u8>, value: &str) {
+        output.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        output.extend_from_slice(value.as_bytes());
     }
 }

@@ -178,8 +178,10 @@ client commands. Durability uses `entity.read` plus `inventory.write`; chunk
 queries use `world.read`; entity raycasts use `entity.read` plus `world.read`;
 death cancellation requires `events.subscribe` and `events.cancel`; local
 commands require a requested and locally granted `client.command`. The host
-GameTests now exercise these server-backed APIs; client command display and
-execution still need a display-backed Minecraft client check.
+also supports bounded dynamic client-command suggestions with the separate
+`client.command.suggest` grant and a detached callback input. The host GameTests
+exercise the server-backed APIs; client command display and execution still
+need a display-backed Minecraft client check.
 
 Host 0.54.0 / ABI 1.44.0 / SDK 0.52.0 adds bounded static villager offers,
 pre-mitigation cancellable `entity.damage_attempt`, cross-dimension server-player

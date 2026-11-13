@@ -6,10 +6,11 @@ use sjml::player::PlayerTeleport;
 use sjml::prelude::PlayerMoved;
 use sjml::registry::{register_villager_trade, VillagerTradeItem, VillagerTradeOffer};
 use sjml::{
-    client_command, command, command_suggestions, event, from_bytes, mod_init, mod_register,
-    mod_shutdown, service, to_bytes, CommandSuggestionArgument, CommandSuggestionRequest,
-    CommandSuggestions, EntityHandle, ErrorCode, PlayerHandle, PlayerSnapshot, SjmlError,
-    SjmlResult, StableDecode, StableEncode, WorldHandle,
+    client_command, client_command_suggestions, command, command_suggestions, event, from_bytes,
+    mod_init, mod_register, mod_shutdown, service, to_bytes, ClientCommandSuggestionRequest,
+    CommandSuggestionArgument, CommandSuggestionRequest, CommandSuggestions, EntityHandle,
+    ErrorCode, PlayerHandle, PlayerSnapshot, SjmlError, SjmlResult, StableDecode, StableEncode,
+    WorldHandle,
 };
 
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -86,6 +87,11 @@ fn echo(message: String) -> SjmlResult<String> {
 #[command_suggestions(name = "players.teleport")]
 fn player_suggestions(_: CommandSuggestionRequest) -> SjmlResult<CommandSuggestions> {
     CommandSuggestions::new(["Alex", "Alexa"])
+}
+
+#[client_command_suggestions(name = "tools.lookup")]
+fn client_suggestions(request: ClientCommandSuggestionRequest) -> SjmlResult<CommandSuggestions> {
+    CommandSuggestions::new([request.partial])
 }
 
 #[client_command(name = "demo.local_echo")]
@@ -172,6 +178,25 @@ fn command_suggestion_callback_uses_the_typed_bounded_sdk_contract() {
     };
     let suggestions = player_suggestions(request).unwrap();
     assert_eq!(suggestions.values(), &["Alex", "Alexa"]);
+}
+
+#[test]
+fn client_command_suggestions_use_a_separate_detached_contract() {
+    let request = ClientCommandSuggestionRequest {
+        command_name: "tools.lookup".into(),
+        argument_index: 1,
+        argument_name: "target".into(),
+        partial: "Al".into(),
+        previous_arguments: vec![CommandSuggestionArgument {
+            name: "dimension".into(),
+            kind: "word".into(),
+            value: "overworld".into(),
+        }],
+    };
+    let encoded = to_bytes(&request).unwrap();
+    let decoded: ClientCommandSuggestionRequest = from_bytes(&encoded).unwrap();
+    assert_eq!(decoded, request);
+    assert_eq!(client_suggestions(decoded).unwrap().values(), &["Al"]);
 }
 
 #[test]

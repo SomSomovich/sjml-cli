@@ -10,7 +10,10 @@ The current core ABI version is **1.74.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
 incompatible. Build metadata does not affect version ordering. ABI 1.74.0 adds per-state bounded shape overrides for
-registered blocks with declared properties. ABI 1.73.0 adds bounded Boolean and integer properties to
+registered blocks with declared properties, and bounded dynamic suggestions for manifest-declared physical-client
+commands. Client suggestions require `client.command.suggest` in addition to `client.command`, run synchronously on the
+physical-client main thread, receive only bounded local text and previously parsed arguments, and return at most 64
+values of 256 UTF-8 bytes each. ABI 1.73.0 adds bounded Boolean and integer properties to
 module-registered block states. ABI 1.72.0 adds static bounded vanilla and modded attribute modifiers to registered items. ABI 1.71.0 adds
 an owner-scoped synchronous `item.use_on_entity` callback for registered items.
 ABI 1.70.0 adds
@@ -1249,8 +1252,30 @@ values, each at most 256 UTF-8 bytes, with no control characters. The host
 rejects malformed records, filters nonmatching partial text, and verifies
 values against the declared parser and integer bounds before passing them to
 Brigadier. A malformed callback disables only its module instance and returns
-no suggestions. Suggestions from client commands, command-tree mutation, and
-structured feedback are not exposed.
+no suggestions.
+
+### Physical-client command suggestions
+
+A client command argument can also set `suggestions = true`; the module must
+request and receive `client.command.suggest` in addition to `client.command`.
+The host requires the normal byte-callback export
+`sjml_v1_client_command_suggestions_<command-name>` before staging the package.
+For one Brigadier request, only the selected module/command callback runs,
+synchronously on the physical-client main thread. Its SDK callback uses
+`#[client_command_suggestions(name = "...")]`.
+
+The input is `ClientCommandSuggestionRequest` schema version 1 and encodes,
+in order: `u32(1)`, the length-prefixed command name, the `u32` argument index,
+the length-prefixed argument name, length-prefixed partial text, then a stable
+`Vec<CommandSuggestionArgument>`. The client request intentionally has no
+server command source, player identity, world, or live game object. Partial
+text is limited to 256 UTF-8 bytes. Prior arguments are detached canonical
+strings, with the same nested layout as server suggestions. The response uses
+the existing `CommandSuggestions` schema: at most 64 unique, nonempty values
+of up to 256 UTF-8 bytes, with no control characters. The host filters by the
+partial text and validates values against the manifest argument type and
+integer bounds. A callback trap, error, or malformed result disables only its
+client module instance and returns no suggestions.
 
 ## Error values
 

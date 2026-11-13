@@ -94,11 +94,12 @@ SDK 0.51.0 adds loaded-entity spatial queries and raycasts, loaded-chunk
 enumeration, allowlisted integer game-rule access, expected-state-guarded
 block-property writes, item-stack snapshots, server-player attribute access,
 player inventory slot and durability writes, synchronous block-placement and
-entity-death vetoes, and manifest-declared local client commands. See
+entity-death vetoes, and manifest-declared local client commands with bounded
+dynamic suggestions. See
 [loaded chunks](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_LOADED_CHUNKS.md),
 [entity raycasts](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_RAYCAST.md),
 [entity death attempts](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_DEATH_ATTEMPTS.md),
-[client commands](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_COMMANDS.md),
+[client commands and bounded local suggestions](https://github.com/SomSomovich/sjml-cli/blob/master/docs/CLIENT_COMMANDS.md),
 [spatial entity queries](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ENTITY_SPATIAL_QUERY.md),
 [integer game rules](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_INTEGER_GAME_RULES.md),
 [block property writes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_BLOCK_PROPERTIES_WRITE.md),

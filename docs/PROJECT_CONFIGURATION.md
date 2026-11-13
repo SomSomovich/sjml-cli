@@ -180,6 +180,7 @@ module's manifest request and the administrator's list.
 | `content.register` | Static registry declarations, including sound events and bounded item food/rarity/enchantment/durability values, and server guest commands. |
 | `command.suggest` | Invoking bounded synchronous guest suggestions for declared server-command arguments; also requires `content.register` and the command's Brigadier permission level. |
 | `client.command` | Register and execute bounded local commands on the physical client; does not send commands to the server. |
+| `client.command.suggest` | Invoke bounded synchronous suggestions for declared physical-client command arguments; also requires `client.command` and the local client thread. |
 | `events.subscribe` | Subscribing to supported host events. |
 | `client.item.tooltip.modify` | Appending bounded literal lines from synchronous `client.item.tooltip` callbacks on the physical client; also requires `events.subscribe`. |
 | `client.chat.send.observe` | Reading original outgoing chat text from the local client's synchronous `client.chat.send_attempt` callback; also requires `events.subscribe` and `events.cancel`. |

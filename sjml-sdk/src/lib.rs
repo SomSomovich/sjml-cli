@@ -180,8 +180,10 @@ pub use client_screen::{
     ClientScreenSliderFormDefinition, ClientScreenTextField,
 };
 pub use command_suggestions::{
-    CommandSuggestionArgument, CommandSuggestionRequest, CommandSuggestions,
-    MAX_COMMAND_SUGGESTIONS, MAX_COMMAND_SUGGESTION_BYTES, MAX_COMMAND_SUGGESTION_PARTIAL_BYTES,
+    ClientCommandSuggestionRequest, CommandSuggestionArgument, CommandSuggestionRequest,
+    CommandSuggestions, CLIENT_COMMAND_SUGGEST_CAPABILITY,
+    MAX_CLIENT_COMMAND_SUGGESTION_PARTIAL_BYTES, MAX_COMMAND_SUGGESTIONS,
+    MAX_COMMAND_SUGGESTION_BYTES, MAX_COMMAND_SUGGESTION_PARTIAL_BYTES,
 };
 pub use entity::{
     ActiveEffect, EntitySnapshot, EntityVelocity, AI_CONTROL_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
@@ -290,8 +292,9 @@ pub use serialization::{
     MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
 };
 pub use sjml_macros::{
-    client_command, client_music_selection, command, command_suggestions, compute, event,
-    event_async, mod_init, mod_register, mod_shutdown, recipe, service,
+    client_command, client_command_suggestions, client_music_selection, command,
+    command_suggestions, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe,
+    service,
 };
 pub use sjml_macros::{StableDecode, StableEncode};
 pub use storage::{
@@ -375,9 +378,10 @@ pub mod prelude {
         ClientScreenSliderFormDefinition, ClientScreenTextField,
     };
     pub use crate::command_suggestions::{
-        CommandSuggestionArgument, CommandSuggestionRequest, CommandSuggestions,
-        MAX_COMMAND_SUGGESTIONS, MAX_COMMAND_SUGGESTION_BYTES,
-        MAX_COMMAND_SUGGESTION_PARTIAL_BYTES,
+        ClientCommandSuggestionRequest, CommandSuggestionArgument, CommandSuggestionRequest,
+        CommandSuggestions, CLIENT_COMMAND_SUGGEST_CAPABILITY,
+        MAX_CLIENT_COMMAND_SUGGESTION_PARTIAL_BYTES, MAX_COMMAND_SUGGESTIONS,
+        MAX_COMMAND_SUGGESTION_BYTES, MAX_COMMAND_SUGGESTION_PARTIAL_BYTES,
     };
     pub use crate::entity;
     pub use crate::entity::{
@@ -558,8 +562,9 @@ pub mod prelude {
         MAX_WORLD_REDSTONE_SIGNAL, MAX_WORLD_SPAWN_POINT_BYTES, MIN_WORLD_PROJECTILE_SPEED,
     };
     pub use crate::{
-        client_command, client_music_selection, command, command_suggestions, compute, event,
-        event_async, mod_init, mod_register, mod_shutdown, recipe, service,
+        client_command, client_command_suggestions, client_music_selection, command,
+        command_suggestions, compute, event, event_async, mod_init, mod_register, mod_shutdown,
+        recipe, service,
     };
     pub use crate::{StableDecode, StableEncode};
 }

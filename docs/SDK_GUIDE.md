@@ -739,8 +739,14 @@ caller. Brigadier rejects malformed command input before invoking the guest.
 Physical-client commands use `[[modules.client_commands]]` and
 `#[client_command(name = "...")]`, are namespaced beneath `/sjmlclient`, and
 require the local `client.command` grant. They do not dispatch server commands
-or modify server state. See [client command declarations](CLIENT_COMMANDS.md)
-for the argument and callback contract.
+or modify server state. Arguments can set `suggestions = true` to call a separate
+`#[client_command_suggestions(name = "...")]` callback. That callback requires
+the local `client.command.suggest` grant and receives a detached
+`ClientCommandSuggestionRequest` with no server source, player identity, or world
+access. It runs synchronously on the physical-client main thread, with at most
+one module/command callback per request, a 256-byte partial input limit, and up
+to 64 results of 256 UTF-8 bytes each. See
+[client command declarations](CLIENT_COMMANDS.md) for the full contract.
 
 ### Dynamic server-command suggestions
 
@@ -785,8 +791,8 @@ fn suggest_player(request: CommandSuggestionRequest) -> SjmlResult<CommandSugges
 The SDK limits each response to 64 unique suggestions of up to 256 UTF-8 bytes
 with no control characters. The host also validates values against the
 argument parser and integer bounds, filters them by the current partial text,
-and fails closed if the callback returns a malformed payload. Client-command
-suggestions, command-tree mutation, and structured feedback remain unavailable.
+and fails closed if the callback returns a malformed payload. Command-tree
+mutation and structured feedback remain unavailable.
 
 The `#[event]` attributes above export callbacks; they do not register them for
 delivery. From `mod_init` in a retained logical-server instance, explicitly

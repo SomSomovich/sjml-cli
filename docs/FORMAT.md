@@ -146,15 +146,15 @@ lowercase ASCII letters, digits, `.`, `_`, or `-`, starting with a letter or
 digit. Argument names are unique within a command and use the manifest
 identifier grammar. Server command declarations in client-only modules are
 rejected. Server commands require `content.register` and its administrator
-grant. Any argument may set `suggestions = true`; this enables one synchronous
-guest suggestion callback for that command and additionally requires the
-requested and administrator-granted `command.suggest` capability. The callback
-receives the argument index, unfinished text, source player UUID when the
-request came from a player, and earlier parsed arguments. It returns at most 64
-unique values of at most 256 UTF-8 bytes each. The host filters candidates by
-the unfinished text and validates them against the argument type and integer
-bounds. Callbacks run synchronously on the server thread and should return
-quickly. See the [SDK command guide](SDK_GUIDE.md#manifest-declared-commands).
+grant. Any server argument may set `suggestions = true`; this enables one
+synchronous guest suggestion callback for that command and additionally
+requires the requested and administrator-granted `command.suggest` capability.
+The callback receives the argument index, unfinished text, source player UUID
+when the request came from a player, and earlier parsed arguments. It returns
+at most 64 unique values of at most 256 UTF-8 bytes each. The host filters
+candidates by the unfinished text and validates them against the argument type
+and integer bounds. Callbacks run synchronously on the server thread and should
+return quickly. See the [SDK command guide](SDK_GUIDE.md#manifest-declared-commands).
 
 NeoForge exposes a guest command at
 `/sjml guest <package-id> <module-id> <command-name> ...`. For example, the
@@ -171,8 +171,13 @@ schema and size limits. They are allowed for `client` and `both` modules,
 require the locally granted `client.command` capability, and register beneath
 `/sjmlclient <package-id> <module-id> <command-name> ...`. Their Rust callbacks
 use `#[client_command]` and return a bounded string to the local command
-source; they never send requests to a server. See
-[client commands](CLIENT_COMMANDS.md).
+source; they never send requests to a server. A client argument may also set
+`suggestions = true`; this requires the requested and locally granted
+`client.command.suggest` capability. Its `#[client_command_suggestions]`
+callback receives a detached request with partial text limited to 256 UTF-8
+bytes and prior arguments, without a server source or world. It runs on the
+physical-client main thread for one selected module/command and returns at most
+64 values of 256 UTF-8 bytes each. See [client commands](CLIENT_COMMANDS.md).
 
 Optional publisher metadata has this shape:
 
