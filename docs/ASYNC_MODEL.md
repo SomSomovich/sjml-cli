@@ -137,7 +137,11 @@ caller needs `service.call`; the provider must declare the service in both
 `exports` and `provides`. Public exports are visible to other packages, while
 private exports are package-local. Version constraints select the highest
 matching declared version. Requests and responses are copied and bounded to
-the configured payload limit.
+the configured payload limit. The level-2 `/sjml profiler` command reports
+accepted calls, failures, provider-handler elapsed time, current in-flight/queued
+work, and peak queue depth for active service endpoints. It excludes time spent
+waiting in the service queue; endpoints disappear from the snapshot when their
+provider unregisters.
 
 `callSync` must be entered from the provider's declared lane. It starts only
 when the endpoint is idle and has no queued async calls; if the endpoint is
