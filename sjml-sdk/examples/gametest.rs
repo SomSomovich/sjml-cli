@@ -1864,27 +1864,19 @@ fn check_menu_action(_: MenuActionCheckArguments) -> SjmlResult<String> {
 #[command(name = "player.inspect")]
 fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let players = player::online()?;
-    let mut target_player = None;
-    let mut target_snapshot = None;
-    for handle in players.iter().copied() {
-        let snapshot = player::snapshot(handle)?;
-        if snapshot.uuid == arguments.player_id {
-            target_player = Some(handle);
-            target_snapshot = Some(snapshot);
-        }
-    }
-    let target_player = target_player.ok_or_else(|| {
-        SjmlError::new(
-            ErrorCode::InvalidArgument,
-            "the GameTest player must be online",
-        )
-    })?;
-    let target_snapshot = target_snapshot.ok_or_else(|| {
-        SjmlError::new(
-            ErrorCode::InvalidArgument,
-            "the GameTest player snapshot must be available",
-        )
-    })?;
+    let target_player = players
+        .iter()
+        .copied()
+        .find(|handle| {
+            player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.player_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "the GameTest player must be online",
+            )
+        })?;
+    let target_snapshot = player::snapshot(target_player)?;
     let cooldown_item_id = "minecraft:diamond";
     if player::has_item_cooldown(target_player, cooldown_item_id)? {
         return Err(SjmlError::new(
@@ -1899,8 +1891,8 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     cooldown_cleanup?;
     let cooldown_cleared = player::has_item_cooldown(target_player, cooldown_item_id)?;
     player::send_action_bar(target_player, "SJML GameTest action-bar request")?;
+
     let original_vitals = player::vitals(target_player)?;
-    let original_game_mode = player::game_mode(target_player)?;
     let equipment = player::equipment(target_player)?;
     if equipment
         .main_hand
@@ -1937,6 +1929,7 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
             "player inventory snapshot did not match the GameTest hotbar fixture",
         ));
     }
+
     let original_hotbar_slot = player::selected_hotbar_slot(target_player)?;
     let temporary_hotbar_slot = (original_hotbar_slot + 1) % 9;
     let changed_hotbar_slot = (|| {
@@ -1947,6 +1940,36 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let changed_hotbar_slot = changed_hotbar_slot?;
     restore_hotbar_slot?;
     let restored_hotbar_slot = player::selected_hotbar_slot(target_player)?;
+
+    let valid_snapshot = target_snapshot.uuid.len() == 36
+        && target_snapshot.dimension_id.split_once(':').is_some()
+        && target_snapshot.x.is_finite()
+        && target_snapshot.y.is_finite()
+        && target_snapshot.z.is_finite();
+    let valid_original_vitals = original_vitals.max_health > 0.0
+        && original_vitals.health <= original_vitals.max_health
+        && original_vitals.food_level <= 20
+        && (0.0..=20.0).contains(&original_vitals.saturation)
+        && original_vitals.experience_progress <= 1.0;
+    if players.is_empty()
+        || !valid_snapshot
+        || !valid_original_vitals
+        || !cooldown_active
+        || cooldown_cleared
+        || changed_hotbar_slot != temporary_hotbar_slot
+        || restored_hotbar_slot != original_hotbar_slot
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player read contract failed",
+        ));
+    }
+    Ok(format!("read {} online player snapshot(s)", players.len()))
+}
+
+#[command(name = "player.inspect.controls")]
+fn inspect_player_controls(arguments: PlayerArguments) -> SjmlResult<String> {
+    let target_player = find_test_player(&arguments.player_id)?;
     let original_attack_damage = sjml::entity_attributes::read_player(
         target_player,
         sjml::entity_attributes::LivingAttribute::AttackDamage,
@@ -1978,6 +2001,7 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         target_player,
         sjml::entity_attributes::LivingAttribute::AttackDamage,
     )?;
+
     let original_interaction_range = sjml::entity_attributes::read_player(
         target_player,
         sjml::entity_attributes::LivingAttribute::BlockInteractionRange,
@@ -2009,6 +2033,7 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
         target_player,
         sjml::entity_attributes::LivingAttribute::BlockInteractionRange,
     )?;
+
     let original_abilities = player::abilities(target_player)?;
     if !original_abilities.may_fly {
         return Err(SjmlError::new(
@@ -2025,6 +2050,8 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let temporary_abilities = temporary_abilities?;
     restore_flying?;
     let restored_abilities = player::abilities(target_player)?;
+
+    let original_game_mode = player::game_mode(target_player)?;
     let temporary_game_mode = if original_game_mode == sjml::PlayerGameMode::Creative {
         sjml::PlayerGameMode::Adventure
     } else {
@@ -2035,6 +2062,7 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let restored_game_mode = player::set_game_mode(target_player, original_game_mode);
     let observed_game_mode = observed_game_mode?;
     restored_game_mode?;
+
     let original_motion = player::motion(target_player)?;
     let temporary_velocity = player::PlayerVelocity::new(0.125, -0.25, 0.5)?;
     let temporary_motion = (|| {
@@ -2052,6 +2080,39 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let temporary_motion = temporary_motion?;
     restore_motion?;
     let restored_motion = player::motion(target_player)?;
+
+    if temporary_abilities.flying != temporary_flying
+        || temporary_abilities.may_fly != original_abilities.may_fly
+        || temporary_abilities.invulnerable != original_abilities.invulnerable
+        || temporary_abilities.may_build != original_abilities.may_build
+        || restored_abilities != original_abilities
+        || (changed_attack_damage.base_value - temporary_attack_damage).abs() > 0.0001
+        || (restored_attack_damage.base_value - original_attack_damage.base_value).abs() > 0.0001
+        || (changed_interaction_range.base_value - temporary_interaction_range).abs() > 0.0001
+        || (restored_interaction_range.base_value - original_interaction_range.base_value).abs()
+            > 0.0001
+        || observed_game_mode != temporary_game_mode
+        || (temporary_motion.velocity_x - temporary_velocity.x).abs() > 0.0001
+        || (temporary_motion.velocity_y - temporary_velocity.y).abs() > 0.0001
+        || (temporary_motion.velocity_z - temporary_velocity.z).abs() > 0.0001
+        || (restored_motion.velocity_x - original_motion.velocity_x).abs() > 0.0001
+        || (restored_motion.velocity_y - original_motion.velocity_y).abs() > 0.0001
+        || (restored_motion.velocity_z - original_motion.velocity_z).abs() > 0.0001
+        || restored_motion.yaw != original_motion.yaw
+        || restored_motion.pitch != original_motion.pitch
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player control write contract failed",
+        ));
+    }
+    Ok("player control read/write/restore succeeded".to_owned())
+}
+
+#[command(name = "player.inspect.vitals")]
+fn inspect_player_vitals(arguments: PlayerArguments) -> SjmlResult<String> {
+    let target_player = find_test_player(&arguments.player_id)?;
+    let original_vitals = player::vitals(target_player)?;
     let temporary_health = if original_vitals.health < original_vitals.max_health {
         (original_vitals.health + 0.5).min(original_vitals.max_health)
     } else {
@@ -2090,47 +2151,11 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let temporary_vitals = temporary_vitals?;
     restore_vitals?;
     let restored_vitals = player::vitals(target_player)?;
-    let valid_snapshot = target_snapshot.uuid.len() == 36
-        && target_snapshot.dimension_id.split_once(':').is_some()
-        && target_snapshot.x.is_finite()
-        && target_snapshot.y.is_finite()
-        && target_snapshot.z.is_finite();
-    let valid_original_vitals = original_vitals.max_health > 0.0
-        && original_vitals.health <= original_vitals.max_health
-        && original_vitals.food_level <= 20
-        && (0.0..=20.0).contains(&original_vitals.saturation)
-        && original_vitals.experience_progress <= 1.0;
-    if players.is_empty()
-        || !valid_snapshot
-        || !valid_original_vitals
-        || temporary_abilities.flying != temporary_flying
-        || temporary_abilities.may_fly != original_abilities.may_fly
-        || temporary_abilities.invulnerable != original_abilities.invulnerable
-        || temporary_abilities.may_build != original_abilities.may_build
-        || restored_abilities != original_abilities
-        || (changed_attack_damage.base_value - temporary_attack_damage).abs() > 0.0001
-        || (restored_attack_damage.base_value - original_attack_damage.base_value).abs() > 0.0001
-        || (changed_interaction_range.base_value - temporary_interaction_range).abs() > 0.0001
-        || (restored_interaction_range.base_value - original_interaction_range.base_value).abs()
-            > 0.0001
-        || observed_game_mode != temporary_game_mode
-        || (temporary_motion.velocity_x - temporary_velocity.x).abs() > 0.0001
-        || (temporary_motion.velocity_y - temporary_velocity.y).abs() > 0.0001
-        || (temporary_motion.velocity_z - temporary_velocity.z).abs() > 0.0001
-        || (restored_motion.velocity_x - original_motion.velocity_x).abs() > 0.0001
-        || (restored_motion.velocity_y - original_motion.velocity_y).abs() > 0.0001
-        || (restored_motion.velocity_z - original_motion.velocity_z).abs() > 0.0001
-        || restored_motion.yaw != original_motion.yaw
-        || restored_motion.pitch != original_motion.pitch
-        || (temporary_vitals.health - temporary_health).abs() > 0.01
+    if (temporary_vitals.health - temporary_health).abs() > 0.01
         || temporary_vitals.food_level != temporary_food
         || (temporary_vitals.saturation - temporary_saturation).abs() > 0.01
         || temporary_vitals.experience_level != temporary_experience_level
         || temporary_vitals.experience_progress != 0.0
-        || !cooldown_active
-        || cooldown_cleared
-        || changed_hotbar_slot != temporary_hotbar_slot
-        || restored_hotbar_slot != original_hotbar_slot
         || (restored_vitals.health - original_vitals.health).abs() > 0.01
         || restored_vitals.food_level != original_vitals.food_level
         || (restored_vitals.saturation - original_vitals.saturation).abs() > 0.01
@@ -2139,10 +2164,22 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "player read contract failed",
+            "player vitals write contract failed",
         ));
     }
-    Ok(format!("read {} online player snapshot(s)", players.len()))
+    Ok("player vitals write/restore succeeded".to_owned())
+}
+
+fn find_test_player(player_id: &str) -> SjmlResult<PlayerHandle> {
+    player::online()?
+        .into_iter()
+        .find(|handle| player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == player_id))
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "the GameTest player must be online",
+            )
+        })
 }
 
 #[command(name = "player.teleport.dimension")]
