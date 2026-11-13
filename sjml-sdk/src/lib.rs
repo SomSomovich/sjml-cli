@@ -187,9 +187,9 @@ pub use entity::{
 };
 pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
-pub use events::BlockFertilizeAttempt;
 pub use events::BlockGrowAttempt;
 pub use events::EntityBreedAttempt;
+pub use events::{BlockFertilizeAttempt, BlockTick, BlockTickProperty};
 pub use events::{
     BlockUseAction, ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction,
     ClientScreenFormSubmit, ClientScreenFormValue, ClientTick, EntityTick, ItemTooltipLines,
@@ -381,18 +381,19 @@ pub mod prelude {
     pub use crate::events::EntityBreedAttempt;
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
-        BlockFertilizeAttempt, BlockPlace, BlockPlaceAttempt, BlockUseAction,
-        ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit,
-        ClientScreenFormValue, ClientTick, EffectTickEvent, EntityDamageAttempt, EntityDamaged,
-        EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
-        EntityJoinAttempt, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
-        ExplosionAttempt, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
-        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
-        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
-        PlayerItemUseAttempt, PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt,
-        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        DEFAULT_SERVER_TICK_INTERVAL, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
+        BlockFertilizeAttempt, BlockPlace, BlockPlaceAttempt, BlockTick, BlockTickProperty,
+        BlockUseAction, ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction,
+        ClientScreenFormSubmit, ClientScreenFormValue, ClientTick, EffectTickEvent,
+        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
+        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, InventoryChanged,
+        ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock,
+        ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt, PlayerJoined,
+        PlayerLeft, PlayerMoved, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, DEFAULT_SERVER_TICK_INTERVAL,
+        MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT, MAX_INVENTORY_CHANGE_SLOT,
+        MAX_SERVER_TICK_INTERVAL,
     };
     pub use crate::events::{
         FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,

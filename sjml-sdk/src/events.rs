@@ -873,6 +873,48 @@ pub struct BlockBreakAttempt {
     pub z: i32,
 }
 
+/// Synchronous, non-cancellable callback for one scheduled tick of a module-owned registered block.
+///
+/// The host dispatches only to the module that declared `block_id`, requires `events.subscribe`,
+/// and caps total `block.tick` callbacks at 512 for each logical-server tick. This event is emitted
+/// after Minecraft invokes the registered block's scheduled `tick` method; it is not a random-tick
+/// callback. Property values are detached strings sorted by name. The callback runs on the
+/// server thread and may use explicitly granted world APIs to read or change the loaded world.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockTick {
+    /// Canonical ID of the registered block whose scheduled tick ran.
+    pub block_id: String,
+    /// Resource location of the dimension containing the block.
+    pub dimension_id: String,
+    /// Block position where Minecraft invoked the scheduled tick.
+    pub position: BlockPos,
+    /// Logical-server tick count at dispatch time.
+    pub tick_count: i64,
+    /// Detached property values from the exact block state being ticked.
+    pub properties: Vec<BlockTickProperty>,
+}
+
+impl BlockTick {
+    /// Returns the value of a captured property, if the block declared it.
+    pub fn property(&self, name: &str) -> Option<&str> {
+        self.properties
+            .iter()
+            .find(|property| property.name == name)
+            .map(|property| property.value.as_str())
+    }
+}
+
+/// One named, detached property on a block state delivered in [`BlockTick`].
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockTickProperty {
+    /// Canonical property name.
+    pub name: String,
+    /// Canonical value, such as `true` or `3`.
+    pub value: String,
+}
+
 /// Synchronous cancellable attempt to grow a block on the logical server.
 ///
 /// Return `Ok(true)` from a `block.grow_attempt` handler to set the NeoForge pre-event result to
@@ -1305,16 +1347,16 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
-        BlockFertilizeAttempt, BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockUseAction,
-        ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
-        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt, EntitySpawned,
-        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
-        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerDropAttempt,
-        PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
-        PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
-        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        BlockFertilizeAttempt, BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockTick,
+        BlockTickProperty, BlockUseAction, ClientChatSendAttempt, ClientItemTooltip, ClientTick,
+        EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt, EntityDamaged, EntityDeath,
+        EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt,
+        FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
+        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt,
+        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
         MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
@@ -1485,6 +1527,49 @@ mod tests {
         let decoded: BlockBreakAttempt = from_bytes(&encoded).unwrap();
 
         assert_eq!(decoded, attempt);
+    }
+
+    #[test]
+    fn block_tick_matches_host_schema_and_exposes_state_properties() {
+        let event = BlockTick {
+            block_id: "ruby_pack:content/machine".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            position: BlockPos { x: -3, y: 70, z: 9 },
+            tick_count: 42,
+            properties: vec![
+                BlockTickProperty {
+                    name: "charge".to_owned(),
+                    value: "3".to_owned(),
+                },
+                BlockTickProperty {
+                    name: "powered".to_owned(),
+                    value: "true".to_owned(),
+                },
+            ],
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.block_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&event.position.x.to_le_bytes());
+        expected.extend_from_slice(&event.position.y.to_le_bytes());
+        expected.extend_from_slice(&event.position.z.to_le_bytes());
+        expected.extend_from_slice(&event.tick_count.to_le_bytes());
+        expected.extend_from_slice(&2_i32.to_le_bytes());
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        append_test_string(&mut expected, "charge");
+        append_test_string(&mut expected, "3");
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        append_test_string(&mut expected, "powered");
+        append_test_string(&mut expected, "true");
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host v1 schema"
+        );
+        assert_eq!(from_bytes::<BlockTick>(&encoded).unwrap(), event);
+        assert_eq!(event.property("powered"), Some("true"));
+        assert_eq!(event.property("missing"), None);
     }
 
     #[test]

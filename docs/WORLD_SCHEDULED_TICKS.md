@@ -21,7 +21,9 @@ block mismatch fail without scheduling a tick.
 The module must request and receive both `world.read` and `world.write`. The
 delay is 1 through 72,000 ticks, and one module can schedule at most 16 ticks
 per logical-server tick. Work is passed to Minecraft's normal scheduled-block
-tick queue, including its usual de-duplication and block tick behavior. This
-does not call a guest callback or create a custom scheduler. The operation is
+tick queue, including its usual de-duplication. A scheduled tick of a
+module-registered block also emits the owner-only [`block.tick` callback](BLOCK_TICK.md)
+on the server thread. Vanilla blocks keep their ordinary behavior and do not
+produce an SJML callback. This API does not create a custom scheduler. It is
 available only to active server modules on the owning server thread; static
 registration receives a denied import.

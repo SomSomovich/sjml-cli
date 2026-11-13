@@ -3044,7 +3044,9 @@ fn validate_block_property_updates(properties: &[BlockProperty]) -> SjmlResult<(
 /// unloaded positions and mismatched block IDs without loading a chunk. The delay must be
 /// between 1 and [`MAX_WORLD_BLOCK_TICK_DELAY_TICKS`] ticks. Calls are limited to 16 per
 /// module per server tick. Minecraft de-duplicates matching pending ticks according to its
-/// normal tick scheduler; this API does not invoke a Rust callback.
+/// normal tick scheduler. If the matching block is an SJML-registered block owned by this
+/// module, its `block.tick` event callback runs on the server thread; vanilla blocks do not emit
+/// this event. See the block tick guide for callback bounds and snapshot fields.
 pub fn schedule_block_tick(
     world: WorldHandle,
     position: BlockPos,

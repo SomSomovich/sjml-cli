@@ -12,6 +12,12 @@ SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
 guest logic and data types can be tested, but native builds do not provide the
 host imports or WebAssembly callback exports.
 
+Registered blocks can subscribe to their own scheduled ticks with
+`events::subscribe("block.tick", ...)`; the callback receives the detached
+[`BlockTick`](https://docs.rs/sjml-sdk/0.82.0/sjml/events/struct.BlockTick.html)
+snapshot. See the [block tick guide](../docs/BLOCK_TICK.md) for ownership,
+thread, capability, and quota limits.
+
 SDK 0.43.0 added bounded same-dimension player teleportation, non-player entity
 removal, loaded-world weather controls, and stonecutting recipes. It also
 includes client-only native chat layout and panel theming, a bounded
