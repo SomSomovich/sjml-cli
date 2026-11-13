@@ -458,7 +458,7 @@ function signatures and public types there are the reference for Rust callers.
 | [`entity`](https://docs.rs/sjml-sdk/0.83.0/sjml/entity/) | Loaded non-player entity snapshots, enumeration, spatial queries, bounded raycasts, custom names, active-effect and health snapshots, bounded healing, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |
 | [`entity_attributes`](https://docs.rs/sjml-sdk/0.83.0/sjml/entity_attributes/) | Bounded reads and base-value writes for 31 built-in vanilla living-entity and server-player attributes, plus module-owned transient modifiers on loaded non-player living entities with automatic owner cleanup. |
 | [`entity_data`](https://docs.rs/sjml-sdk/0.83.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.83.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/respawn/advancement/sleep, owner-scoped registered-block and registered-item use callbacks, including block/entity targets, client outgoing-chat veto and item-tooltip callbacks, cancellable block break/place/grow/fertilization, entity breed/damage/death/target/projectile-impact, player fishing, outgoing-chat, drop/sleep/item-use, and world-explosion attempts, plus crafting, inventory, and resource events. |
+| [`events`](https://docs.rs/sjml-sdk/0.83.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/respawn/advancement/sleep, owner-scoped registered-block and registered-item use callbacks, including block/entity targets, client outgoing-chat veto and item-tooltip callbacks, completed villager-trade notifications, cancellable block break/place/grow/fertilization, entity breed/damage/death/target/projectile-impact, player fishing, outgoing-chat, drop/sleep/item-use, and world-explosion attempts, plus crafting, inventory, and resource events. |
 | [`gl`](https://docs.rs/sjml-sdk/0.83.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
 | [`host`](https://docs.rs/sjml-sdk/0.83.0/sjml/host/) | ABI version query and host logging. |
 | [`inventory`](https://docs.rs/sjml-sdk/0.83.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, integer and boolean component updates, and slot-to-slot transfers. Block inventories also support literal item-stack custom names and preflighted moves of existing items. |
@@ -802,7 +802,7 @@ subscribe with `events::subscribe(event_name, priority)`. The NeoForge adapter r
 respawn, interactions, item-use attempts, registered-block use, and earned advancements; entity
 death/spawn/effect/damage, target and projectile-impact events; block
 break/place; world load/unload and explosion-attempt; server tick, inventory
-changes, resource reloads, and menu actions. Synchronous cancellable callbacks include `block.break`,
+changes, resource reloads, menu actions, and completed villager trades. Synchronous cancellable callbacks include `block.break`,
 `block.break_attempt`, `block.place_attempt`, `block.grow_attempt`, `player.interaction`,
 `player.drop_attempt`, `player.sleep_attempt`, `player.item_use_attempt`, `block.use`,
 `item.use`, `item.use_on_block`, `item.use_on_entity`,
@@ -866,6 +866,14 @@ NeoForge's fishing-catch event. Its `PlayerFishedAttempt` and nested
 `Ok(true)` suppresses the drops, but the hook still takes its requested rod
 damage. It requires both `events.subscribe` and `events.cancel`; see
 [cancellable fishing catches](PLAYER_FISHED_ATTEMPTS.md).
+
+Server modules can observe a completed villager or wandering-trader offer with
+`player.villager_traded`. Its `PlayerVillagerTraded` snapshot contains the
+player and merchant IDs, merchant type and position, dimension, villager
+profession and level when available, effective item costs, result, and offer
+use count. NeoForge emits this non-cancellable event only after the offer
+accepts both inputs; it cannot change the trade. See
+[live villager trades](PLAYER_VILLAGER_TRADES.md).
 
 `events::subscribe` returns an `EventSubscriptionHandle`. Keep that handle if
 you need to call `events::unsubscribe(handle)` later; closing the module also

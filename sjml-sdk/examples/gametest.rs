@@ -74,6 +74,8 @@ mod player_statistics;
 mod player_tab_list;
 #[path = "gametest/player_tick.rs"]
 mod player_tick;
+#[path = "gametest/player_villager_trade.rs"]
+mod player_villager_trade;
 #[path = "gametest/scoreboard.rs"]
 mod scoreboard;
 #[path = "gametest/scoreboard_display_slot.rs"]
@@ -512,6 +514,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("block.place", EventPriority::Normal)?;
     events::subscribe("block.place_attempt", EventPriority::Normal)?;
     events::subscribe("player.interacted", EventPriority::Normal)?;
+    player_villager_trade::initialize()?;
     events::subscribe("player.interaction", EventPriority::Normal)?;
     events::subscribe("player.drop_attempt", EventPriority::Normal)?;
     events::subscribe("entity.damaged", EventPriority::Normal)?;

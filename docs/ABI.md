@@ -535,6 +535,22 @@ result is taken. It also sends the existing `inventory.changed` notification;
 this new event does not expose ingredients, mutate the result, or cancel the
 craft. It requires `events.subscribe` and cannot be asynchronous.
 
+The non-cancellable `sjml_v1_event_player.villager_traded` callback receives a
+schema-v1 `PlayerVillagerTraded` snapshot after a successful trade with a
+villager or wandering trader. The payload is little-endian `u32(1)`, stable
+length-prefixed UTF-8 strings for player UUID, merchant UUID, merchant type,
+dimension, profession (empty when unavailable), first-cost item, second-cost
+item (empty for a single-cost offer), and result item, with little-endian `i32`
+block coordinates, profession level, and item/use counts between the strings.
+IDs are limited to 256 UTF-8 bytes, the payload to 8 KiB, item counts to
+`1..=1,000,000`, and a missing second cost has count zero. A villager profession
+level is 1–5; a missing profession has level zero. NeoForge's
+`TradeWithVillagerEvent` is logical-server-only, non-cancellable, and is posted
+from `AbstractVillager.notifyTrade` after the selected offer accepts its inputs
+and increments its use count. The event observes the completed trade; it cannot
+change the offer, costs, result, experience, or player inventory. It requires
+`events.subscribe` and runs on the owning logical-server thread.
+
 The synchronous cancellable `sjml_v1_event_player.item_use_attempt` callback
 receives schema-v1 `PlayerItemUseAttempt`: little-endian `u32(1)`, stable
 length-prefixed UTF-8 strings for canonical player UUID, dimension ID, hand,
@@ -707,6 +723,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
 `entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`,
+`player.villager_traded`,
 `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`, `player.fished_attempt`,
 `client.chat.send_attempt`, and `client.action_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,

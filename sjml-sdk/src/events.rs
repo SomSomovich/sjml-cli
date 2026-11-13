@@ -961,6 +961,49 @@ pub struct PlayerItemCrafted {
     pub count: i32,
 }
 
+/// Synchronous, non-cancellable snapshot emitted after a player completes a trade with a villager
+/// or wandering trader. The NeoForge event runs after the merchant accepted the inputs and updated
+/// the offer use count. IDs and stack counts are detached; item components and mutable Minecraft
+/// objects are not exposed.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerVillagerTraded {
+    /// Canonical UUID string of the player who completed the trade.
+    pub player_id: String,
+    /// Canonical UUID string of the merchant entity.
+    pub merchant_id: String,
+    /// Registry ID of the merchant entity type, commonly `minecraft:villager` or `minecraft:wandering_trader`.
+    pub merchant_type_id: String,
+    /// Dimension ID where the trade occurred.
+    pub dimension_id: String,
+    /// Merchant block X coordinate at the trade.
+    pub x: i32,
+    /// Merchant block Y coordinate at the trade.
+    pub y: i32,
+    /// Merchant block Z coordinate at the trade.
+    pub z: i32,
+    /// Villager profession registry ID, or empty for wandering traders and merchants without a profession.
+    pub profession_id: String,
+    /// Villager level in `1..=5`, or zero when no profession is available.
+    pub profession_level: u32,
+    /// Registry ID of the first item cost after the current offer price modifiers.
+    pub cost_a_item_id: String,
+    /// Count taken for the first item cost.
+    pub cost_a_count: u32,
+    /// Registry ID of the second cost item, or empty when the trade has one cost.
+    pub cost_b_item_id: String,
+    /// Count taken for the second cost, or zero when `cost_b_item_id` is empty.
+    pub cost_b_count: u32,
+    /// Registry ID of the traded result item.
+    pub result_item_id: String,
+    /// Count in the traded result stack.
+    pub result_count: u32,
+    /// Offer use count after this successful trade.
+    pub uses: u32,
+    /// Maximum use count declared by the offer.
+    pub max_uses: u32,
+}
+
 /// Synchronous, non-cancellable notification emitted after a server resource reload commits.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -1581,8 +1624,8 @@ mod tests {
         ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAttackAttempt,
         PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt,
         PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt,
-        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        MAX_SERVER_TICK_INTERVAL,
+        PlayerTick, PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -3024,6 +3067,53 @@ mod tests {
         };
         let encoded = to_bytes(&event).unwrap();
         assert_eq!(from_bytes::<PlayerItemCrafted>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn player_villager_trade_snapshot_round_trips_bounded_offer_and_merchant_data() {
+        let event = PlayerVillagerTraded {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            merchant_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            merchant_type_id: "minecraft:villager".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: 3,
+            y: 64,
+            z: -5,
+            profession_id: "minecraft:librarian".to_owned(),
+            profession_level: 2,
+            cost_a_item_id: "minecraft:emerald".to_owned(),
+            cost_a_count: 4,
+            cost_b_item_id: String::new(),
+            cost_b_count: 0,
+            result_item_id: "minecraft:book".to_owned(),
+            result_count: 1,
+            uses: 1,
+            max_uses: 12,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.player_id);
+        append_test_string(&mut expected, &event.merchant_id);
+        append_test_string(&mut expected, &event.merchant_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&event.x.to_le_bytes());
+        expected.extend_from_slice(&event.y.to_le_bytes());
+        expected.extend_from_slice(&event.z.to_le_bytes());
+        append_test_string(&mut expected, &event.profession_id);
+        expected.extend_from_slice(&event.profession_level.to_le_bytes());
+        append_test_string(&mut expected, &event.cost_a_item_id);
+        expected.extend_from_slice(&event.cost_a_count.to_le_bytes());
+        append_test_string(&mut expected, &event.cost_b_item_id);
+        expected.extend_from_slice(&event.cost_b_count.to_le_bytes());
+        append_test_string(&mut expected, &event.result_item_id);
+        expected.extend_from_slice(&event.result_count.to_le_bytes());
+        expected.extend_from_slice(&event.uses.to_le_bytes());
+        expected.extend_from_slice(&event.max_uses.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<PlayerVillagerTraded>(&encoded).unwrap(), event);
     }
 
     #[test]

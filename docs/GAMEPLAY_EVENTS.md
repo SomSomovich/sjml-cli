@@ -81,6 +81,15 @@ emits it after the crafting result is taken, alongside the existing
 change the output, or cancel crafting. It requires `events.subscribe` and runs
 on the logical-server thread.
 
+Server modules can observe a successful villager or wandering-trader offer with
+`player.villager_traded`. Its `PlayerVillagerTraded` snapshot includes both
+entity UUIDs, merchant type and position, dimension, villager profession and
+level when available, the effective item costs, result, and offer use count.
+The NeoForge event is posted only after the offer accepts the trade inputs and
+cannot be cancelled or used to mutate the trade. The callback requires
+`events.subscribe` and runs synchronously on the logical-server thread. See
+[live villager trades](PLAYER_VILLAGER_TRADES.md).
+
 Server modules can also observe `player.tick` after each live player's logical
 server tick. Its `PlayerTick` snapshot contains the player UUID, dimension ID,
 and non-negative tick count. The default cadence is 20 ticks;

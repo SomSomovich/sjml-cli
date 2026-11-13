@@ -213,7 +213,7 @@ pub use events::{
     ClientScreenMultiSelectFormSubmit, ClientTick, EntityKnockbackAttempt, EntityTick,
     ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock,
     ModuleItemUseOnEntity, PlayerItemCrafted, PlayerItemUseAttempt, PlayerSleepAttempt, PlayerTick,
-    CLIENT_ACTION_CANCEL_CAPABILITY, MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
+    PlayerVillagerTraded, CLIENT_ACTION_CANCEL_CAPABILITY, MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
 };
 pub use events::{
     FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
