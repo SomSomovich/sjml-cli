@@ -172,8 +172,9 @@ pub use client_music::{
 pub use client_notifications::NotificationKind;
 pub use client_screen::{
     ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition, ClientScreenFormDefinition,
-    ClientScreenListFormDefinition, ClientScreenSelectionList, ClientScreenSelectionOption,
-    ClientScreenSettingsFormDefinition, ClientScreenTextField,
+    ClientScreenListFormDefinition, ClientScreenNumericSlider, ClientScreenSelectionList,
+    ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+    ClientScreenSliderFormDefinition, ClientScreenTextField,
 };
 pub use command_suggestions::{
     CommandSuggestionArgument, CommandSuggestionRequest, CommandSuggestions,
@@ -353,8 +354,9 @@ pub mod prelude {
     pub use crate::client_screen;
     pub use crate::client_screen::{
         ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition,
-        ClientScreenFormDefinition, ClientScreenListFormDefinition, ClientScreenSelectionList,
-        ClientScreenSelectionOption, ClientScreenSettingsFormDefinition, ClientScreenTextField,
+        ClientScreenFormDefinition, ClientScreenListFormDefinition, ClientScreenNumericSlider,
+        ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+        ClientScreenSliderFormDefinition, ClientScreenTextField,
     };
     pub use crate::command_suggestions::{
         CommandSuggestionArgument, CommandSuggestionRequest, CommandSuggestions,

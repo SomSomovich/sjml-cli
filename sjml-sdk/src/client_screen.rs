@@ -10,6 +10,8 @@ pub const CLIENT_SCREEN_FORM_SCHEMA_VERSION: u32 = 2;
 pub const CLIENT_SCREEN_LIST_FORM_SCHEMA_VERSION: u32 = 3;
 /// Schema version used by checkbox settings forms sent to the host.
 pub const CLIENT_SCREEN_SETTINGS_FORM_SCHEMA_VERSION: u32 = 4;
+/// Schema version used by settings forms with one integer slider.
+pub const CLIENT_SCREEN_SLIDER_FORM_SCHEMA_VERSION: u32 = 5;
 /// Maximum UTF-8 length of a screen or button ID.
 pub const MAX_CLIENT_SCREEN_ID_BYTES: usize = 64;
 /// Maximum UTF-8 length of a screen title.
@@ -34,6 +36,8 @@ pub const MAX_CLIENT_SCREEN_TEXT_FIELD_VALUE_BYTES: u32 = 128;
 pub const MAX_CLIENT_SCREEN_SELECTION_OPTIONS: usize = 32;
 /// Maximum number of checkbox fields in a client settings form.
 pub const MAX_CLIENT_SCREEN_CHECKBOXES: usize = 8;
+/// Absolute bound accepted by client numeric slider endpoints and values.
+pub const MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE: i32 = 1_000_000;
 /// Maximum UTF-8 length of one selection list or option label.
 pub const MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES: usize = 96;
 /// Maximum encoded size of a complete screen definition.
@@ -462,6 +466,194 @@ pub struct ClientScreenCheckbox {
     pub initial_checked: bool,
 }
 
+/// One bounded integer slider submitted as a canonical decimal string.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenNumericSlider {
+    /// Stable lowercase key included in the submit callback.
+    pub id: String,
+    /// Literal label displayed above the slider.
+    pub label: String,
+    /// Inclusive minimum value.
+    pub minimum: i32,
+    /// Inclusive maximum value.
+    pub maximum: i32,
+    /// Positive distance between adjacent values.
+    pub step: i32,
+    /// Initial value, which must align with the range and step.
+    pub initial_value: i32,
+}
+
+impl ClientScreenNumericSlider {
+    /// Builds and validates one bounded integer slider.
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        minimum: i32,
+        maximum: i32,
+        step: i32,
+        initial_value: i32,
+    ) -> SjmlResult<Self> {
+        let slider = Self {
+            id: id.into(),
+            label: label.into(),
+            minimum,
+            maximum,
+            step,
+            initial_value,
+        };
+        slider.validate()?;
+        Ok(slider)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        validate_id(&self.id, "numeric slider ID")?;
+        validate_text(
+            &self.label,
+            1,
+            MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES,
+            "numeric slider label",
+        )?;
+        let span = i64::from(self.maximum) - i64::from(self.minimum);
+        if self.minimum < -MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE
+            || self.maximum > MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE
+            || self.minimum >= self.maximum
+            || self.step < 1
+            || span % i64::from(self.step) != 0
+            || self.initial_value < self.minimum
+            || self.initial_value > self.maximum
+            || (i64::from(self.initial_value) - i64::from(self.minimum)) % i64::from(self.step) != 0
+        {
+            return Err(invalid(
+                "numeric slider must use aligned bounds within ±1000000 and an aligned initial value",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A form with optional text, list, and checkbox controls plus one numeric slider.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenSliderFormDefinition {
+    /// Screen content and submit buttons.
+    pub screen: ClientScreenDefinition,
+    /// Zero to four uniquely identified text input fields.
+    pub fields: Vec<ClientScreenTextField>,
+    /// Optional single-choice list.
+    pub list: Option<ClientScreenSelectionList>,
+    /// Zero to eight uniquely identified checkbox fields.
+    pub checkboxes: Vec<ClientScreenCheckbox>,
+    /// The required bounded integer slider.
+    pub slider: ClientScreenNumericSlider,
+}
+
+impl ClientScreenSliderFormDefinition {
+    /// Builds and validates a bounded slider form.
+    pub fn new(
+        screen: ClientScreenDefinition,
+        fields: Vec<ClientScreenTextField>,
+        list: Option<ClientScreenSelectionList>,
+        checkboxes: Vec<ClientScreenCheckbox>,
+        slider: ClientScreenNumericSlider,
+    ) -> SjmlResult<Self> {
+        let definition = Self {
+            screen,
+            fields,
+            list,
+            checkboxes,
+            slider,
+        };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    fn validate(&self) -> SjmlResult<usize> {
+        let mut size = self.screen.validate()?;
+        self.slider.validate()?;
+        if self.fields.len() > MAX_CLIENT_SCREEN_TEXT_FIELDS {
+            return Err(invalid(format!(
+                "a slider form supports at most {MAX_CLIENT_SCREEN_TEXT_FIELDS} text fields"
+            )));
+        }
+        if self.checkboxes.len() > MAX_CLIENT_SCREEN_CHECKBOXES {
+            return Err(invalid(format!(
+                "a slider form supports at most {MAX_CLIENT_SCREEN_CHECKBOXES} checkboxes"
+            )));
+        }
+        let mut ids: Vec<String> = self
+            .screen
+            .buttons
+            .iter()
+            .map(|button| button.id.clone())
+            .collect();
+        for field in &self.fields {
+            field.validate()?;
+            if ids.contains(&field.id) {
+                return Err(invalid(
+                    "slider form element IDs must be unique and cannot match a button ID",
+                ));
+            }
+            ids.push(field.id.clone());
+        }
+        if let Some(list) = &self.list {
+            list.validate()?;
+            if ids.contains(&list.id) {
+                return Err(invalid(
+                    "slider form element IDs must be unique and cannot match a button ID",
+                ));
+            }
+            ids.push(list.id.clone());
+        }
+        for checkbox in &self.checkboxes {
+            checkbox.validate()?;
+            if ids.contains(&checkbox.id) {
+                return Err(invalid(
+                    "slider form element IDs must be unique and cannot match a button ID",
+                ));
+            }
+            ids.push(checkbox.id.clone());
+        }
+        if ids.contains(&self.slider.id) {
+            return Err(invalid(
+                "slider form element IDs must be unique and cannot match a button ID",
+            ));
+        }
+
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for field in &self.fields {
+            size = checked_string_size(size, &field.id)?;
+            size = checked_string_size(size, &field.label)?;
+            size = checked_string_size(size, &field.initial_value)?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        if let Some(list) = &self.list {
+            size = checked_string_size(size, &list.id)?;
+            size = checked_string_size(size, &list.label)?;
+            size = checked_string_size(size, list.initial_selected_id.as_deref().unwrap_or(""))?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+            for option in &list.options {
+                size = checked_string_size(size, &option.id)?;
+                size = checked_string_size(size, &option.label)?;
+            }
+        }
+        size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        for checkbox in &self.checkboxes {
+            size = checked_string_size(size, &checkbox.id)?;
+            size = checked_string_size(size, &checkbox.label)?;
+            size = size.checked_add(4).ok_or_else(payload_overflow)?;
+        }
+        size = checked_string_size(size, &self.slider.id)?;
+        size = checked_string_size(size, &self.slider.label)?;
+        size = size.checked_add(4 * 4).ok_or_else(payload_overflow)?;
+        if size > MAX_CLIENT_SCREEN_PAYLOAD_BYTES {
+            return Err(too_large(format!(
+                "encoded client slider form exceeds {MAX_CLIENT_SCREEN_PAYLOAD_BYTES} bytes"
+            )));
+        }
+        Ok(size)
+    }
+}
+
 impl ClientScreenCheckbox {
     /// Builds and validates one checkbox field.
     pub fn new(
@@ -644,6 +836,15 @@ pub fn open_settings_form(definition: &ClientScreenSettingsFormDefinition) -> Sj
     open_payload(&payload)
 }
 
+/// Opens a form with one bounded integer slider on the local physical client.
+///
+/// Values are local while dragging and are submitted as canonical decimal strings only when a
+/// button is clicked. Submission order is text fields, optional selection, checkboxes, then slider.
+pub fn open_slider_form(definition: &ClientScreenSliderFormDefinition) -> SjmlResult<()> {
+    let payload = encode_slider_form_definition(definition)?;
+    open_payload(&payload)
+}
+
 fn open_payload(payload: &[u8]) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
     {
@@ -774,6 +975,50 @@ fn encode_settings_form_definition(
     Ok(payload)
 }
 
+fn encode_slider_form_definition(
+    definition: &ClientScreenSliderFormDefinition,
+) -> SjmlResult<Vec<u8>> {
+    let capacity = definition.validate()?;
+    let mut payload = encode_definition(&definition.screen)?;
+    payload.reserve(capacity.saturating_sub(payload.len()));
+    payload[..4].copy_from_slice(&CLIENT_SCREEN_SLIDER_FORM_SCHEMA_VERSION.to_le_bytes());
+    write_u32(&mut payload, definition.fields.len() as u32);
+    for field in &definition.fields {
+        write_string(&mut payload, &field.id)?;
+        write_string(&mut payload, &field.label)?;
+        write_string(&mut payload, &field.initial_value)?;
+        write_u32(&mut payload, field.max_utf8_bytes);
+    }
+    write_u32(&mut payload, u32::from(definition.list.is_some()));
+    if let Some(list) = &definition.list {
+        write_string(&mut payload, &list.id)?;
+        write_string(&mut payload, &list.label)?;
+        write_string(
+            &mut payload,
+            list.initial_selected_id.as_deref().unwrap_or(""),
+        )?;
+        write_u32(&mut payload, list.options.len() as u32);
+        for option in &list.options {
+            write_string(&mut payload, &option.id)?;
+            write_string(&mut payload, &option.label)?;
+        }
+    }
+    write_u32(&mut payload, definition.checkboxes.len() as u32);
+    for checkbox in &definition.checkboxes {
+        write_string(&mut payload, &checkbox.id)?;
+        write_string(&mut payload, &checkbox.label)?;
+        write_u32(&mut payload, u32::from(checkbox.initial_checked));
+    }
+    write_string(&mut payload, &definition.slider.id)?;
+    write_string(&mut payload, &definition.slider.label)?;
+    payload.extend_from_slice(&definition.slider.minimum.to_le_bytes());
+    payload.extend_from_slice(&definition.slider.maximum.to_le_bytes());
+    payload.extend_from_slice(&definition.slider.step.to_le_bytes());
+    payload.extend_from_slice(&definition.slider.initial_value.to_le_bytes());
+    debug_assert!(payload.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    Ok(payload)
+}
+
 fn write_string(payload: &mut Vec<u8>, value: &str) -> SjmlResult<()> {
     let length = u32::try_from(value.len()).map_err(|_| payload_overflow())?;
     write_u32(payload, length);
@@ -835,10 +1080,12 @@ fn payload_overflow() -> SjmlError {
 mod tests {
     use super::{
         encode_definition, encode_form_definition, encode_list_form_definition,
-        encode_settings_form_definition, ClientScreenButton, ClientScreenCheckbox,
-        ClientScreenDefinition, ClientScreenFormDefinition, ClientScreenListFormDefinition,
-        ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
-        ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES, MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
+        encode_settings_form_definition, encode_slider_form_definition, ClientScreenButton,
+        ClientScreenCheckbox, ClientScreenDefinition, ClientScreenFormDefinition,
+        ClientScreenListFormDefinition, ClientScreenNumericSlider, ClientScreenSelectionList,
+        ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+        ClientScreenSliderFormDefinition, ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES,
+        MAX_CLIENT_SCREEN_PAYLOAD_BYTES, MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
     };
 
     #[test]
@@ -1142,6 +1389,88 @@ mod tests {
         assert!(
             ClientScreenSettingsFormDefinition::new(screen(), Vec::new(), None, too_many).is_err()
         );
+    }
+
+    #[test]
+    fn encodes_schema_v5_slider_after_compatible_v4_form_fields() {
+        let screen = ClientScreenDefinition::new(
+            "demo:volume",
+            "Volume",
+            vec!["Set a level".to_owned()],
+            vec![ClientScreenButton::new("save", "Save").unwrap()],
+        )
+        .unwrap();
+        let slider = ClientScreenNumericSlider::new("level", "Level", -10, 10, 5, 0).unwrap();
+        let definition = ClientScreenSliderFormDefinition::new(
+            screen.clone(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            slider,
+        )
+        .unwrap();
+        let encoded = encode_slider_form_definition(&definition).unwrap();
+        let mut expected = encode_definition(&screen).unwrap();
+        expected[..4].copy_from_slice(&5_u32.to_le_bytes());
+        expected.extend_from_slice(&0_u32.to_le_bytes()); // text fields
+        expected.extend_from_slice(&0_u32.to_le_bytes()); // optional list
+        expected.extend_from_slice(&0_u32.to_le_bytes()); // checkboxes
+        append_string(&mut expected, "level");
+        append_string(&mut expected, "Level");
+        for value in [-10_i32, 10, 5, 0] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        assert_eq!(encoded, expected);
+        assert!(encoded.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    }
+
+    #[test]
+    fn slider_validation_checks_step_alignment_range_and_element_ids() {
+        assert!(ClientScreenNumericSlider::new("level", "Level", 0, 10, 3, 3).is_err());
+        assert!(ClientScreenNumericSlider::new("level", "Level", 0, 10, 2, 3).is_err());
+        assert!(ClientScreenNumericSlider::new("level", "Level", 0, 10, 0, 0).is_err());
+        assert!(ClientScreenNumericSlider::new("level", "Level", 0, 10, 1, 11).is_err());
+        assert!(ClientScreenNumericSlider::new("level", "", 0, 10, 1, 0).is_err());
+        assert!(ClientScreenNumericSlider::new("level", "Level", 0, 0, 1, 0).is_err());
+        assert!(ClientScreenNumericSlider::new(
+            "level",
+            "Level",
+            -MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE - 1,
+            10,
+            1,
+            0
+        )
+        .is_err());
+        assert_eq!(
+            ClientScreenNumericSlider::new(
+                "level",
+                "Level",
+                -MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
+                MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
+                2 * MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
+                -MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
+            )
+            .unwrap()
+            .initial_value,
+            -MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE
+        );
+
+        let screen = ClientScreenDefinition::new(
+            "demo:volume",
+            "Volume",
+            Vec::new(),
+            vec![ClientScreenButton::new("save", "Save").unwrap()],
+        )
+        .unwrap();
+        let slider = ClientScreenNumericSlider::new("save", "Level", 0, 10, 1, 0).unwrap();
+        assert!(ClientScreenSliderFormDefinition::new(
+            screen,
+            Vec::new(),
+            None,
+            Vec::new(),
+            slider,
+        )
+        .is_err());
     }
 
     fn append_string(target: &mut Vec<u8>, value: &str) {

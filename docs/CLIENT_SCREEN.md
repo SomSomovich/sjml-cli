@@ -264,8 +264,8 @@ form-button click, including Cancel, `ClientScreenFormSubmit.fields` contains va
 order: text fields first, the selection value if present next, then checkboxes. Text values are the
 current input strings, a list value is its selected option ID (or an empty string when unselected),
 and checkbox values are the strings `"true"` or `"false"`. The clicked button ID is available in
-`submit.button_id`. A maximum-size settings form returns 13 values: four text fields, one list
-selection, and eight checkboxes. Escape closes the screen without submitting.
+`submit.button_id`. A maximum-size schema-v4 settings form returns 13 values: four text fields,
+one list selection, and eight checkboxes. Escape closes the screen without submitting.
 
 ```rust
 use sjml::client_screen::{
@@ -372,3 +372,47 @@ Minecraft objects, arbitrary widget trees, custom render callbacks, or focus man
 [`RENDERING.md`](RENDERING.md) for HUD and active-screen overlays, and
 [`SCREEN_INPUT_SCROLL.md`](SCREEN_INPUT_SCROLL.md) for input delivered to the currently active
 screen.
+
+## Numeric slider forms
+
+Use `client_screen::open_slider_form` for a form with one bounded integer slider and optional text,
+selection, and checkbox controls. `ClientScreenNumericSlider::new(id, label, minimum, maximum,
+step, initial_value)` requires inclusive endpoints within `-1_000_000..=1_000_000`, a positive step
+that evenly divides the range, and an initial value on one of those steps. Its selected value
+changes locally while dragging; the host does not call guest code or send network traffic until the
+user clicks a form button.
+
+```rust
+use sjml::client_screen::{
+    self, ClientScreenButton, ClientScreenDefinition, ClientScreenNumericSlider,
+    ClientScreenSliderFormDefinition,
+};
+use sjml::prelude::*;
+
+#[client_command(name = "slider.open")]
+fn open_slider() -> SjmlResult<String> {
+    let definition = ClientScreenSliderFormDefinition::new(
+        ClientScreenDefinition::new(
+            "audio.settings",
+            "Audio settings",
+            vec!["Set the local volume".to_owned()],
+            vec![ClientScreenButton::new("save", "Save")?],
+        )?,
+        Vec::new(),
+        None,
+        Vec::new(),
+        ClientScreenNumericSlider::new("volume", "Volume", 0, 100, 5, 50)?,
+    )?;
+    client_screen::open_slider_form(&definition)?;
+    Ok("Opened slider settings".to_owned())
+}
+```
+
+This is schema v5. It retains the v1 screen prefix, then uses the v4 order for text fields, the
+optional list, and checkboxes, and appends the slider ID, label, minimum, maximum, step, and initial
+value. Existing v1-v4 request encodings and their callbacks are unchanged. On submit, the callback
+receives the declared text values, optional list selection, checkbox strings, and finally the
+slider value as a canonical base-10 integer string (for example, `"35"`). The clicked button ID
+remains in `submit.button_id`; Escape closes without submitting. A maximum-size v5 form returns 14
+values. The owner must export `client.screen.form_submit` before opening the screen. The example
+exposes it as `/sjmlclient client_screen_demo screen screen.slider audio`.
