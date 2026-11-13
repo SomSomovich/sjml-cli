@@ -6,10 +6,10 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.74.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.75.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.74.0 adds per-state bounded shape overrides for
+incompatible. Build metadata does not affect version ordering. ABI 1.75.0 adds owner-scoped player boss bars, loaded non-player living-entity vitals and bounded healing, and exact-state emitted-light overrides for registered blocks. ABI 1.74.0 adds per-state bounded shape overrides for
 registered blocks with declared properties, and bounded dynamic suggestions for manifest-declared physical-client
 commands. Client suggestions require `client.command.suggest` in addition to `client.command`, run synchronously on the
 physical-client main thread, receive only bounded local text and previously parsed arguments, and return at most 64

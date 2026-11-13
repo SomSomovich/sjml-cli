@@ -52,13 +52,13 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.82.0"`; that crate must be available from a configured Cargo registry.
+"0.83.0"`; that crate must be available from a configured Cargo registry.
 Until the SDK crates are published, use `--sdk-path` when you need to compile
 the generated project.
 
 ## Documentation
 
-- [Rust SDK guide](docs/SDK_GUIDE.md), [registered block scheduled ticks](docs/BLOCK_TICK.md), [persistent block-entity data](docs/BLOCK_ENTITY_PERSISTENT_DATA.md), [bounded vanilla projectile launches](docs/VANILLA_PROJECTILES.md), [registered entity AI goals](docs/ENTITY_AI_GOALS.md), [client action attempts](docs/CLIENT_ACTION_ATTEMPTS.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), [registered block-state properties](docs/BLOCK_STATE_PROPERTIES.md), [block-state shapes](docs/BLOCK_STATE_SHAPES.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.82.0/sjml/)
+- [Rust SDK guide](docs/SDK_GUIDE.md), [registered block scheduled ticks](docs/BLOCK_TICK.md), [persistent block-entity data](docs/BLOCK_ENTITY_PERSISTENT_DATA.md), [bounded vanilla projectile launches](docs/VANILLA_PROJECTILES.md), [registered entity AI goals](docs/ENTITY_AI_GOALS.md), [client action attempts](docs/CLIENT_ACTION_ATTEMPTS.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), [registered block-state properties](docs/BLOCK_STATE_PROPERTIES.md), [block-state shapes](docs/BLOCK_STATE_SHAPES.md), [block-state light](docs/BLOCK_STATE_LIGHT.md), [entity health](docs/ENTITY_HEALTH.md), [player boss bars](docs/PLAYER_BOSS_BARS.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.83.0/sjml/)
 - [Registered block shapes](docs/WORLD_BLOCK_SHAPES.md)
 - [Registered block behavior](docs/WORLD_BLOCK_BEHAVIOR.md)
 - [Registered block use](docs/BLOCK_USE.md)
