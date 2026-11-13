@@ -230,6 +230,85 @@ pub struct BlockDefinition {
     pub has_item_form: bool,
 }
 
+/// A fixed selection and collision shape for a module-registered block.
+///
+/// Cuboid coordinates are fractions of one block, from 0.0 through 1.0.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BlockShape {
+    /// A full 1×1×1 block cube.
+    FullCube,
+    /// A block with no outline or collision shape.
+    Empty,
+    /// A single cuboid used for selection, collision, occlusion, and support.
+    Cuboid {
+        min_x: f32,
+        min_y: f32,
+        min_z: f32,
+        max_x: f32,
+        max_y: f32,
+        max_z: f32,
+    },
+}
+
+impl BlockShape {
+    /// Creates a bounded cuboid shape from inclusive minimum and maximum corners.
+    pub fn cuboid(min: [f32; 3], max: [f32; 3]) -> SjmlResult<Self> {
+        let shape = Self::Cuboid {
+            min_x: min[0],
+            min_y: min[1],
+            min_z: min[2],
+            max_x: max[0],
+            max_y: max[1],
+            max_z: max[2],
+        };
+        shape.validate()?;
+        Ok(shape)
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if let Self::Cuboid {
+            min_x,
+            min_y,
+            min_z,
+            max_x,
+            max_y,
+            max_z,
+        } = self
+        {
+            let minimums = [min_x, min_y, min_z];
+            let maximums = [max_x, max_y, max_z];
+            if minimums
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0 || *value > 1.0)
+                || maximums
+                    .iter()
+                    .any(|value| !value.is_finite() || *value < 0.0 || *value > 1.0)
+                || (0..3).any(|axis| minimums[axis] >= maximums[axis])
+            {
+                return Err(invalid_argument(
+                    "block cuboid corners must be finite, inside 0..=1, and strictly ordered",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn abi_values(self) -> (i32, [f32; 6]) {
+        match self {
+            Self::FullCube => (0, [0.0; 6]),
+            Self::Empty => (1, [0.0; 6]),
+            Self::Cuboid {
+                min_x,
+                min_y,
+                min_z,
+                max_x,
+                max_y,
+                max_z,
+            } => (2, [min_x, min_y, min_z, max_x, max_y, max_z]),
+        }
+    }
+}
+
 /// One bounded vanilla AI goal installed on a registered living entity.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EntityAiGoal {
@@ -1046,6 +1125,18 @@ extern "C" {
         requires_correct_tool: i32,
         has_item_form: i32,
     ) -> i32;
+    #[link_name = "set_block_shape"]
+    fn imported_set_block_shape(
+        path_pointer: i32,
+        path_length: i32,
+        shape_kind: i32,
+        min_x_bits: i32,
+        min_y_bits: i32,
+        min_z_bits: i32,
+        max_x_bits: i32,
+        max_y_bits: i32,
+        max_z_bits: i32,
+    ) -> i32;
     #[link_name = "register_block_entity"]
     fn imported_register_block_entity(
         path_pointer: i32,
@@ -1565,6 +1656,53 @@ pub fn register_block(path: &str, definition: BlockDefinition) -> SjmlResult<()>
         let _ = definition;
         Err(unsupported_target())
     }
+}
+
+/// Applies one fixed selection and collision shape to a block already staged by this module.
+///
+/// The shape is used for selection, collision, occlusion, and support checks. Call this during
+/// `#[mod_register]`, after [`register_block`]. Cuboid coordinates are local block fractions from
+/// 0.0 through 1.0. The legacy block-registration import stays unchanged; shaped blocks use a
+/// separate bounded import.
+pub fn set_block_shape(path: &str, shape: BlockShape) -> SjmlResult<()> {
+    validate_path(path)?;
+    shape.validate()?;
+    let (kind, values) = shape.abi_values();
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded path and validates the fixed-size shape values.
+        let status = unsafe {
+            imported_set_block_shape(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                kind,
+                values[0].to_bits() as i32,
+                values[1].to_bits() as i32,
+                values[2].to_bits() as i32,
+                values[3].to_bits() as i32,
+                values[4].to_bits() as i32,
+                values[5].to_bits() as i32,
+            )
+        };
+        return status_result(status, "host rejected the block shape");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (kind, values);
+        Err(unsupported_target())
+    }
+}
+
+/// Stages a block and assigns its selection and collision shape in one call.
+pub fn register_block_with_shape(
+    path: &str,
+    definition: BlockDefinition,
+    shape: BlockShape,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    shape.validate()?;
+    register_block(path, definition)?;
+    set_block_shape(path, shape)
 }
 
 /// Stages a block entity backed by another block declared by this same module.
@@ -3405,6 +3543,38 @@ mod tests {
         assert_eq!(EntityDefinition::default().height, 1.8);
         assert_eq!(FluidDefinition::default().tick_rate, 5);
         assert_eq!(FluidDefinition::default().slope_find_distance, 4);
+    }
+
+    #[test]
+    fn block_shapes_validate_normalized_cuboids_before_host_access() {
+        assert_eq!(
+            BlockShape::cuboid([0.25, 0.0, 0.25], [0.75, 0.5, 0.75]).unwrap(),
+            BlockShape::Cuboid {
+                min_x: 0.25,
+                min_y: 0.0,
+                min_z: 0.25,
+                max_x: 0.75,
+                max_y: 0.5,
+                max_z: 0.75,
+            }
+        );
+        for (minimum, maximum) in [
+            ([0.5, 0.0, 0.0], [0.5, 1.0, 1.0]),
+            ([f32::NAN, 0.0, 0.0], [1.0, 1.0, 1.0]),
+            ([-0.01, 0.0, 0.0], [1.0, 1.0, 1.0]),
+            ([0.0, 0.0, 0.0], [1.01, 1.0, 1.0]),
+        ] {
+            assert_eq!(
+                BlockShape::cuboid(minimum, maximum).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_block_shape("block", BlockShape::Empty)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
     }
 
     #[test]
