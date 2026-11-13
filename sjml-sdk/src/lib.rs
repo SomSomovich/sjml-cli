@@ -319,9 +319,9 @@ pub use widgets::{
     Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
 };
 pub use world::{
-    BlockProperty, BlockStateSnapshot, ChunkPos, FluidStateSnapshot, HeightmapType,
-    ItemSpawnVelocity, LightSnapshot, TagRegistry, WorldBorderSnapshot, WorldDifficulty,
-    WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint, MAX_WORLD_BIOME_IDS,
+    BlockProperty, BlockStateSnapshot, BlockUpdateOptions, ChunkPos, FluidStateSnapshot,
+    HeightmapType, ItemSpawnVelocity, LightSnapshot, TagRegistry, WorldBorderSnapshot,
+    WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint, MAX_WORLD_BIOME_IDS,
     MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_COORDINATE,
     MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
     MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
@@ -332,7 +332,7 @@ pub use world::{
     MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED, MAX_WORLD_ITEM_STACK_COUNT,
     MAX_WORLD_REDSTONE_SIGNAL, MAX_WORLD_SPAWN_POINT_BYTES, MAX_WORLD_TAG_ID_BYTES,
     MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES, MAX_WORLD_TAG_MEMBERS_QUERY_BYTES,
-    MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES,
+    MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES, WORLD_BLOCK_UPDATE_ALLOWED_MASK,
 };
 
 /// Common imports for an SJML guest module.
@@ -578,10 +578,10 @@ pub mod prelude {
     };
     pub use crate::world;
     pub use crate::world::{
-        BlockProperty, BlockStateSnapshot, ChunkPos, FluidStateSnapshot, HeightmapType,
-        ItemSpawnVelocity, LightSnapshot, ProjectileVelocity, RaycastBlockMode, RaycastFluidMode,
-        RaycastHit, RaycastPoint, TagRegistry, VanillaProjectileKind, WorldBorderSnapshot,
-        WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
+        BlockProperty, BlockStateSnapshot, BlockUpdateOptions, ChunkPos, FluidStateSnapshot,
+        HeightmapType, ItemSpawnVelocity, LightSnapshot, ProjectileVelocity, RaycastBlockMode,
+        RaycastFluidMode, RaycastHit, RaycastPoint, TagRegistry, VanillaProjectileKind,
+        WorldBorderSnapshot, WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
         MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
         MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
         MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
@@ -591,6 +591,7 @@ pub mod prelude {
         MAX_WORLD_PROJECTILES_PER_TICK, MAX_WORLD_PROJECTILE_SPEED,
         MAX_WORLD_RAYCAST_RESPONSE_BYTES, MAX_WORLD_RAY_COORDINATE, MAX_WORLD_RAY_DISTANCE,
         MAX_WORLD_REDSTONE_SIGNAL, MAX_WORLD_SPAWN_POINT_BYTES, MIN_WORLD_PROJECTILE_SPEED,
+        WORLD_BLOCK_UPDATE_ALLOWED_MASK,
     };
     pub use crate::{
         client_command, client_command_suggestions, client_music_selection, command,

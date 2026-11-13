@@ -100,6 +100,8 @@ mod world_light_at;
 mod world_neighbor_update;
 #[path = "gametest/world_redstone_signal.rs"]
 mod world_redstone_signal;
+#[path = "gametest/world_set_block_options.rs"]
+mod world_set_block_options;
 #[path = "gametest/world_spawn_point.rs"]
 mod world_spawn_point;
 #[path = "gametest/world_tag_members.rs"]

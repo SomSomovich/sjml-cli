@@ -26,6 +26,8 @@ pub const MAX_WORLD_BLOCK_PROPERTY_UPDATES: usize = 32;
 pub const MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES: usize = 10_932;
 /// Maximum output bytes reserved for one block-property snapshot.
 pub const MAX_WORLD_BLOCK_PROPERTIES_RESPONSE_BYTES: usize = 21_257;
+/// Allowed raw update-bit mask for [`set_block_with_options`].
+pub const WORLD_BLOCK_UPDATE_ALLOWED_MASK: i32 = 0b1_0011;
 /// Maximum output bytes reserved for one fluid-state snapshot.
 pub const MAX_WORLD_FLUID_STATE_RESPONSE_BYTES: usize = 275;
 /// Maximum length of one raycast segment in blocks.
@@ -1150,6 +1152,17 @@ extern "C" {
         z: i32,
         block_id: i32,
         block_id_length: i32,
+    ) -> i32;
+    #[link_name = "set_block_with_options"]
+    fn imported_set_block_with_options(
+        handle: i32,
+        handle_length: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_id: i32,
+        block_id_length: i32,
+        update_flags: i32,
     ) -> i32;
     #[link_name = "set_block_properties"]
     fn imported_set_block_properties(request: i32, request_length: i32) -> i32;
@@ -3148,7 +3161,7 @@ pub fn set_block(world: WorldHandle, position: BlockPos, block_id: &str) -> Sjml
     #[cfg(target_arch = "wasm32")]
     {
         let encoded = to_bytes(&world)?;
-        // SAFETY: this synchronous host call copies the 24-byte handle and bounded block ID.
+        // SAFETY: this legacy import copies the 24-byte handle and bounded block ID synchronously.
         let status = unsafe {
             imported_set_block(
                 encoded.as_ptr() as usize as u32 as i32,
@@ -3172,6 +3185,96 @@ pub fn set_block(world: WorldHandle, position: BlockPos, block_id: &str) -> Sjml
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
+/// Controls the safe update behavior when [`set_block_with_options`] replaces a block.
+///
+/// This deliberately exposes only neighbor notifications, client updates, and the
+/// `UPDATE_KNOWN_SHAPE` optimization. Flags that suppress drops, request immediate updates,
+/// or bypass normal movement handling are unavailable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockUpdateOptions {
+    /// Send normal block-neighbor notifications after the replacement.
+    pub update_neighbors: bool,
+    /// Send the block update to clients tracking the loaded chunk.
+    pub update_clients: bool,
+    /// Assert that the replacement's neighbor shape is already known to be consistent.
+    /// Use this only when the caller has already established the surrounding shape state.
+    pub known_shape: bool,
+}
+
+impl Default for BlockUpdateOptions {
+    fn default() -> Self {
+        Self {
+            update_neighbors: true,
+            update_clients: true,
+            known_shape: false,
+        }
+    }
+}
+
+impl BlockUpdateOptions {
+    #[cfg(any(target_arch = "wasm32", test))]
+    const fn abi_flags(self) -> i32 {
+        (if self.update_neighbors { 1 } else { 0 })
+            | (if self.update_clients { 1 << 1 } else { 0 })
+            | (if self.known_shape { 1 << 4 } else { 0 })
+    }
+}
+
+/// Replaces one loaded block with the default state of `block_id` using explicit safe update options.
+///
+/// The call requires both `world.read` and `world.write`, runs on the owning logical-server thread,
+/// and does not load chunks. Disabling neighbor updates can leave dependent blocks in their current
+/// state until another update reaches them. Disabling client updates leaves connected clients stale
+/// until a later packet refreshes the position. `known_shape` is an opt-in assertion for callers
+/// that already established the surrounding shape state. [`set_block`] keeps the default behavior
+/// of enabling both neighbor and client updates with `known_shape` disabled.
+pub fn set_block_with_options(
+    world: WorldHandle,
+    position: BlockPos,
+    block_id: &str,
+    options: BlockUpdateOptions,
+) -> SjmlResult<()> {
+    validate_block_id(block_id)?;
+    if position.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block x/z coordinates must be within ±30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&world)?;
+        // SAFETY: this synchronous host call copies the 24-byte handle and bounded block ID.
+        let status = unsafe {
+            imported_set_block_with_options(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                position.x,
+                position.y,
+                position.z,
+                block_id.as_ptr() as usize as u32 as i32,
+                block_id.len() as i32,
+                options.abi_flags(),
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the world block mutation",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, options);
         Err(unsupported_target())
     }
 }
@@ -3593,15 +3696,15 @@ mod tests {
         biome_ids, block_has_tag, block_properties, collides, day_time, daylight_cycle_enabled,
         entity_type_tag_members, fluid_at, fluid_tag_members, integer_game_rule, item_has_tag,
         item_tag_members, loaded_chunks, notify_neighbors_at, play_sound, raycast,
-        schedule_block_tick, set_block, set_block_properties, set_daylight_cycle_enabled,
-        set_game_time, set_integer_game_rule, set_time, spawn_entity, spawn_item, spawn_particle,
-        spawn_projectile, structures_at, tag_members, validate_biome_ids,
-        validate_block_property_updates, validate_loaded_chunk_query,
+        schedule_block_tick, set_block, set_block_properties, set_block_with_options,
+        set_daylight_cycle_enabled, set_game_time, set_integer_game_rule, set_time, spawn_entity,
+        spawn_item, spawn_particle, spawn_projectile, structures_at, tag_members,
+        validate_biome_ids, validate_block_property_updates, validate_loaded_chunk_query,
         validate_loaded_chunk_results, validate_structure_ids, validate_tag_member_ids,
         validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse, BlockPropertiesMutation,
         BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateBatch,
-        BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse, ChunkPos,
-        DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity,
+        BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse, BlockUpdateOptions,
+        ChunkPos, DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity,
         ItemTagQuery, ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
         RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery,
         StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
@@ -3611,17 +3714,18 @@ mod tests {
         WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot, WorldItemSpawnRequest,
         WorldProjectileSpawnRequest, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
         MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
-        MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
-        MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_TAG_ID_BYTES,
-        MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
-        MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
+        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTIES,
+        MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
+        MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
+        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
+        MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
         MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED, MAX_WORLD_ITEM_STACK_COUNT,
         MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
         MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_PROJECTILE_SPEED, MAX_WORLD_STRUCTURES_AT,
         MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES, MAX_WORLD_STRUCTURE_ID_BYTES,
         MAX_WORLD_TAG_ID_BYTES, MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES,
         MAX_WORLD_TAG_MEMBERS_QUERY_BYTES, MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES,
-        MIN_WORLD_PROJECTILE_SPEED,
+        MIN_WORLD_PROJECTILE_SPEED, WORLD_BLOCK_UPDATE_ALLOWED_MASK,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -4656,6 +4760,75 @@ mod tests {
         }
         assert_eq!(
             set_block(world, position, "minecraft:stone")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn block_update_options_map_only_to_safe_vanilla_update_flags() {
+        assert_eq!(WORLD_BLOCK_UPDATE_ALLOWED_MASK, 0b1_0011);
+        assert_eq!(BlockUpdateOptions::default().abi_flags(), 0b0_0011);
+        assert_eq!(
+            BlockUpdateOptions {
+                update_neighbors: true,
+                update_clients: false,
+                known_shape: false,
+            }
+            .abi_flags(),
+            0b0_0001
+        );
+        assert_eq!(
+            BlockUpdateOptions {
+                update_neighbors: false,
+                update_clients: true,
+                known_shape: true,
+            }
+            .abi_flags(),
+            0b1_0010
+        );
+        assert_eq!(
+            BlockUpdateOptions {
+                update_neighbors: true,
+                update_clients: true,
+                known_shape: true,
+            }
+            .abi_flags(),
+            WORLD_BLOCK_UPDATE_ALLOWED_MASK
+        );
+    }
+
+    #[test]
+    fn block_update_options_validate_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        let options = BlockUpdateOptions::default();
+        for invalid in ["stone", "Minecraft:stone", "minecraft:bad path"] {
+            assert_eq!(
+                set_block_with_options(world, position, invalid, options)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_block_with_options(
+                world,
+                BlockPos {
+                    x: MAX_WORLD_BLOCK_COORDINATE + 1,
+                    y: 64,
+                    z: 0
+                },
+                "minecraft:stone",
+                options,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_block_with_options(world, position, "minecraft:stone", options)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

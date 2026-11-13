@@ -192,6 +192,7 @@ inventory writes](PLAYER_INVENTORY_WRITES.md), [loaded chunks](WORLD_LOADED_CHUN
 [entity raycasts](ENTITY_RAYCAST.md), [death attempts](ENTITY_DEATH_ATTEMPTS.md),
 [client commands](CLIENT_COMMANDS.md), [spatial entity queries](ENTITY_SPATIAL_QUERY.md),
 [integer game rules](WORLD_INTEGER_GAME_RULES.md), [block property updates](WORLD_BLOCK_PROPERTIES_WRITE.md),
+[block replacement update options](WORLD_BLOCK_UPDATE_OPTIONS.md),
 [item-stack snapshots](ITEM_STACK_SNAPSHOT.md), and [block placement vetoes](BLOCK_PLACE_ATTEMPTS.md).
 
 SDK 0.52.0 adds static villager trade offers, cancellable pre-mitigation

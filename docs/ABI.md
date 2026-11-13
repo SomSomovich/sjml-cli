@@ -1817,6 +1817,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `raycast` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<RaycastHit>` for one bounded segment |
 | `collides` | `query_ptr, query_len, out_ptr, out_capacity` | Stable `Option<bool>` for one bounded axis-aligned box |
 | `set_block` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len` | Replace one loaded position with the registered block's default state; status only |
+| `set_block_with_options` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len, update_flags` | Replace one loaded block with only neighbor (`1`), client (`2`), and known-shape (`16`) flags; unknown bits are rejected; status only |
 | `schedule_block_tick` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len, delay_ticks` | Schedule one normal tick for the matching registered block at an already-loaded position; status only |
 | `notify_neighbors_at` | `handle_ptr, handle_len, x, y, z` | Run the ordinary vanilla neighbor update at a loaded position; status only |
 | `spawn_entity` | `query_ptr, query_len` | Spawn one registered, non-player entity from a bounded schema-v1 world/type/position record; status only |
@@ -2007,6 +2008,16 @@ registry ID, a position inside build height, and an already loaded chunk. It
 places the block's default state on the owning server thread and never loads a
 chunk. Invalid IDs, out-of-height positions, and unloaded chunks return
 `INVALID_ARGUMENT`; static-registration calls are denied.
+
+`set_block_with_options` has the same loaded-world, permission, thread, and
+position checks. Its `update_flags` accepts only mask `0b1_0011`: bit 0 sends
+vanilla neighbor updates, bit 1 sends updates to tracking clients, and bit 4
+asserts the vanilla known-shape optimization. The legacy `set_block` import
+retains `UPDATE_ALL` behavior. Bits for invisible or immediate updates,
+suppressing drops, and piston movement are rejected; the call cannot suppress
+normal drops. Disabling neighbor or client updates is explicit and may leave
+dependent block state or a client view unchanged until another update arrives.
+See [block replacement update options](WORLD_BLOCK_UPDATE_OPTIONS.md).
 
 `spawn_entity` requires `world.read` and the separate administrator-granted
 `entity.spawn` capability. Its stable request is schema `u32(1)`, the 24-byte
