@@ -897,6 +897,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_entity_textured_model` | `(path_ptr: i32, path_len: i32, texture_ptr: i32, texture_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded entity cuboid model using a PNG resource in the owning package namespace; the model may include host-evaluated animation. |
 | `sjml_registry_v1.register_block_entity_textured_model` | `(path_ptr: i32, path_len: i32, texture_ptr: i32, texture_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded block-entity cuboid model using a PNG resource in the owning package namespace; the model may include host-evaluated animation. |
 | `sjml_registry_v1.register_model_keyframe_track` | `(path_ptr: i32, path_len: i32, track_ptr: i32, track_len: i32) -> i32` | Stage one bounded host-evaluated periodic keyframe rotation on a previously registered same-module entity or block-entity model/cuboid. |
+| `sjml_registry_v1.register_model_transform_keyframe_track` | `(path_ptr: i32, path_len: i32, track_ptr: i32, track_len: i32) -> i32` | Stage one bounded host-evaluated periodic XYZ translation or scale keyframe track on a previously registered same-module entity or block-entity model/cuboid. |
 | `sjml_registry_v1.register_entity` | `(path_ptr: i32, path_len: i32, width_bits: i32, height_bits: i32, tracking_range: i32, update_interval: i32, fire_immune: i32) -> i32` | Stage a generic living `MobCategory.MISC` entity type. |
 | `sjml_registry_v1.register_entity_ai_goal` | `(path_ptr: i32, path_len: i32, goal: i32, priority: i32, value_bits: i32, flags: i32) -> i32` | Add one bounded vanilla goal to an entity declared by the same module. |
 | `sjml_registry_v1.register_entity_ai_goal_v2` | `(path_ptr: i32, path_len: i32, goal: i32, priority: i32, range_bits: i32, walk_speed_bits: i32, sprint_speed_bits: i32, flags: i32) -> i32` | Add the bounded AvoidPlayer goal to an entity declared by the same module. |
@@ -998,6 +999,20 @@ permits one track per axis across sine and keyframe tracks; registration is
 capped at 512 tracks/8,192 frames per module and 8,192 tracks/65,536 frames
 total. The type and cuboid index must belong to the same module. Rendering
 performs no guest call.
+`register_model_transform_keyframe_track` uses a separate schema-v1 record with
+a 36-byte little-endian header: schema (`1`), target kind (`0=entity`,
+`1=block entity`), cuboid index (`0xffffffff` for the whole model), transform
+kind (`0=translation`, `1=scale`), three f32 pivot coordinates, u32 loop
+duration, and u32 frame count. Each of 2–32 frames contains a u32 tick and XYZ
+f32 values. Translation has a zero pivot and is bounded to +/-4 model-local
+units for entities and +/-1 for block entities. Scale values are positive
+`0.01..=16`; scale pivots use the entity `[-4,4]` or block-entity `[0,1]`
+bounds. The loop duration is 2–12,000 ticks; ticks start at zero and increase
+strictly. The host linearly interpolates and wraps at the duration. Rotation
+payloads and imports keep their existing schema and bytes. Each target allows
+one translation and one scale track in addition to its rotation tracks; the
+combined keyframe cap is 165 tracks per model, 512 tracks/8,192 frames per
+module, and 8,192 tracks/65,536 frames total.
 Custom registry IDs use `<package-id>:custom/<module-id>/<path>` and entry IDs
 use the module's normal `<package-id>:<module-id>/<path>` namespace. Registry
 declarations and entries are staged only during `mod_register`; NeoForge

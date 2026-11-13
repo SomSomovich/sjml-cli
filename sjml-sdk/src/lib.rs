@@ -232,9 +232,11 @@ pub use menu::{
     MenuDefinition, MenuItem,
 };
 pub use model_animation::{
-    register_block_entity_model_keyframe_track, register_entity_model_keyframe_track,
-    ModelAnimationTarget, ModelKeyframe, ModelKeyframeTrack, MAX_MODEL_KEYFRAMES,
-    MAX_MODEL_KEYFRAME_DURATION_TICKS,
+    register_block_entity_model_keyframe_track,
+    register_block_entity_model_transform_keyframe_track, register_entity_model_keyframe_track,
+    register_entity_model_transform_keyframe_track, ModelAnimationTarget, ModelKeyframe,
+    ModelKeyframeTrack, ModelTransformKeyframe, ModelTransformKeyframeTrack, ModelTransformKind,
+    MAX_MODEL_KEYFRAMES, MAX_MODEL_KEYFRAME_DURATION_TICKS, MAX_MODEL_SCALE, MIN_MODEL_SCALE,
 };
 pub use network::{
     ChannelRef, LogicalSide, NetworkContext, NetworkContextSnapshot, NetworkDirection,
@@ -464,9 +466,12 @@ pub mod prelude {
     };
     pub use crate::model_animation;
     pub use crate::model_animation::{
-        register_block_entity_model_keyframe_track, register_entity_model_keyframe_track,
-        ModelAnimationTarget, ModelKeyframe, ModelKeyframeTrack, MAX_MODEL_KEYFRAMES,
-        MAX_MODEL_KEYFRAME_DURATION_TICKS,
+        register_block_entity_model_keyframe_track,
+        register_block_entity_model_transform_keyframe_track, register_entity_model_keyframe_track,
+        register_entity_model_transform_keyframe_track, ModelAnimationTarget, ModelKeyframe,
+        ModelKeyframeTrack, ModelTransformKeyframe, ModelTransformKeyframeTrack,
+        ModelTransformKind, MAX_MODEL_KEYFRAMES, MAX_MODEL_KEYFRAME_DURATION_TICKS,
+        MAX_MODEL_SCALE, MIN_MODEL_SCALE,
     };
     pub use crate::network;
     pub use crate::network::{

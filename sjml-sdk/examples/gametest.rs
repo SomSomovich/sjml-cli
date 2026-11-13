@@ -338,6 +338,29 @@ fn register_test_content() -> SjmlResult<()> {
         ModelAnimationTarget::Cuboid(1),
         keyframe_track,
     )?;
+    model_animation::register_entity_model_transform_keyframe_track(
+        "gametest_ai",
+        ModelAnimationTarget::Cuboid(0),
+        ModelTransformKeyframeTrack::translation(
+            40,
+            vec![
+                ModelTransformKeyframe::new(0, [0.0, 0.0, 0.0])?,
+                ModelTransformKeyframe::new(20, [0.1, 0.0, 0.0])?,
+            ],
+        )?,
+    )?;
+    model_animation::register_entity_model_transform_keyframe_track(
+        "gametest_ai",
+        ModelAnimationTarget::Cuboid(0),
+        ModelTransformKeyframeTrack::scale(
+            [0.0, 0.25, 0.0],
+            40,
+            vec![
+                ModelTransformKeyframe::new(0, [1.0, 1.0, 1.0])?,
+                ModelTransformKeyframe::new(20, [1.1, 1.0, 1.1])?,
+            ],
+        )?,
+    )?;
     registry::register_entity_ai_goal("gametest_ai", EntityAiGoal::Swim { priority: 0 })?;
     registry::register_entity_ai_goal(
         "gametest_ai",
