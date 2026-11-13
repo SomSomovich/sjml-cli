@@ -44,34 +44,57 @@ fn increment_deaths(input: PlayerId) -> SjmlResult<String> {
     ))
 }
 
-#[command(name = "player.statistics.registry.check")]
-fn check_registry_statistics(input: PlayerId) -> SjmlResult<String> {
+fn increment_and_verify(
+    handle: sjml::PlayerHandle,
+    family: StatisticFamily,
+    registry_id: &str,
+) -> SjmlResult<()> {
+    let statistic = PlayerStatistic::new(family, registry_id)?;
+    let before = player_statistics::read(handle, &statistic)?;
+    if before >= i32::MAX as u32 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "registry-backed statistic is already at Minecraft's signed integer limit",
+        ));
+    }
+    player_statistics::increment(handle, &statistic, 1)?;
+    if player_statistics::read(handle, &statistic)? != before + 1 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "registry-backed statistic increment did not round-trip",
+        ));
+    }
+    Ok(())
+}
+
+#[command(name = "player.statistics.registry.blocks")]
+fn check_block_statistics(input: PlayerId) -> SjmlResult<String> {
     let handle = player_handle(&input.uuid)?;
-    let targets = [
-        (StatisticFamily::BlockMined, "minecraft:stone"),
+    increment_and_verify(handle, StatisticFamily::BlockMined, "minecraft:stone")?;
+    Ok("block-mined statistic incremented".to_owned())
+}
+
+#[command(name = "player.statistics.registry.items")]
+fn check_item_statistics(input: PlayerId) -> SjmlResult<String> {
+    let handle = player_handle(&input.uuid)?;
+    for (family, registry_id) in [
         (StatisticFamily::ItemUsed, "minecraft:diamond"),
         (StatisticFamily::ItemBroken, "minecraft:diamond"),
         (StatisticFamily::ItemCrafted, "minecraft:diamond"),
+    ] {
+        increment_and_verify(handle, family, registry_id)?;
+    }
+    Ok("item statistics incremented".to_owned())
+}
+
+#[command(name = "player.statistics.registry.entities")]
+fn check_entity_statistics(input: PlayerId) -> SjmlResult<String> {
+    let handle = player_handle(&input.uuid)?;
+    for (family, registry_id) in [
         (StatisticFamily::EntityKilled, "minecraft:zombie"),
         (StatisticFamily::EntityKilledBy, "minecraft:zombie"),
-    ];
-
-    for (family, registry_id) in targets {
-        let statistic = PlayerStatistic::new(family, registry_id)?;
-        let before = player_statistics::read(handle, &statistic)?;
-        if before >= i32::MAX as u32 {
-            return Err(SjmlError::new(
-                ErrorCode::InvalidArgument,
-                "registry-backed statistic is already at Minecraft's signed integer limit",
-            ));
-        }
-        player_statistics::increment(handle, &statistic, 1)?;
-        if player_statistics::read(handle, &statistic)? != before + 1 {
-            return Err(SjmlError::new(
-                ErrorCode::InvalidArgument,
-                "registry-backed statistic increment did not round-trip",
-            ));
-        }
+    ] {
+        increment_and_verify(handle, family, registry_id)?;
     }
-    Ok("six vanilla registry-backed statistics incremented".to_owned())
+    Ok("entity statistics incremented".to_owned())
 }

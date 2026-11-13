@@ -25,7 +25,9 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes SDK 0.82.0 and core ABI 1.74.0.
+unverified. This guide describes SDK 0.82.0 and core ABI 1.74.0. Live
+server-player scoreboard-team membership reads and guarded set/clear calls are
+documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
 SDK 0.82.0 adds per-state shape overrides for registered blocks. See
 [registered block-state shapes](BLOCK_STATE_SHAPES.md).
 SDK 0.81.0 adds bounded Boolean and integer properties for registered block

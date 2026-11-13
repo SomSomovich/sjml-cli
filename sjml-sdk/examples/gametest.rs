@@ -1594,6 +1594,50 @@ fn inspect_player_active_effects(arguments: PlayerArguments) -> SjmlResult<Strin
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
+struct PlayerTeamArguments {
+    player_id: String,
+    old_team_id: String,
+    new_team_id: String,
+}
+
+#[command(name = "player.team.membership")]
+fn check_player_team_membership(arguments: PlayerTeamArguments) -> SjmlResult<String> {
+    let handle = player::online()?
+        .into_iter()
+        .find(|handle| {
+            player::snapshot(*handle).is_ok_and(|snapshot| snapshot.uuid == arguments.player_id)
+        })
+        .ok_or_else(|| {
+            SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "requested team-test player is not online",
+            )
+        })?;
+    if player::team(handle)?.as_deref() != Some(arguments.old_team_id.as_str()) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player team read did not return the initial scoreboard assignment",
+        ));
+    }
+    player::set_team(handle, &arguments.new_team_id)?;
+    if player::team(handle)?.as_deref() != Some(arguments.new_team_id.as_str()) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player team read did not return the updated scoreboard assignment",
+        ));
+    }
+    player::clear_team(handle)?;
+    if player::team(handle)?.is_some() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "cleared player still has a scoreboard-team assignment",
+        ));
+    }
+    Ok("player scoreboard team read, set, and clear succeeded".to_owned())
+}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
 struct MenuActionOpenArguments {
     player_id: String,
 }

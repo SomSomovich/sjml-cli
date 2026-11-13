@@ -2006,6 +2006,9 @@ signatures but calls return `PERMISSION_DENIED`.
 | `advancement_progress` | `handle_ptr, handle_len, advancement_id_ptr, advancement_id_len, out_ptr, out_capacity` | Write a stable schema-v1 snapshot of at most 256 sorted criteria and their achieved flags; requires `entity.read`. |
 | `grant_advancement_criterion` | `handle_ptr, handle_len, advancement_id_ptr, advancement_id_len, criterion_id_ptr, criterion_id_len, changed_out_ptr, changed_out_capacity` | Award one exact registered criterion; requires `entity.read` and `player.advancement.write`. |
 | `revoke_advancement_criterion` | `handle_ptr, handle_len, advancement_id_ptr, advancement_id_len, criterion_id_ptr, criterion_id_len, changed_out_ptr, changed_out_capacity` | Revoke one exact registered criterion; requires `entity.read` and `player.advancement.write`. |
+| `team` | `handle_ptr, handle_len, out_ptr, out_capacity` | Read the live player's optional current scoreboard-team ID; requires `entity.read`. |
+| `set_team` | `handle_ptr, handle_len, team_id_ptr, team_id_len` | Move the live player to an existing current-server scoreboard team; requires `entity.read` and `player.team.write`. |
+| `clear_team` | `handle_ptr, handle_len` | Remove the live player's current team assignment; requires `entity.read` and `player.team.write`. |
 
 `handle_len` must be 24. UUIDs are canonical lowercase UUID text, and
 dimension IDs are canonical `namespace:path`. Each stable string is limited to
@@ -2090,6 +2093,18 @@ blank, while the subtitle may be empty. Each animation timing must be in
 `0..=6000` ticks. Calls are server-only, validate the live login session and
 server thread, and are limited to ten sends per module per five seconds. See
 [player title and subtitle messages](PLAYER_TITLES.md).
+
+Player team imports use `sjml_player_v1`. Reads require `entity.read`; `set_team`
+and `clear_team` additionally require `player.team.write`. Team IDs are limited
+to 1–64 ASCII letters, digits, `.`, `_`, `+`, or `-`. `team` requires a
+73-byte output buffer and returns u32 schema `1`, followed by tag `0` when
+unassigned or tag `1`, a little-endian u32 byte length, and the team ID. The
+host resolves the handle to the current live `ServerPlayer` and accesses the
+active server scoreboard on its owning server thread. `set_team` requires an
+already existing team and may replace any current membership; it never creates
+a team. `clear_team` removes the current membership and succeeds when already
+unassigned. Static registration and client calls fail closed. See
+[live player scoreboard teams](PLAYER_TEAMS.md).
 
 Criterion-level advancement imports use `sjml_player_v1`. The optional progress
 read requires `entity.read`; the two criterion mutation imports additionally

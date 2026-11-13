@@ -1,4 +1,4 @@
-//! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, active-effect, and game-mode reads require
+//! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, active-effect, team, and game-mode reads require
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
@@ -16,9 +16,11 @@ pub use crate::entity::ActiveEffect;
 use crate::entity::ActiveEffectsResponse;
 use crate::entity::{validate_effect_id, MAX_EFFECT_DURATION_TICKS};
 #[cfg(target_arch = "wasm32")]
-use crate::MAX_STRING_BYTES;
+use crate::to_bytes;
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::Decoder;
 #[cfg(target_arch = "wasm32")]
-use crate::{to_bytes, Decoder};
+use crate::MAX_STRING_BYTES;
 use crate::{
     ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
 };
@@ -28,6 +30,71 @@ pub const MAX_PLAYER_ACTIVE_EFFECTS: usize = crate::entity::MAX_ACTIVE_ENTITY_EF
 /// Maximum response bytes reserved for one player's detached active-effect snapshot.
 pub const MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES: usize =
     crate::entity::MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES;
+/// Maximum UTF-8 bytes accepted for an existing vanilla scoreboard team name.
+pub const MAX_PLAYER_TEAM_NAME_BYTES: usize = 64;
+/// Maximum schema-v1 response size for a current player scoreboard-team assignment.
+pub const MAX_PLAYER_TEAM_RESPONSE_BYTES: usize = 4 + 1 + 4 + MAX_PLAYER_TEAM_NAME_BYTES;
+
+#[cfg(any(target_arch = "wasm32", test))]
+const PLAYER_TEAM_RESPONSE_SCHEMA: u32 = 1;
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, StableEncode)]
+#[sjml(version = 1)]
+struct PlayerTeamResponse {
+    team_name: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for PlayerTeamResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != PLAYER_TEAM_RESPONSE_SCHEMA {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported player scoreboard-team response schema",
+            ));
+        }
+        let team_name = match decoder.read_u8()? {
+            0 => None,
+            1 => {
+                let length = decoder.read_length(MAX_PLAYER_TEAM_NAME_BYTES)?;
+                if length == 0 {
+                    return Err(SjmlError::new(
+                        ErrorCode::InvalidArgument,
+                        "player scoreboard-team name cannot be empty",
+                    ));
+                }
+                let bytes = decoder.read_raw(length)?;
+                let value = core::str::from_utf8(bytes).map_err(|_| {
+                    SjmlError::new(
+                        ErrorCode::InvalidUtf8,
+                        "player scoreboard-team name is not valid UTF-8",
+                    )
+                })?;
+                validate_player_team_name(value)?;
+                Some(value.to_owned())
+            }
+            value => {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    format!("player scoreboard-team option tag must be 0 or 1, found {value}"),
+                ));
+            }
+        };
+        if decoder
+            .read_raw(decoder.remaining())?
+            .iter()
+            .any(|byte| *byte != 0)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "player scoreboard-team response has nonzero trailing data",
+            ));
+        }
+        Ok(Self { team_name })
+    }
+}
 
 /// Current identity, dimension, and coordinates of one online player.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -798,6 +865,17 @@ extern "C" {
     ) -> i32;
     #[link_name = "active_effects"]
     fn imported_active_effects(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "team"]
+    fn imported_team(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_team"]
+    fn imported_set_team(
+        handle: i32,
+        handle_length: i32,
+        team_name: i32,
+        team_name_length: i32,
+    ) -> i32;
+    #[link_name = "clear_team"]
+    fn imported_clear_team(handle: i32, handle_length: i32) -> i32;
     #[link_name = "teleport"]
     fn imported_teleport(
         handle: i32,
@@ -1784,6 +1862,111 @@ pub fn active_effects(handle: PlayerHandle) -> SjmlResult<Vec<ActiveEffect>> {
     }
 }
 
+/// Reads the current scoreboard-team name for the live player, if the player is assigned to a team.
+///
+/// Requires the declared and granted `entity.read` capability and a logical-server context. The
+/// detached name is limited to 64 ASCII bytes. The lookup is revalidated against the player's
+/// current login session and current server-level scoreboard; no scoreboard or Minecraft object
+/// references cross the ABI.
+pub fn team(handle: PlayerHandle) -> SjmlResult<Option<String>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let response: PlayerTeamResponse =
+            read_output(MAX_PLAYER_TEAM_RESPONSE_BYTES as u32, |output, capacity| {
+                // SAFETY: the encoded handle and bounded response allocation remain live for this import.
+                unsafe {
+                    imported_team(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as u32 as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            })?;
+        Ok(response.team_name)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Assigns the live player to an existing scoreboard team.
+///
+/// Requires both `entity.read` and `player.team.write`. The name must identify a team that already
+/// exists on the current logical-server scoreboard; this API never creates teams. An existing
+/// membership can be replaced, so `player.team.write` grants authority over any team's membership
+/// for this live player. Names are limited to 64 ASCII letters, digits, '.', '_', '+', or '-'.
+pub fn set_team(handle: PlayerHandle, team_name: &str) -> SjmlResult<()> {
+    validate_player_team_name(team_name)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the handle and bounded team-name slices remain valid for this synchronous host call.
+        let status = unsafe {
+            imported_set_team(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                team_name.as_ptr() as usize as u32 as i32,
+                team_name.len() as u32 as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player scoreboard-team assignment",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Removes the live player from its current scoreboard team, if assigned.
+///
+/// Requires both `entity.read` and `player.team.write`. This can remove membership from any
+/// existing team, including a vanilla team or a team owned by another module.
+pub fn clear_team(handle: PlayerHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the stable handle remains valid for this synchronous host call.
+        let status = unsafe {
+            imported_clear_team(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected clearing the player scoreboard-team assignment",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_player_team_name(team_name: &str) -> SjmlResult<()> {
+    if team_name.is_empty()
+        || team_name.len() > MAX_PLAYER_TEAM_NAME_BYTES
+        || !team_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'+' | b'-'))
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "scoreboard team names must be 1–64 ASCII letters, digits, '.', '_', '+', or '-'",
+        ));
+    }
+    Ok(())
+}
+
 /// Teleports an online player to an absolute position in their current dimension.
 ///
 /// The module must request and receive both `entity.read` and `player.teleport`.
@@ -2041,12 +2224,14 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, apply_effect, teleport, teleport_to_world, validate_player_title_text,
-        vitals, PlayerMotion, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
+        active_effects, apply_effect, clear_team, set_team, team, teleport, teleport_to_world,
+        validate_player_team_name, validate_player_title_text, vitals, PlayerMotion,
+        PlayerTeamResponse, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
         MAX_PLAYER_ACTIVE_EFFECTS, MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES,
-        MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
+        MAX_PLAYER_TEAM_NAME_BYTES, MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES,
+        MAX_TELEPORT_COORDINATE,
     };
-    use crate::{ActiveEffect, ErrorCode, PlayerHandle, WorldHandle};
+    use crate::{ActiveEffect, ErrorCode, PlayerHandle, StableDecode, WorldHandle};
 
     #[test]
     fn player_active_effects_reuse_the_bounded_entity_effect_schema() {
@@ -2081,6 +2266,87 @@ mod tests {
                 .code(),
             ErrorCode::UnknownErrorCode
         );
+    }
+
+    #[test]
+    fn player_team_membership_uses_a_bounded_optional_schema_and_name_contract() {
+        assert_eq!(MAX_PLAYER_TEAM_NAME_BYTES, 64);
+        assert_eq!(MAX_PLAYER_TEAM_RESPONSE_BYTES, 73);
+
+        let no_team = crate::to_bytes(&PlayerTeamResponse { team_name: None }).unwrap();
+        assert_eq!(no_team, [1, 0, 0, 0, 0]);
+        assert_eq!(
+            crate::from_bytes::<PlayerTeamResponse>(&no_team)
+                .unwrap()
+                .team_name,
+            None
+        );
+
+        let some_team = crate::to_bytes(&PlayerTeamResponse {
+            team_name: Some("red-team".to_owned()),
+        })
+        .unwrap();
+        assert_eq!(
+            &some_team,
+            &[1, 0, 0, 0, 1, 8, 0, 0, 0, b'r', b'e', b'd', b'-', b't', b'e', b'a', b'm']
+        );
+        assert_eq!(
+            crate::from_bytes::<PlayerTeamResponse>(&some_team)
+                .unwrap()
+                .team_name
+                .as_deref(),
+            Some("red-team")
+        );
+
+        let mut padded = some_team.clone();
+        padded.resize(MAX_PLAYER_TEAM_RESPONSE_BYTES, 0);
+        assert_eq!(
+            PlayerTeamResponse::decode(&mut crate::Decoder::new(&padded).unwrap())
+                .unwrap()
+                .team_name
+                .as_deref(),
+            Some("red-team")
+        );
+        let mut malformed = padded;
+        *malformed.last_mut().unwrap() = 1;
+        assert_eq!(
+            PlayerTeamResponse::decode(&mut crate::Decoder::new(&malformed).unwrap())
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+
+        for invalid in ["", "has space", "../team", "red\nteammates", "команда"] {
+            assert_eq!(
+                validate_player_team_name(invalid).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+                "invalid team name {invalid:?} should be rejected"
+            );
+        }
+        validate_player_team_name("sJML-team.1+ok").unwrap();
+        assert_eq!(
+            validate_player_team_name(&"a".repeat(MAX_PLAYER_TEAM_NAME_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let handle = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            assert_eq!(
+                team(handle).unwrap_err().code(),
+                ErrorCode::UnknownErrorCode
+            );
+            assert_eq!(
+                set_team(handle, "red-team").unwrap_err().code(),
+                ErrorCode::UnknownErrorCode
+            );
+            assert_eq!(
+                clear_team(handle).unwrap_err().code(),
+                ErrorCode::UnknownErrorCode
+            );
+        }
     }
 
     fn motion_with_rotation(yaw: f32, pitch: f32) -> PlayerMotion {

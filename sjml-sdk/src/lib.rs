@@ -233,17 +233,18 @@ pub use network::{
     NetworkSubscriptionHandle, Player as NetworkPlayer, Uuid,
 };
 pub use player::{
-    active_effects, clear_respawn_point, custom_stat, grant_advancement, increment_custom_stat,
-    respawn_point, revoke_advancement, selected_hotbar_slot, set_respawn_point,
-    set_selected_hotbar_slot, PlayerAbilities, PlayerCustomStat, PlayerEquipment,
-    PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint, PlayerSnapshot,
-    PlayerTitleTimings, PlayerVelocity, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
+    active_effects, clear_respawn_point, clear_team as clear_player_team, custom_stat,
+    grant_advancement, increment_custom_stat, respawn_point, revoke_advancement,
+    selected_hotbar_slot, set_respawn_point, set_selected_hotbar_slot, set_team as set_player_team,
+    team as player_team, PlayerAbilities, PlayerCustomStat, PlayerEquipment, PlayerEquipmentStack,
+    PlayerGameMode, PlayerMotion, PlayerRespawnPoint, PlayerSnapshot, PlayerTitleTimings,
+    PlayerVelocity, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
     MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_ADVANCEMENT_ID_BYTES,
     MAX_PLAYER_HOTBAR_SLOT_INDEX, MAX_PLAYER_RESPAWN_ANGLE, MAX_PLAYER_RESPAWN_COORDINATE,
     MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES, MAX_PLAYER_RESPAWN_POINT_BYTES,
-    MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES, MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_TITLE_TEXT_BYTES,
-    MAX_PLAYER_TITLE_TEXT_CODE_POINTS, MAX_PLAYER_TITLE_TIMING_TICKS,
-    MAX_PLAYER_VELOCITY_COMPONENT,
+    MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES, MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_TEAM_NAME_BYTES,
+    MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_PLAYER_TITLE_TEXT_CODE_POINTS,
+    MAX_PLAYER_TITLE_TIMING_TICKS, MAX_PLAYER_VELOCITY_COMPONENT,
 };
 pub use player_advancement::{
     grant_criterion as grant_advancement_criterion, progress as player_advancement_progress,
@@ -451,16 +452,17 @@ pub mod prelude {
     };
     pub use crate::player;
     pub use crate::player::{
-        active_effects, clear_item_cooldown, clear_respawn_point, grant_advancement,
+        active_effects, clear_item_cooldown, clear_respawn_point, clear_team, grant_advancement,
         has_item_cooldown, respawn_point, revoke_advancement, selected_hotbar_slot,
-        set_item_cooldown, set_respawn_point, set_selected_hotbar_slot, PlayerAbilities,
-        PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint,
-        PlayerSnapshot, PlayerVelocity, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
-        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_ADVANCEMENT_ID_BYTES,
-        MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES, MAX_PLAYER_HOTBAR_SLOT_INDEX,
-        MAX_PLAYER_ITEM_COOLDOWN_TICKS, MAX_PLAYER_RESPAWN_ANGLE, MAX_PLAYER_RESPAWN_COORDINATE,
-        MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES, MAX_PLAYER_RESPAWN_POINT_BYTES,
-        MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES, MAX_PLAYER_VELOCITY_COMPONENT,
+        set_item_cooldown, set_respawn_point, set_selected_hotbar_slot, set_team, team,
+        PlayerAbilities, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
+        PlayerRespawnPoint, PlayerSnapshot, PlayerVelocity, PlayerVitals,
+        MAX_PLAYER_ACTIVE_EFFECTS, MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES,
+        MAX_PLAYER_ADVANCEMENT_ID_BYTES, MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES,
+        MAX_PLAYER_HOTBAR_SLOT_INDEX, MAX_PLAYER_ITEM_COOLDOWN_TICKS, MAX_PLAYER_RESPAWN_ANGLE,
+        MAX_PLAYER_RESPAWN_COORDINATE, MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES,
+        MAX_PLAYER_RESPAWN_POINT_BYTES, MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES,
+        MAX_PLAYER_TEAM_NAME_BYTES, MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_VELOCITY_COMPONENT,
     };
     pub use crate::player_advancement;
     pub use crate::player_advancement::{
