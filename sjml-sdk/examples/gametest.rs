@@ -170,6 +170,25 @@ fn register_test_content() -> SjmlResult<()> {
         &[("powered", "true")],
         12,
     )?;
+    registry::register_block(
+        "gametest_stateful_behavior_block",
+        BlockDefinition::default(),
+    )?;
+    registry::add_block_state_property(
+        "gametest_stateful_behavior_block",
+        &BlockStateProperty::boolean("powered", false)?,
+    )?;
+    registry::set_block_state_behavior(
+        "gametest_stateful_behavior_block",
+        &[("powered", "true")],
+        registry::BlockStateBehavior::new()
+            .sound(BlockSound::Amethyst)
+            .redstone_conductor(false)
+            .suffocating(false)
+            .view_blocking(true)
+            .emissive_rendering(true)
+            .post_process(true),
+    )?;
     registry::register_block("gametest_interactive_block", BlockDefinition::default())?;
     registry::register_block("gametest_scheduled_block", BlockDefinition::default())?;
     registry::add_block_state_property(

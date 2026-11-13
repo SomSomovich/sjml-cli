@@ -15,6 +15,14 @@ const BLOCK_STATE_SHAPE_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_SHAPE_PAYLOAD_BYTES: usize = 512;
 const BLOCK_STATE_LIGHT_LEVEL_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES: usize = 512;
+const BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION: u32 = 1;
+const MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES: usize = 512;
+const BLOCK_STATE_BEHAVIOR_SOUND: u32 = 1;
+const BLOCK_STATE_BEHAVIOR_REDSTONE_CONDUCTOR: u32 = 1 << 1;
+const BLOCK_STATE_BEHAVIOR_SUFFOCATING: u32 = 1 << 2;
+const BLOCK_STATE_BEHAVIOR_VIEW_BLOCKING: u32 = 1 << 3;
+const BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING: u32 = 1 << 4;
+const BLOCK_STATE_BEHAVIOR_POST_PROCESS: u32 = 1 << 5;
 /// Maximum number of vanilla status effects on one registered food item.
 pub const MAX_ITEM_FOOD_EFFECTS: usize = 8;
 /// Maximum UTF-8 size of one fully qualified vanilla or modded effect ID.
@@ -486,6 +494,114 @@ pub struct BlockBehavior {
     ignited_by_lava: bool,
     push_reaction: BlockPushReaction,
     sound: BlockSound,
+}
+
+/// State-specific properties handled by Minecraft's vanilla BlockState predicates.
+///
+/// Fields left unset retain the registered block's existing behavior. These overrides are static
+/// and are selected from the immutable state properties; they never call guest code at runtime.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BlockStateBehavior {
+    sound: Option<BlockSound>,
+    redstone_conductor: Option<bool>,
+    suffocating: Option<bool>,
+    view_blocking: Option<bool>,
+    emissive_rendering: Option<bool>,
+    post_process: Option<bool>,
+}
+
+impl BlockStateBehavior {
+    /// Creates an empty override. Set at least one field before staging it.
+    pub const fn new() -> Self {
+        Self {
+            sound: None,
+            redstone_conductor: None,
+            suffocating: None,
+            view_blocking: None,
+            emissive_rendering: None,
+            post_process: None,
+        }
+    }
+
+    /// Sets the vanilla sound group used by this exact block state.
+    pub const fn sound(mut self, sound: BlockSound) -> Self {
+        self.sound = Some(sound);
+        self
+    }
+
+    /// Overrides whether this state conducts redstone signals.
+    pub const fn redstone_conductor(mut self, value: bool) -> Self {
+        self.redstone_conductor = Some(value);
+        self
+    }
+
+    /// Overrides whether this state blocks entity suffocation checks.
+    pub const fn suffocating(mut self, value: bool) -> Self {
+        self.suffocating = Some(value);
+        self
+    }
+
+    /// Overrides whether this state blocks the camera view.
+    pub const fn view_blocking(mut self, value: bool) -> Self {
+        self.view_blocking = Some(value);
+        self
+    }
+
+    /// Overrides whether this state renders as emissive.
+    pub const fn emissive_rendering(mut self, value: bool) -> Self {
+        self.emissive_rendering = Some(value);
+        self
+    }
+
+    /// Overrides whether this state needs a post-process render pass.
+    pub const fn post_process(mut self, value: bool) -> Self {
+        self.post_process = Some(value);
+        self
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if self.sound.is_none()
+            && self.redstone_conductor.is_none()
+            && self.suffocating.is_none()
+            && self.view_blocking.is_none()
+            && self.emissive_rendering.is_none()
+            && self.post_process.is_none()
+        {
+            return Err(invalid_argument(
+                "block-state behavior must set at least one property",
+            ));
+        }
+        Ok(())
+    }
+
+    fn abi_values(self) -> (u32, i32, u32) {
+        let mut mask = 0;
+        let mut values = 0;
+        if self.sound.is_some() {
+            mask |= BLOCK_STATE_BEHAVIOR_SOUND;
+        }
+        for (field, value) in [
+            (
+                BLOCK_STATE_BEHAVIOR_REDSTONE_CONDUCTOR,
+                self.redstone_conductor,
+            ),
+            (BLOCK_STATE_BEHAVIOR_SUFFOCATING, self.suffocating),
+            (BLOCK_STATE_BEHAVIOR_VIEW_BLOCKING, self.view_blocking),
+            (
+                BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING,
+                self.emissive_rendering,
+            ),
+            (BLOCK_STATE_BEHAVIOR_POST_PROCESS, self.post_process),
+        ] {
+            if let Some(value) = value {
+                mask |= field;
+                if value {
+                    values |= field;
+                }
+            }
+        }
+        (mask, self.sound.map_or(0, |sound| sound as i32), values)
+    }
 }
 
 impl BlockBehavior {
@@ -1523,6 +1639,13 @@ extern "C" {
         payload_pointer: i32,
         payload_length: i32,
     ) -> i32;
+    #[link_name = "set_block_state_behavior"]
+    fn imported_set_block_state_behavior(
+        path_pointer: i32,
+        path_length: i32,
+        payload_pointer: i32,
+        payload_length: i32,
+    ) -> i32;
     #[link_name = "register_block_entity"]
     fn imported_register_block_entity(
         path_pointer: i32,
@@ -2238,6 +2361,41 @@ pub fn set_block_state_light_level(
     }
 }
 
+/// Applies selected vanilla state-aware sound and rendering predicates to one exact block state.
+///
+/// Call this from `#[mod_register]` after declaring the block and all of its state properties.
+/// The state slice must name every declared property exactly once using canonical values. Fields
+/// left unset in [`BlockStateBehavior`] retain the block's existing state behavior. The host
+/// resolves these values into bounded immutable lookup tables and never invokes guest code from
+/// Minecraft's sound, redstone, collision, or render queries.
+pub fn set_block_state_behavior(
+    path: &str,
+    state: &[(&str, &str)],
+    behavior: BlockStateBehavior,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    behavior.validate()?;
+    let payload = encode_block_state_behavior(state, behavior)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded path and exact-state behavior payload before returning.
+        let status = unsafe {
+            imported_set_block_state_behavior(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                payload.as_ptr() as usize as u32 as i32,
+                payload.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the block-state behavior");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = payload;
+        Err(unsupported_target())
+    }
+}
+
 fn encode_block_state_light_level(state: &[(&str, &str)], level: u32) -> SjmlResult<Vec<u8>> {
     if state.is_empty() || state.len() > MAX_BLOCK_STATE_PROPERTIES {
         return Err(invalid_argument(
@@ -2272,6 +2430,55 @@ fn encode_block_state_light_level(state: &[(&str, &str)], level: u32) -> SjmlRes
         payload.extend_from_slice(value.as_bytes());
     }
     payload.extend_from_slice(&level.to_le_bytes());
+    Ok(payload)
+}
+
+fn encode_block_state_behavior(
+    state: &[(&str, &str)],
+    behavior: BlockStateBehavior,
+) -> SjmlResult<Vec<u8>> {
+    behavior.validate()?;
+    if state.is_empty() || state.len() > MAX_BLOCK_STATE_PROPERTIES {
+        return Err(invalid_argument(
+            "block-state behavior must name between 1 and 7 properties",
+        ));
+    }
+    let mut payload = Vec::with_capacity(MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES);
+    payload.extend_from_slice(&BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION.to_le_bytes());
+    payload.extend_from_slice(&(state.len() as u32).to_le_bytes());
+    let mut names = Vec::with_capacity(state.len());
+    for (name, value) in state {
+        validate_block_state_property_name(name)?;
+        if value.is_empty()
+            || value.len() > MAX_BLOCK_STATE_VALUE_BYTES
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
+            })
+        {
+            return Err(invalid_argument(
+                "block-state behavior values must be 1..=5 lowercase ASCII letters, digits, '_' or '-'; the host validates the declared property type and range",
+            ));
+        }
+        if names.iter().any(|existing| existing == name) {
+            return Err(invalid_argument(
+                "block-state behavior repeats a property name",
+            ));
+        }
+        names.push(*name);
+        payload.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        payload.extend_from_slice(name.as_bytes());
+        payload.extend_from_slice(value.as_bytes());
+    }
+    let (mask, sound, boolean_values) = behavior.abi_values();
+    payload.extend_from_slice(&mask.to_le_bytes());
+    payload.extend_from_slice(&sound.to_le_bytes());
+    payload.extend_from_slice(&boolean_values.to_le_bytes());
+    if payload.len() > MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES {
+        return Err(invalid_argument(
+            "block-state behavior payload exceeds its supported byte limit",
+        ));
+    }
     Ok(payload)
 }
 
@@ -4511,6 +4718,64 @@ mod tests {
         }
         assert_eq!(
             set_block_state_light_level("block", &[("powered", "true")], 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn block_state_behavior_payloads_preserve_exact_optional_fields() {
+        let behavior = BlockStateBehavior::new()
+            .sound(BlockSound::Amethyst)
+            .redstone_conductor(false)
+            .suffocating(false)
+            .view_blocking(true)
+            .emissive_rendering(true)
+            .post_process(false);
+        let encoded = encode_block_state_behavior(&[("powered", "true")], behavior).unwrap();
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 1);
+        assert_eq!(
+            u32::from_le_bytes(encoded[27..31].try_into().unwrap()),
+            BLOCK_STATE_BEHAVIOR_SOUND
+                | BLOCK_STATE_BEHAVIOR_REDSTONE_CONDUCTOR
+                | BLOCK_STATE_BEHAVIOR_SUFFOCATING
+                | BLOCK_STATE_BEHAVIOR_VIEW_BLOCKING
+                | BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING
+                | BLOCK_STATE_BEHAVIOR_POST_PROCESS
+        );
+        assert_eq!(i32::from_le_bytes(encoded[31..35].try_into().unwrap()), 12);
+        assert_eq!(
+            u32::from_le_bytes(encoded[35..39].try_into().unwrap()),
+            BLOCK_STATE_BEHAVIOR_VIEW_BLOCKING | BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING
+        );
+        assert!(encoded.len() <= MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES);
+
+        assert_eq!(
+            encode_block_state_behavior(&[("powered", "true")], BlockStateBehavior::new())
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        for state in [
+            &[][..],
+            &[("powered", "true"), ("powered", "false")][..],
+            &[("Upper", "true")][..],
+            &[("powered", "perhaps")][..],
+        ] {
+            assert_eq!(
+                encode_block_state_behavior(
+                    state,
+                    BlockStateBehavior::new().sound(BlockSound::Stone)
+                )
+                .unwrap_err()
+                .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_block_state_behavior("block", &[("powered", "true")], behavior)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode
