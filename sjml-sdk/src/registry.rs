@@ -70,6 +70,8 @@ const MAX_RECIPE_KEY_LIST_BYTES: usize = 4096;
 const MAX_RECIPE_COOKING_TIME_TICKS: u32 = 36_000;
 const MAX_RECIPE_EXPERIENCE: f32 = 1_000.0;
 const MAX_VILLAGER_TRADE_ID_BYTES: usize = 256;
+/// Maximum UTF-8 size of one fully qualified target entity type ID in a registered AI goal.
+pub const MAX_ENTITY_AI_TARGET_ID_BYTES: usize = 256;
 const MAX_VILLAGER_TRADE_USES: u32 = 1_000;
 const MAX_VILLAGER_TRADE_XP: u32 = 1_000;
 const MAX_VILLAGER_TRADE_PRICE_MULTIPLIER: f32 = 100.0;
@@ -858,7 +860,7 @@ pub enum BlockSound {
 }
 
 /// One bounded vanilla AI goal installed on a registered living entity.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EntityAiGoal {
     /// Swim when in fluid.
     Swim { priority: u32 },
@@ -877,6 +879,14 @@ pub enum EntityAiGoal {
         walk_speed: f32,
         sprint_speed: f32,
     },
+    /// Avoid nearby living entities of exactly this registered type.
+    AvoidEntityType {
+        priority: u32,
+        entity_type_id: String,
+        range: f32,
+        walk_speed: f32,
+        sprint_speed: f32,
+    },
     /// Look at a nearby player within a bounded distance.
     LookAtPlayer { priority: u32, range: f32 },
     /// Attack a visible nearby target at a bounded movement speed.
@@ -889,6 +899,12 @@ pub enum EntityAiGoal {
     RandomLookAround { priority: u32 },
     /// Select nearby players as targets.
     TargetPlayer { priority: u32, must_see: bool },
+    /// Select nearby living entities of exactly this registered type as targets.
+    TargetEntityType {
+        priority: u32,
+        entity_type_id: String,
+        must_see: bool,
+    },
     /// Target entities that previously hurt this entity.
     Retaliate { priority: u32 },
 }
@@ -1945,6 +1961,19 @@ extern "C" {
         walk_speed_bits: i32,
         sprint_speed_bits: i32,
         flags: i32,
+    ) -> i32;
+    #[link_name = "register_entity_ai_goal_v3"]
+    fn imported_register_entity_ai_goal_v3(
+        path_pointer: i32,
+        path_length: i32,
+        goal: i32,
+        priority: i32,
+        range_bits: i32,
+        walk_speed_bits: i32,
+        sprint_speed_bits: i32,
+        flags: i32,
+        entity_type_pointer: i32,
+        entity_type_length: i32,
     ) -> i32;
     #[link_name = "register_villager_trade_v2"]
     fn imported_register_villager_trade(
@@ -3636,15 +3665,35 @@ fn validate_entity_spawn_egg(
 /// sixteen goals may be added to one entity type.
 pub fn register_entity_ai_goal(path: &str, goal: EntityAiGoal) -> SjmlResult<()> {
     validate_path(path)?;
-    if !valid_entity_ai_goal(goal) {
+    if !valid_entity_ai_goal(&goal) {
         return Err(invalid_argument(
             "entity AI goal priority or parameter is outside its supported range",
         ));
     }
     #[cfg(target_arch = "wasm32")]
     {
+        if let Some((kind, priority, range, walk_speed, sprint_speed, flags, entity_type_id)) =
+            entity_ai_goal_v3_wire(&goal)
+        {
+            // SAFETY: the host copies both bounded UTF-8 strings and scalar goal parameters before returning.
+            let status = unsafe {
+                imported_register_entity_ai_goal_v3(
+                    path.as_ptr() as usize as u32 as i32,
+                    path.len() as u32 as i32,
+                    kind,
+                    priority as i32,
+                    range.to_bits() as i32,
+                    walk_speed.to_bits() as i32,
+                    sprint_speed.to_bits() as i32,
+                    flags,
+                    entity_type_id.as_ptr() as usize as u32 as i32,
+                    entity_type_id.len() as u32 as i32,
+                )
+            };
+            return status_result(status, "host rejected an entity AI goal");
+        }
         if let Some((kind, priority, range, walk_speed, sprint_speed, flags)) =
-            entity_ai_goal_v2_wire(goal)
+            entity_ai_goal_v2_wire(&goal)
         {
             // SAFETY: the host copies this bounded path and scalar goal descriptor before returning.
             let status = unsafe {
@@ -3661,7 +3710,7 @@ pub fn register_entity_ai_goal(path: &str, goal: EntityAiGoal) -> SjmlResult<()>
             };
             return status_result(status, "host rejected an entity AI goal");
         }
-        let (kind, priority, value, flags) = entity_ai_goal_wire(goal);
+        let (kind, priority, value, flags) = entity_ai_goal_wire(&goal);
         // SAFETY: the host copies this bounded path and scalar goal descriptor before returning.
         let status = unsafe {
             imported_register_entity_ai_goal(
@@ -4119,72 +4168,138 @@ fn encode_model_animation_fields(encoded: &mut Vec<u8>, animation: ModelAnimatio
     encoded.extend_from_slice(&animation.phase_ticks.to_le_bytes());
 }
 
-fn valid_entity_ai_goal(goal: EntityAiGoal) -> bool {
+fn valid_entity_ai_goal(goal: &EntityAiGoal) -> bool {
     let valid_priority = |priority: u32| priority <= 31;
     match goal {
         EntityAiGoal::Swim { priority }
         | EntityAiGoal::RandomLookAround { priority }
-        | EntityAiGoal::Retaliate { priority } => valid_priority(priority),
+        | EntityAiGoal::Retaliate { priority } => valid_priority(*priority),
         EntityAiGoal::RandomStroll { priority, speed }
         | EntityAiGoal::WaterAvoidingRandomStroll { priority, speed }
         | EntityAiGoal::Panic { priority, speed }
         | EntityAiGoal::RandomSwimming { priority, speed }
         | EntityAiGoal::MeleeAttack {
             priority, speed, ..
-        } => valid_priority(priority) && speed.is_finite() && (0.01..=8.0).contains(&speed),
+        } => valid_priority(*priority) && speed.is_finite() && (0.01..=8.0).contains(speed),
         EntityAiGoal::AvoidPlayer {
             priority,
             range,
             walk_speed,
             sprint_speed,
+        }
+        | EntityAiGoal::AvoidEntityType {
+            priority,
+            range,
+            walk_speed,
+            sprint_speed,
+            ..
         } => {
-            valid_priority(priority)
+            valid_priority(*priority)
                 && range.is_finite()
-                && (1.0..=32.0).contains(&range)
+                && (1.0..=32.0).contains(range)
                 && walk_speed.is_finite()
-                && (0.01..=8.0).contains(&walk_speed)
+                && (0.01..=8.0).contains(walk_speed)
                 && sprint_speed.is_finite()
-                && (walk_speed..=8.0).contains(&sprint_speed)
+                && (*walk_speed..=8.0).contains(sprint_speed)
+                && match goal {
+                    EntityAiGoal::AvoidEntityType { entity_type_id, .. } => {
+                        valid_ai_entity_type_id(entity_type_id)
+                    }
+                    _ => true,
+                }
         }
         EntityAiGoal::LookAtPlayer { priority, range } => {
-            valid_priority(priority) && range.is_finite() && (1.0..=64.0).contains(&range)
+            valid_priority(*priority) && range.is_finite() && (1.0..=64.0).contains(range)
         }
-        EntityAiGoal::TargetPlayer { priority, .. } => valid_priority(priority),
+        EntityAiGoal::TargetPlayer { priority, .. } => valid_priority(*priority),
+        EntityAiGoal::TargetEntityType {
+            priority,
+            entity_type_id,
+            ..
+        } => valid_priority(*priority) && valid_ai_entity_type_id(entity_type_id),
     }
 }
 
+fn valid_ai_entity_type_id(value: &str) -> bool {
+    value.len() <= MAX_ENTITY_AI_TARGET_ID_BYTES
+        && validate_registry_id(
+            value,
+            "entity AI target type ID",
+            MAX_ENTITY_AI_TARGET_ID_BYTES,
+        )
+        .is_ok()
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
-fn entity_ai_goal_wire(goal: EntityAiGoal) -> (i32, u32, f32, i32) {
+fn entity_ai_goal_wire(goal: &EntityAiGoal) -> (i32, u32, f32, i32) {
     match goal {
-        EntityAiGoal::Swim { priority } => (0, priority, 0.0, 0),
-        EntityAiGoal::RandomStroll { priority, speed } => (1, priority, speed, 0),
-        EntityAiGoal::LookAtPlayer { priority, range } => (2, priority, range, 0),
+        EntityAiGoal::Swim { priority } => (0, *priority, 0.0, 0),
+        EntityAiGoal::RandomStroll { priority, speed } => (1, *priority, *speed, 0),
+        EntityAiGoal::LookAtPlayer { priority, range } => (2, *priority, *range, 0),
         EntityAiGoal::MeleeAttack {
             priority,
             speed,
             long_memory,
-        } => (3, priority, speed, i32::from(long_memory)),
-        EntityAiGoal::RandomLookAround { priority } => (4, priority, 0.0, 0),
+        } => (3, *priority, *speed, i32::from(*long_memory)),
+        EntityAiGoal::RandomLookAround { priority } => (4, *priority, 0.0, 0),
         EntityAiGoal::TargetPlayer { priority, must_see } => {
-            (5, priority, 0.0, i32::from(must_see))
+            (5, *priority, 0.0, i32::from(*must_see))
         }
-        EntityAiGoal::Retaliate { priority } => (6, priority, 0.0, 0),
-        EntityAiGoal::WaterAvoidingRandomStroll { priority, speed } => (7, priority, speed, 0),
-        EntityAiGoal::Panic { priority, speed } => (8, priority, speed, 0),
-        EntityAiGoal::RandomSwimming { priority, speed } => (9, priority, speed, 0),
+        EntityAiGoal::Retaliate { priority } => (6, *priority, 0.0, 0),
+        EntityAiGoal::WaterAvoidingRandomStroll { priority, speed } => (7, *priority, *speed, 0),
+        EntityAiGoal::Panic { priority, speed } => (8, *priority, *speed, 0),
+        EntityAiGoal::RandomSwimming { priority, speed } => (9, *priority, *speed, 0),
         EntityAiGoal::AvoidPlayer { .. } => unreachable!("AvoidPlayer uses the v2 host import"),
+        EntityAiGoal::AvoidEntityType { .. } | EntityAiGoal::TargetEntityType { .. } => {
+            unreachable!("type-specific goals use the v3 host import")
+        }
     }
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn entity_ai_goal_v2_wire(goal: EntityAiGoal) -> Option<(i32, u32, f32, f32, f32, i32)> {
+fn entity_ai_goal_v2_wire(goal: &EntityAiGoal) -> Option<(i32, u32, f32, f32, f32, i32)> {
     match goal {
         EntityAiGoal::AvoidPlayer {
             priority,
             range,
             walk_speed,
             sprint_speed,
-        } => Some((10, priority, range, walk_speed, sprint_speed, 0)),
+        } => Some((10, *priority, *range, *walk_speed, *sprint_speed, 0)),
+        _ => None,
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn entity_ai_goal_v3_wire(goal: &EntityAiGoal) -> Option<(i32, u32, f32, f32, f32, i32, &str)> {
+    match goal {
+        EntityAiGoal::AvoidEntityType {
+            priority,
+            entity_type_id,
+            range,
+            walk_speed,
+            sprint_speed,
+        } => Some((
+            11,
+            *priority,
+            *range,
+            *walk_speed,
+            *sprint_speed,
+            0,
+            entity_type_id,
+        )),
+        EntityAiGoal::TargetEntityType {
+            priority,
+            entity_type_id,
+            must_see,
+        } => Some((
+            12,
+            *priority,
+            0.0,
+            0.0,
+            0.0,
+            i32::from(*must_see),
+            entity_type_id,
+        )),
         _ => None,
     }
 }
@@ -6147,32 +6262,32 @@ mod tests {
     #[test]
     fn added_entity_ai_goals_keep_stable_wire_tags_and_speed_bounds() {
         assert_eq!(
-            entity_ai_goal_wire(EntityAiGoal::WaterAvoidingRandomStroll {
+            entity_ai_goal_wire(&EntityAiGoal::WaterAvoidingRandomStroll {
                 priority: 5,
                 speed: 0.75,
             }),
             (7, 5, 0.75, 0)
         );
         assert_eq!(
-            entity_ai_goal_wire(EntityAiGoal::Panic {
+            entity_ai_goal_wire(&EntityAiGoal::Panic {
                 priority: 2,
                 speed: 1.25,
             }),
             (8, 2, 1.25, 0)
         );
         assert_eq!(
-            entity_ai_goal_wire(EntityAiGoal::RandomSwimming {
+            entity_ai_goal_wire(&EntityAiGoal::RandomSwimming {
                 priority: 6,
                 speed: 0.5,
             }),
             (9, 6, 0.5, 0)
         );
         assert_eq!(
-            entity_ai_goal_wire(EntityAiGoal::Retaliate { priority: 0 }).0,
+            entity_ai_goal_wire(&EntityAiGoal::Retaliate { priority: 0 }).0,
             6
         );
         assert_eq!(
-            entity_ai_goal_v2_wire(EntityAiGoal::AvoidPlayer {
+            entity_ai_goal_v2_wire(&EntityAiGoal::AvoidPlayer {
                 priority: 3,
                 range: 16.0,
                 walk_speed: 0.75,
@@ -6180,17 +6295,51 @@ mod tests {
             }),
             Some((10, 3, 16.0, 0.75, 1.5, 0))
         );
-        assert!(valid_entity_ai_goal(EntityAiGoal::AvoidPlayer {
+        assert!(valid_entity_ai_goal(&EntityAiGoal::AvoidPlayer {
             priority: 0,
             range: 1.0,
             walk_speed: 0.01,
             sprint_speed: 0.01,
         }));
-        assert!(valid_entity_ai_goal(EntityAiGoal::AvoidPlayer {
+        assert!(valid_entity_ai_goal(&EntityAiGoal::AvoidPlayer {
             priority: 31,
             range: 32.0,
             walk_speed: 8.0,
             sprint_speed: 8.0,
+        }));
+        let avoid_cows = EntityAiGoal::AvoidEntityType {
+            priority: 3,
+            entity_type_id: "minecraft:cow".to_owned(),
+            range: 12.0,
+            walk_speed: 0.8,
+            sprint_speed: 1.4,
+        };
+        assert!(valid_entity_ai_goal(&avoid_cows));
+        assert_eq!(
+            entity_ai_goal_v3_wire(&avoid_cows),
+            Some((11, 3, 12.0, 0.8, 1.4, 0, "minecraft:cow"))
+        );
+        let target_cows = EntityAiGoal::TargetEntityType {
+            priority: 1,
+            entity_type_id: "minecraft:cow".to_owned(),
+            must_see: true,
+        };
+        assert!(valid_entity_ai_goal(&target_cows));
+        assert_eq!(
+            entity_ai_goal_v3_wire(&target_cows),
+            Some((12, 1, 0.0, 0.0, 0.0, 1, "minecraft:cow"))
+        );
+        assert!(!valid_entity_ai_goal(&EntityAiGoal::TargetEntityType {
+            priority: 1,
+            entity_type_id: "minecraft:unknown type".to_owned(),
+            must_see: false,
+        }));
+        assert!(!valid_entity_ai_goal(&EntityAiGoal::AvoidEntityType {
+            priority: 1,
+            entity_type_id: "minecraft:pig".to_owned(),
+            range: 1.0,
+            walk_speed: 1.0,
+            sprint_speed: 0.99,
         }));
     }
 

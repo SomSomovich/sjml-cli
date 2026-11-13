@@ -25,10 +25,13 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.96.0
-and core ABI 1.88.0. Live
+unverified. This guide describes the private SDK workspace target 0.97.0
+and core ABI 1.89.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
+SDK 0.97.0 adds exact-type `AvoidEntityType` and `TargetEntityType` goals for
+registered SJML mobs. These goals use a canonical entity registry ID and retain
+vanilla pathfinding and target checks; see [registered entity AI goals](ENTITY_AI_GOALS.md).
 SDK 0.96.0 adds synchronous cancellable `entity.drops_attempt` for
 vetoing bounded item drops caused by a living entity's death. The callback sees
 entity identity, dimension, `recently_hit`, and up to 32 detached item
@@ -470,7 +473,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.95.0"
+sjml-sdk = "0.97.0"
 ```
 
 For development against this checkout, use
@@ -483,8 +486,8 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.92.0/sjml/). Those links cover the latest registry release (0.92.0); the private 0.95.0
-workspace adds the event types described above.
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.92.0/sjml/). Those links cover the latest registry release (0.92.0); the private 0.97.0
+workspace adds the entity AI goals and event types described above.
 
 | Module | Main API |
 | --- | --- |

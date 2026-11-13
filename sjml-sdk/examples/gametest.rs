@@ -451,6 +451,24 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::register_entity_ai_goal(
         "gametest_ai",
+        EntityAiGoal::AvoidEntityType {
+            priority: 8,
+            entity_type_id: "minecraft:pig".to_owned(),
+            range: 12.0,
+            walk_speed: 0.8,
+            sprint_speed: 1.4,
+        },
+    )?;
+    registry::register_entity_ai_goal(
+        "gametest_ai",
+        EntityAiGoal::TargetEntityType {
+            priority: 0,
+            entity_type_id: "minecraft:cow".to_owned(),
+            must_see: false,
+        },
+    )?;
+    registry::register_entity_ai_goal(
+        "gametest_ai",
         EntityAiGoal::WaterAvoidingRandomStroll {
             priority: 5,
             speed: 0.75,

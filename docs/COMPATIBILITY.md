@@ -16,15 +16,26 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.98.0`, Rust SDK/macros `0.96.0`, private CLI
-`0.1.28`, and ABI `1.88.0`. ABI compatibility remains major-version based: host
-0.98.0 accepts ABI `1.0.x` through `1.88.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.88.0` and host range
-`^0.98.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.99.0`, Rust SDK/macros `0.97.0`, private CLI
+`0.1.29`, and ABI `1.89.0`. ABI compatibility remains major-version based: host
+0.99.0 accepts ABI `1.0.x` through `1.89.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.89.0` and host range
+`^0.99.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.89.0
+
+Registered SJML mobs can use `EntityAiGoal::AvoidEntityType` and
+`EntityAiGoal::TargetEntityType` to avoid or select one fully qualified living
+entity type. The host keeps vanilla pathfinding and target checks, then matches
+the exact registered entity type. The new registration import is restricted to
+`content.register` during `mod_register`; existing goal import versions are
+unchanged. Unknown registry IDs are skipped with a warning when the mob's goals
+are installed. Vanilla selectors only consider living entities, so non-living
+registered types never match. See [registered entity AI goals](ENTITY_AI_GOALS.md).
 
 ### APIs added in ABI 1.88.0
 
