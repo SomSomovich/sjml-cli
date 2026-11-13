@@ -26,6 +26,12 @@ const MAX_EFFECT_ID_BYTES: usize = MAX_ENTITY_EFFECT_ID_BYTES;
 pub(crate) const MAX_EFFECT_DURATION_TICKS: u32 = 72_000;
 /// Maximum absolute entity velocity component in blocks per tick.
 pub const MAX_ENTITY_VELOCITY_COMPONENT: f64 = 64.0;
+/// Maximum absolute yaw accepted for a loaded non-player entity, in degrees.
+pub const MAX_ENTITY_YAW_DEGREES: f32 = 36_000.0;
+/// Maximum absolute pitch accepted for a loaded non-player entity, in degrees.
+pub const MAX_ENTITY_PITCH_DEGREES: f32 = 90.0;
+/// Capability required with `entity.read` to change a loaded non-player entity's rotation.
+pub const ROTATION_WRITE_CAPABILITY: &str = "entity.rotation.write";
 /// Maximum damage amount accepted by one [`damage`] call.
 pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
@@ -91,6 +97,39 @@ pub struct EntityVelocity {
     pub y: f64,
     /// Z velocity component.
     pub z: f64,
+}
+
+/// Detached yaw and pitch of one loaded non-player entity, in degrees.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityRotation {
+    /// Yaw around the vertical axis, bounded to ±36,000 degrees.
+    pub yaw: f32,
+    /// Pitch around the horizontal axis, bounded to -90..=90 degrees.
+    pub pitch: f32,
+}
+
+impl EntityRotation {
+    /// Constructs an entity rotation after checking finite angles and supported bounds.
+    pub fn new(yaw: f32, pitch: f32) -> SjmlResult<Self> {
+        let rotation = Self { yaw, pitch };
+        rotation.validate()?;
+        Ok(rotation)
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if !self.yaw.is_finite()
+            || self.yaw.abs() > MAX_ENTITY_YAW_DEGREES
+            || !self.pitch.is_finite()
+            || !(-MAX_ENTITY_PITCH_DEGREES..=MAX_ENTITY_PITCH_DEGREES).contains(&self.pitch)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity yaw must be finite within ±36,000 degrees and pitch within -90..=90 degrees",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Detached active status effect on a loaded living non-player entity.
@@ -351,6 +390,15 @@ extern "C" {
         handle_length: i32,
         velocity: i32,
         velocity_length: i32,
+    ) -> i32;
+    #[link_name = "rotation"]
+    fn imported_rotation(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_rotation"]
+    fn imported_set_rotation(
+        handle: i32,
+        handle_length: i32,
+        rotation: i32,
+        rotation_length: i32,
     ) -> i32;
     #[link_name = "damage"]
     fn imported_damage(handle: i32, handle_length: i32, amount_bits: i32) -> i32;
@@ -1015,6 +1063,67 @@ pub fn velocity(handle: EntityHandle) -> SjmlResult<EntityVelocity> {
                 )
             }
         })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the current yaw and pitch of one loaded non-player entity.
+///
+/// The module must request `entity.read`. Angles are returned in degrees and
+/// checked for finite values, yaw within ±36,000, and pitch within -90..=90.
+/// The host revalidates the live entity on the owning server thread and only
+/// reads entities already present in a loaded chunk.
+pub fn rotation(handle: EntityHandle) -> SjmlResult<EntityRotation> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let rotation = read_output::<EntityRotation>(12, |output, capacity| {
+            // SAFETY: read_output owns the destination allocation for this synchronous import.
+            unsafe {
+                imported_rotation(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        rotation.validate()?;
+        Ok(rotation)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets yaw and pitch on one loaded non-player entity.
+///
+/// The module must request and receive both `entity.read` and
+/// `entity.rotation.write`. Yaw is finite within ±36,000 degrees and pitch is
+/// finite within -90..=90 degrees. The host revalidates the live entity and
+/// owning server thread before changing the vanilla entity rotation.
+pub fn set_rotation(handle: EntityHandle, rotation: EntityRotation) -> SjmlResult<()> {
+    rotation.validate()?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let encoded_rotation = to_bytes(&rotation)?;
+        // SAFETY: both bounded stable values remain live during the synchronous host call.
+        let status = unsafe {
+            imported_set_rotation(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                encoded_rotation.as_ptr() as usize as u32 as i32,
+                encoded_rotation.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the entity rotation mutation")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

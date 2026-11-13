@@ -56,6 +56,28 @@ fn native_entity_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        entity::rotation(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_rotation(handle, entity::EntityRotation::new(180.0, -35.0).unwrap())
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_rotation(
+            handle,
+            entity::EntityRotation {
+                yaw: f32::INFINITY,
+                pitch: 0.0,
+            },
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
         entity::fire_ticks(handle).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );
@@ -269,5 +291,49 @@ fn entity_velocity_uses_schema_v1_little_endian_component_encoding() {
     assert_eq!(
         from_bytes::<entity::EntityVelocity>(&expected).unwrap(),
         velocity
+    );
+}
+
+#[test]
+fn entity_rotation_uses_schema_v1_yaw_then_pitch_and_checks_finite_bounds() {
+    let rotation = entity::EntityRotation {
+        yaw: -270.0,
+        pitch: 45.5,
+    };
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    expected.extend_from_slice(&rotation.yaw.to_le_bytes());
+    expected.extend_from_slice(&rotation.pitch.to_le_bytes());
+    assert_eq!(expected.len(), 12);
+    assert_eq!(to_bytes(&rotation).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<entity::EntityRotation>(&expected).unwrap(),
+        rotation
+    );
+
+    assert_eq!(
+        entity::EntityRotation::new(36_000.0, -90.0).unwrap().yaw,
+        36_000.0
+    );
+    assert_eq!(
+        entity::EntityRotation::new(f32::NAN, 0.0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        entity::EntityRotation::new(36_000.1, 0.0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        entity::EntityRotation::new(0.0, f32::NEG_INFINITY)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        entity::EntityRotation::new(0.0, 90.01).unwrap_err().code(),
+        ErrorCode::InvalidArgument
     );
 }

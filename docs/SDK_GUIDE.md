@@ -2263,6 +2263,8 @@ never loads chunks and returns whether Minecraft accepted the path. It does not
 expose path nodes or custom pathfinding callbacks. See
 [bounded entity navigation](ENTITY_NAVIGATION.md).
 
+Loaded non-player entities also expose bounded yaw/pitch reads and writes with `entity::rotation` and `entity::set_rotation`; writes require `entity.read` plus `entity.rotation.write`. See [entity rotation](ENTITY_ROTATION.md).
+
 ## Entity-attached opaque data
 
 Modules can keep small opaque byte values attached to the entity itself. Request

@@ -2189,6 +2189,8 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | `remove_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len` | Remove one registered active effect from a loaded living non-player entity; status only |
 | `discard` | `(handle_ptr: i32, handle_len: i32) -> i32` | Discard one loaded non-player entity and revoke its handle; status only |
 | `damage` | `(handle_ptr: i32, handle_len: i32, amount_bits: i32) -> i32` | Apply bounded generic damage to a loaded living non-player entity; requires `entity.read` and `entity.damage` |
+| `rotation` | `handle_ptr, handle_len, out_ptr, out_capacity` | Write schema-v1 `u32(1)`, `f32 yaw`, `f32 pitch`; requires `entity.read` |
+| `set_rotation` | `handle_ptr, handle_len, rotation_ptr, rotation_len` | Set bounded yaw and pitch from an exact 12-byte schema-v1 record; requires `entity.read` and `entity.rotation.write` |
 
 `handle_len` must be 24. `uuid` is canonical lowercase UUID text;
 `entity_type_id` and `dimension_id` are canonical `namespace:path` IDs. Each
@@ -2232,6 +2234,16 @@ are denied. See [bounded entity navigation](ENTITY_NAVIGATION.md).
 Effect removal applies only to loaded living non-player entities on the owning
 server thread. Stale handles, players, nonliving targets, and unknown IDs are
 rejected. See [effect removal](ENTITY_EFFECT_REMOVAL.md).
+
+`rotation` reads detached yaw and pitch from any live loaded non-player entity.
+Its exact 12-byte result is little-endian `u32(1)`, `f32 yaw`, `f32 pitch`.
+`set_rotation` accepts the same record and requires both `entity.read` and
+`entity.rotation.write`. Yaw must be finite within ±36,000 degrees and pitch
+finite within -90..=90; invalid values or a wrong schema/request size return
+`INVALID_ARGUMENT`. Both imports revalidate the module-owned handle and run on
+the owning server thread. The host checks current loaded entity membership
+without loading chunks; static-registration and client calls fail closed. See
+[entity rotation](ENTITY_ROTATION.md).
 
 Each module owns a 1,024-live-handle quota. Enumeration returns loaded
 non-player entities from every loaded server dimension, including modded

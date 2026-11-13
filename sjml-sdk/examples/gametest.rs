@@ -36,6 +36,8 @@ mod entity_join_attempt;
 mod entity_knockback_attempt;
 #[path = "gametest/entity_navigation.rs"]
 mod entity_navigation;
+#[path = "gametest/entity_rotation.rs"]
+mod entity_rotation;
 #[path = "gametest/entity_riding.rs"]
 mod entity_riding;
 #[path = "gametest/entity_target.rs"]
