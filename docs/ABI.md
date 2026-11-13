@@ -2679,6 +2679,21 @@ scope. It applies all entries together or none of them, so an invalid record,
 quota failure, or other rejected batch leaves every original record intact.
 See [STORAGE.md](STORAGE.md) for the complete wire and migration contract.
 
+## Existing objective display slots (NeoForge adapter)
+
+The Rust guest SDK binds `set_display_slot` and `clear_display_slot` in
+`sjml_scoreboard_v1`; both require `scoreboard.write`, a live logical-server
+scoreboard, and its owning server thread. `set_display_slot` takes
+`objective_ptr, objective_len, slot_code`; the objective must already exist.
+`clear_display_slot` takes only `slot_code` and is idempotent. Neither operation
+creates or changes an objective. The bounded stable codes are `List` 0,
+`Sidebar` 1, `BelowName` 2, `TeamBlack` 3, `TeamDarkBlue` 4, `TeamDarkGreen` 5,
+`TeamDarkAqua` 6, `TeamDarkRed` 7, `TeamDarkPurple` 8, `TeamGold` 9,
+`TeamGray` 10, `TeamDarkGray` 11, `TeamBlue` 12, `TeamGreen` 13, `TeamAqua`
+14, `TeamRed` 15, `TeamLightPurple` 16, `TeamYellow` 17, and `TeamWhite` 18.
+Unknown or negative codes return `INVALID_ARGUMENT`. The host maps this fixed
+wire range explicitly rather than accepting arbitrary Java enum ordinals.
+
 ## Module-owned scoreboard teams (NeoForge adapter)
 
 The Rust guest SDK binds the following imports in `sjml_scoreboard_v1`.

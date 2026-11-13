@@ -281,8 +281,10 @@ pub use render::{
     MAX_WORLD_MODEL_VERTICES,
 };
 pub use scoreboard::{
-    score as scoreboard_score, set_score as scoreboard_set_score, MAX_SCOREBOARD_ENTRY_BYTES,
-    MAX_SCOREBOARD_OBJECTIVE_BYTES, MAX_SCORE_VALUE,
+    clear_display_slot as scoreboard_clear_display_slot, score as scoreboard_score,
+    set_display_slot as scoreboard_set_display_slot, set_score as scoreboard_set_score,
+    DisplaySlot, DISPLAY_SLOT_COUNT, MAX_SCOREBOARD_ENTRY_BYTES, MAX_SCOREBOARD_OBJECTIVE_BYTES,
+    MAX_SCORE_VALUE,
 };
 pub use screen_input::{
     unsubscribe_key_pressed, ScreenInputEvent, ScreenInputSubscriptionHandle,
@@ -529,7 +531,11 @@ pub mod prelude {
         MAX_WORLD_MODEL_QUADS, MAX_WORLD_MODEL_VERTICES,
     };
     pub use crate::scoreboard;
-    pub use crate::scoreboard::{score as scoreboard_score, set_score as scoreboard_set_score};
+    pub use crate::scoreboard::{
+        clear_display_slot as scoreboard_clear_display_slot, score as scoreboard_score,
+        set_display_slot as scoreboard_set_display_slot, set_score as scoreboard_set_score,
+        DisplaySlot,
+    };
     pub use crate::screen_input;
     pub use crate::screen_input::{
         unsubscribe_key_pressed, ScreenInputEvent, ScreenInputSubscriptionHandle,

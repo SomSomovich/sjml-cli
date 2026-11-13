@@ -1,14 +1,16 @@
 # Scoreboard API
 
 SJML exposes bounded reads and writes for entries in existing vanilla
-scoreboard objectives, and a separate API for teams owned by one SJML module.
-Modules cannot create or change objectives, display slots, or vanilla and
-other-module teams.
+scoreboard objectives, guarded display-slot assignment for existing objectives,
+and a separate API for teams owned by one SJML module. Modules cannot create or
+change objectives or vanilla and other-module teams.
 
 ## Permissions and bounds
 
 - `scoreboard.read` grants `sjml::scoreboard::score(objective, entry)`.
 - `scoreboard.write` grants `sjml::scoreboard::set_score(objective, entry, value)`.
+- `scoreboard.write` also grants `set_display_slot(objective, slot)` and
+  `clear_display_slot(slot)`.
 - `scoreboard.read` also grants `sjml::scoreboard::team(id)`.
 - `scoreboard.write` grants module-owned team creation, removal, options, and
   player membership operations.
@@ -18,13 +20,24 @@ other-module teams.
 - Scores are limited to −1,000,000,000 through 1,000,000,000.
 - Only the active logical-server scoreboard can be accessed, and calls must run
   on its owning server thread. Client-side modules cannot use this API.
-- Read-only objectives cannot be changed. `score()` returns `None` if the
+- Scores in read-only objectives cannot be changed. `score()` returns `None` if the
   objective exists but the entry has no score; a missing objective is an
   invalid argument.
 
 `set_score` creates or updates only the named entry within an existing,
 writable objective. It does not create objectives or change objective
 criteria, display names, display slots, teams, or other entries.
+
+`set_display_slot` assigns an existing objective to one fixed vanilla display
+slot, replacing the objective currently shown there. `clear_display_slot`
+removes the current objective from that slot and succeeds if it is already
+empty. These calls can select or clear any of the 19 fixed vanilla slots; they
+do not create objectives or alter the objective itself. Slot codes are stable:
+`List` 0, `Sidebar` 1, `BelowName` 2, then `TeamBlack`, `TeamDarkBlue`,
+`TeamDarkGreen`, `TeamDarkAqua`, `TeamDarkRed`, `TeamDarkPurple`, `TeamGold`,
+`TeamGray`, `TeamDarkGray`, `TeamBlue`, `TeamGreen`, `TeamAqua`, `TeamRed`,
+`TeamLightPurple`, `TeamYellow`, and `TeamWhite` (3–18). Display-slot calls use
+the same server-thread and `scoreboard.write` guard as score mutations.
 
 ## Module-owned teams
 
@@ -93,10 +106,19 @@ and explicitly granted by the server administrator as needed.
 
 ```rust
 use sjml::scoreboard;
+use sjml::DisplaySlot;
 
 fn award_kill() -> sjml::SjmlResult<()> {
     let old = scoreboard::score("kills", "Alice")?.unwrap_or(0);
     scoreboard::set_score("kills", "Alice", old.saturating_add(1))
+}
+
+fn show_kills_sidebar() -> sjml::SjmlResult<()> {
+    scoreboard::set_display_slot("kills", DisplaySlot::Sidebar)
+}
+
+fn hide_kills_sidebar() -> sjml::SjmlResult<()> {
+    scoreboard::clear_display_slot(DisplaySlot::Sidebar)
 }
 ```
 

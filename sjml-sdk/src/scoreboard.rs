@@ -1,5 +1,5 @@
-//! Bounded access to the active logical-server scoreboard. Objective score access is limited to existing
-//! objectives. Module-owned teams use local IDs and cannot access vanilla or another module's teams.
+//! Bounded APIs for the active logical-server scoreboard. Score operations and objective display assignments use
+//! existing objectives. Module-owned teams use local IDs and cannot access vanilla or another module's teams.
 
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
@@ -9,6 +9,8 @@ pub const MAX_SCOREBOARD_OBJECTIVE_BYTES: usize = 16;
 pub const MAX_SCOREBOARD_ENTRY_BYTES: usize = 40;
 /// Maximum score magnitude accepted by the host and SDK.
 pub const MAX_SCORE_VALUE: i32 = 1_000_000_000;
+/// Number of stable display-slot codes accepted by ABI v1.
+pub const DISPLAY_SLOT_COUNT: u32 = 19;
 /// Fixed ABI-v1 output size for [`score`].
 pub const SCORE_RESPONSE_BYTES: usize = 12;
 /// Maximum UTF-8 bytes accepted for module-owned team display text.
@@ -42,6 +44,10 @@ extern "C" {
         entry_length: i32,
         value: i32,
     ) -> i32;
+    #[link_name = "set_display_slot"]
+    fn imported_set_display_slot(objective_pointer: i32, objective_length: i32, slot: i32) -> i32;
+    #[link_name = "clear_display_slot"]
+    fn imported_clear_display_slot(slot: i32) -> i32;
     #[link_name = "team"]
     fn imported_team(
         id_pointer: i32,
@@ -84,6 +90,34 @@ extern "C" {
         uuid_pointer: i32,
         uuid_length: i32,
     ) -> i32;
+}
+
+/// One of Minecraft's fixed scoreboard display slots, with stable ABI-v1 codes.
+///
+/// Codes follow the vanilla `DisplaySlot` IDs: the three general slots first, followed by the sixteen
+/// team-colored sidebar slots. The host validates every raw code before mapping it to a vanilla value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum DisplaySlot {
+    List = 0,
+    Sidebar = 1,
+    BelowName = 2,
+    TeamBlack = 3,
+    TeamDarkBlue = 4,
+    TeamDarkGreen = 5,
+    TeamDarkAqua = 6,
+    TeamDarkRed = 7,
+    TeamDarkPurple = 8,
+    TeamGold = 9,
+    TeamGray = 10,
+    TeamDarkGray = 11,
+    TeamBlue = 12,
+    TeamGreen = 13,
+    TeamAqua = 14,
+    TeamRed = 15,
+    TeamLightPurple = 16,
+    TeamYellow = 17,
+    TeamWhite = 18,
 }
 
 /// Vanilla formatting color code used by module-owned scoreboard teams.
@@ -346,6 +380,45 @@ pub fn set_score(objective: &str, entry: &str, value: i32) -> SjmlResult<()> {
     }
 }
 
+/// Displays an existing objective in one fixed vanilla scoreboard slot.
+///
+/// This replaces the current objective in that slot and does not create or modify an objective.
+pub fn set_display_slot(objective: &str, slot: DisplaySlot) -> SjmlResult<()> {
+    validate_objective_name(objective)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the UTF-8 objective slice remains valid for this synchronous host call.
+        let status = unsafe {
+            imported_set_display_slot(
+                objective.as_ptr() as usize as u32 as i32,
+                objective.len() as u32 as i32,
+                slot as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the scoreboard display-slot update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = slot;
+        Err(unsupported_target())
+    }
+}
+
+/// Clears one fixed vanilla scoreboard display slot. Clearing an empty slot succeeds.
+pub fn clear_display_slot(slot: DisplaySlot) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the enum is passed as its stable scalar ABI-v1 code.
+        let status = unsafe { imported_clear_display_slot(slot as u32 as i32) };
+        status_result(status, "host rejected clearing the scoreboard display slot")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = slot;
+        Err(unsupported_target())
+    }
+}
+
 fn validate_team_id(id: &str) -> SjmlResult<()> {
     if id.is_empty()
         || id.len() > 64
@@ -542,17 +615,7 @@ fn invalid_team_response(message: &str) -> SjmlError {
 }
 
 fn validate_names(objective: &str, entry: &str) -> SjmlResult<()> {
-    if objective.is_empty()
-        || objective.len() > MAX_SCOREBOARD_OBJECTIVE_BYTES
-        || !objective
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"_.+-".contains(&byte))
-    {
-        return Err(SjmlError::new(
-            ErrorCode::InvalidArgument,
-            "objective names must be 1–16 ASCII letters, digits, '.', '_', '+', or '-'",
-        ));
-    }
+    validate_objective_name(objective)?;
     if entry.is_empty()
         || entry.chars().all(char::is_whitespace)
         || entry.starts_with('#')
@@ -563,6 +626,21 @@ fn validate_names(objective: &str, entry: &str) -> SjmlResult<()> {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "score entries must be 1–40 UTF-8 bytes/characters without controls or a leading '#'",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_objective_name(objective: &str) -> SjmlResult<()> {
+    if objective.is_empty()
+        || objective.len() > MAX_SCOREBOARD_OBJECTIVE_BYTES
+        || !objective
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_.+-".contains(&byte))
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "objective names must be 1–16 ASCII letters, digits, '.', '_', '+', or '-'",
         ));
     }
     Ok(())

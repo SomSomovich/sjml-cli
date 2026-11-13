@@ -64,6 +64,8 @@ mod player_statistics;
 mod player_tick;
 #[path = "gametest/scoreboard.rs"]
 mod scoreboard;
+#[path = "gametest/scoreboard_display_slot.rs"]
+mod scoreboard_display_slot;
 #[path = "gametest/scoreboard_teams.rs"]
 mod scoreboard_teams;
 #[path = "gametest/world_block_tag.rs"]

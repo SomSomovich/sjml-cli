@@ -23,6 +23,11 @@ actions through `client.action_attempt`. The synchronous callback requires
 `events.subscribe`, `events.cancel`, and `client.input.action_cancel`; see the
 [client action attempts guide](../docs/CLIENT_ACTION_ATTEMPTS.md).
 
+The `scoreboard` module can assign or clear a fixed vanilla display slot for
+an existing objective under `scoreboard.write`; see the
+[scoreboard guide](../docs/SCOREBOARD.md) for stable slot codes and the
+server-thread contract.
+
 SDK 0.43.0 added bounded same-dimension player teleportation, non-player entity
 removal, loaded-world weather controls, and stonecutting recipes. It also
 includes client-only native chat layout and panel theming, a bounded
