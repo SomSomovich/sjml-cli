@@ -6,10 +6,12 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.70.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.71.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.70.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.71.0 adds
+an owner-scoped synchronous `item.use_on_entity` callback for registered items.
+ABI 1.70.0 adds
 an owner-scoped synchronous `item.use_on_block` callback for registered items.
 ABI 1.69.0 adds
 the owner-scoped, synchronous `block.use` callback for registered blocks. ABI
@@ -486,6 +488,24 @@ return exactly one stable boolean byte after the status prefix. `true` vetoes
 the original action, while `false` leaves it available to vanilla and other
 event handlers. It requires both `events.subscribe` and `events.cancel` and
 cannot be asynchronous.
+
+The synchronous `sjml_v1_event_item.use_on_entity` callback is an owner-scoped
+registered-item behavior hook. Its schema-v1 payload contains stable strings
+for the player UUID, dimension ID, held item ID, target entity UUID, target
+entity-type ID, and hand; a little-endian `i32` stack count; and little-endian
+`f64` target X/Y/Z coordinates. Strings are limited to 256 UTF-8 bytes,
+coordinates must be finite and within ±30,000,000, the count is
+`0..=1,000,000`, and the payload is limited to 4 KiB. The host routes the
+callback only to the module that declared the held item under its
+`package:module/path` namespace. It runs on the logical server after the
+general `player.interaction` veto and after the more specific entity
+`interactAt` stage has passed, before vanilla entity/item interaction behavior.
+Return exactly one action byte: `0=Pass`, `1=Success`, or `2=ConsumeOne`;
+invalid results disable the failing module callback. `Pass` continues vanilla
+interaction. `Success` handles it. `ConsumeOne` handles it and consumes one
+item only if its ID and count remain unchanged. A handled action sets
+NeoForge's successful cancellation result. It requires `events.subscribe` and
+`events.cancel` and cannot be asynchronous.
 The synchronous cancellable `sjml_v1_event_player.drop_attempt` callback
 receives schema-v1 `PlayerDropAttempt`: little-endian `u32(1)`, stable
 length-prefixed strings for the canonical player UUID, dimension ID, and item
@@ -680,11 +700,11 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
 `entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`,
-`item.use`, `block.use`, `item.use_on_block`, `player.fished_attempt`, and
+`item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`, `player.fished_attempt`, and
 `client.chat.send_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.interaction`, `player.drop_attempt`, `player.sleep_attempt`,
-`player.item_use_attempt`, `item.use`, `block.use`, `item.use_on_block`,
+`player.item_use_attempt`, `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`,
 `client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,

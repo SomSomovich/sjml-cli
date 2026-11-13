@@ -64,6 +64,15 @@ It returns the same bounded `ItemUseAction` as `item.use`, requires
 `events.subscribe` and `events.cancel`, and routes only to the held item's
 declaring module. See [registered item use on blocks](ITEM_USE_ON_BLOCK.md).
 
+`item.use_on_entity` handles a registered item during vanilla's general entity
+interaction stage. NeoForge first gives `Entity.interactAt` a chance to handle
+the click; if it passes, SJML applies the general `player.interaction` veto and
+then routes to only the held item's declaring module before vanilla entity/item
+interaction behavior. The synchronous callback receives detached player, item,
+entity, position, and hand values and returns `Pass`, `Success`, or
+`ConsumeOne`. It requires `events.subscribe` and `events.cancel`; see
+[registered item use on entities](ITEM_USE_ON_ENTITY.md).
+
 Server modules can observe a successful ordinary crafting result with
 `player.item_crafted`. The non-cancellable `PlayerItemCrafted` payload contains
 the player UUID, matched recipe ID, output item ID, and output count. The host

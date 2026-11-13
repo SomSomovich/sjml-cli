@@ -52,17 +52,18 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.78.0"`; that crate must be available from a configured Cargo registry.
+"0.79.0"`; that crate must be available from a configured Cargo registry.
 Until the SDK crates are published, use `--sdk-path` when you need to compile
 the generated project.
 
 ## Documentation
 
-- [Rust SDK guide](docs/SDK_GUIDE.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.78.0/sjml/)
+- [Rust SDK guide](docs/SDK_GUIDE.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.79.0/sjml/)
 - [Registered block shapes](docs/WORLD_BLOCK_SHAPES.md)
 - [Registered block behavior](docs/WORLD_BLOCK_BEHAVIOR.md)
 - [Registered block use](docs/BLOCK_USE.md)
 - [Registered item use on blocks](docs/ITEM_USE_ON_BLOCK.md)
+- [Registered item use on entities](docs/ITEM_USE_ON_ENTITY.md)
 - [WebAssembly ABI v1](docs/ABI.md)
 - [Project configuration and capability grants](docs/PROJECT_CONFIGURATION.md)
 - [Complete manifest schema](docs/MANIFEST_SCHEMA.md) and [`.sjml` archive format](docs/FORMAT.md)

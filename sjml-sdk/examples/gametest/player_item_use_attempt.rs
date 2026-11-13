@@ -2,7 +2,7 @@ use sjml::{
     command, event,
     events::{
         self, EventPriority, ItemUseAction, ModuleItemUse, ModuleItemUseOnBlock,
-        PlayerItemUseAttempt,
+        ModuleItemUseOnEntity, PlayerItemUseAttempt,
     },
     ErrorCode, SjmlError, SjmlResult, StableDecode,
 };
@@ -28,6 +28,7 @@ pub(super) fn initialize() -> SjmlResult<()> {
     events::subscribe("player.item_use_attempt", EventPriority::Normal)?;
     events::subscribe("item.use", EventPriority::Normal)?;
     events::subscribe("item.use_on_block", EventPriority::Normal)?;
+    events::subscribe("item.use_on_entity", EventPriority::Normal)?;
     Ok(())
 }
 
@@ -69,6 +70,19 @@ fn handle_module_item_use_on_block(attempt: ModuleItemUseOnBlock) -> SjmlResult<
         && attempt.item_id == "sjml_game_test:content/gametest_ruby"
         && attempt.item_count == 2
         && attempt.block_id == "minecraft:stone"
+    {
+        Ok(ItemUseAction::ConsumeOne)
+    } else {
+        Ok(ItemUseAction::Pass)
+    }
+}
+
+#[event(name = "item.use_on_entity")]
+fn handle_module_item_use_on_entity(attempt: ModuleItemUseOnEntity) -> SjmlResult<ItemUseAction> {
+    if attempt.hand == "main_hand"
+        && attempt.item_id == "sjml_game_test:content/gametest_ruby"
+        && attempt.item_count == 2
+        && attempt.target_type_id == "minecraft:cow"
     {
         Ok(ItemUseAction::ConsumeOne)
     } else {

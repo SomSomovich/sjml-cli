@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.78.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.79.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.70.0"
+abi = "^1.71.0"
 minecraft = "~1.21.1"
-sjml = "^0.80.0"
+sjml = "^0.81.0"
 
 [[modules]]
 id = "main"
@@ -183,7 +183,7 @@ module's manifest request and the administrator's list.
 | `events.subscribe` | Subscribing to supported host events. |
 | `client.item.tooltip.modify` | Appending bounded literal lines from synchronous `client.item.tooltip` callbacks on the physical client; also requires `events.subscribe`. |
 | `client.chat.send.observe` | Reading original outgoing chat text from the local client's synchronous `client.chat.send_attempt` callback; also requires `events.subscribe` and `events.cancel`. |
-| `events.cancel` | Vetoing cancellable block break/place/growth, right-click `player.interaction`, `player.drop_attempt`, `player.fished_attempt`, `client.chat.send_attempt`, `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`, `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`, `entity.breed_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; also permits result callbacks for module-owned `block.use`, `item.use`, and `item.use_on_block`, which also require `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
+| `events.cancel` | Vetoing cancellable block break/place/growth, right-click `player.interaction`, `player.drop_attempt`, `player.fished_attempt`, `client.chat.send_attempt`, `entity.death_attempt`, `entity.damage_attempt`, `entity.heal_attempt`, `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`, `entity.breed_attempt`, `entity.projectile_impact_attempt`, and `world.explosion_attempt`; also permits result callbacks for module-owned `block.use`, `item.use`, `item.use_on_block`, and `item.use_on_entity`, which also require `events.subscribe`. A drop veto is skipped if the full stack cannot be restored. |
 | `world.read`, `world.write` | Reading loaded server-world state; writes include blocks and properties, scheduled block ticks, time, weather, difficulty, Overworld spawn point, allowlisted boolean/integer game rules, and world-border settings, and require both. |
 | `entity.read`, `entity.spawn`, `entity.effect.apply`, `entity.effect.remove` | Reading player/entity snapshots, spawning registered entities, or applying/removing registered effects; effect mutation also requires `entity.read`. |
 | `entity.mount.write` | Starting or stopping a non-forced ride between two loaded non-player entities; also requires `entity.read` and same-world live handles. |
