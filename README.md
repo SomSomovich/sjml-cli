@@ -52,13 +52,13 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.80.0"`; that crate must be available from a configured Cargo registry.
+"0.81.0"`; that crate must be available from a configured Cargo registry.
 Until the SDK crates are published, use `--sdk-path` when you need to compile
 the generated project.
 
 ## Documentation
 
-- [Rust SDK guide](docs/SDK_GUIDE.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.80.0/sjml/)
+- [Rust SDK guide](docs/SDK_GUIDE.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), [registered block-state properties](docs/BLOCK_STATE_PROPERTIES.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.81.0/sjml/)
 - [Registered block shapes](docs/WORLD_BLOCK_SHAPES.md)
 - [Registered block behavior](docs/WORLD_BLOCK_BEHAVIOR.md)
 - [Registered block use](docs/BLOCK_USE.md)

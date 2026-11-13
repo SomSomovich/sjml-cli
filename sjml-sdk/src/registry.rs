@@ -9,6 +9,7 @@
 use crate::{ErrorCode, SjmlError, SjmlResult};
 
 const MAX_CONTENT_PATH_BYTES: usize = 256;
+const MAX_BLOCK_STATE_PROPERTY_NAME_BYTES: usize = 32;
 /// Maximum number of vanilla status effects on one registered food item.
 pub const MAX_ITEM_FOOD_EFFECTS: usize = 8;
 /// Maximum UTF-8 size of one fully qualified vanilla or modded effect ID.
@@ -21,6 +22,16 @@ pub const MAX_ITEM_MAX_DAMAGE: u32 = 1_000_000;
 pub const MAX_ITEM_ATTRIBUTE_MODIFIERS: usize = 16;
 /// Maximum absolute static modifier amount on one registered item.
 pub const MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT: f32 = 1024.0;
+/// Maximum declared state properties on one registered block.
+pub const MAX_BLOCK_STATE_PROPERTIES: usize = 7;
+/// Maximum possible state combinations on one registered block.
+pub const MAX_BLOCK_STATE_VARIANTS: usize = 128;
+/// Maximum values in a single bounded integer block-state property.
+pub const MAX_BLOCK_INTEGER_PROPERTY_VALUES: usize = 16;
+/// Minimum value in a bounded integer block-state property.
+pub const MIN_BLOCK_INTEGER_PROPERTY_VALUE: i32 = -128;
+/// Maximum value in a bounded integer block-state property.
+pub const MAX_BLOCK_INTEGER_PROPERTY_VALUE: i32 = 127;
 const MAX_FLUID_PATH_BYTES: usize = MAX_CONTENT_PATH_BYTES - "_flowing".len();
 const MAX_FLUID_TEXTURE_ID_BYTES: usize = 256;
 const MAX_COMPONENT_VALUE_BYTES: usize = 4096;
@@ -312,6 +323,73 @@ pub struct BlockDefinition {
     pub resistance: f32,
     pub requires_correct_tool: bool,
     pub has_item_form: bool,
+}
+
+/// One custom Boolean or bounded integer property on a module-registered block.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlockStateProperty {
+    name: String,
+    property_type: i32,
+    minimum: i32,
+    maximum: i32,
+    default_value: i32,
+}
+
+impl BlockStateProperty {
+    /// Creates a Boolean property with the given default value.
+    pub fn boolean(name: impl Into<String>, default_value: bool) -> SjmlResult<Self> {
+        let name = name.into();
+        validate_block_state_property_name(&name)?;
+        Ok(Self {
+            name,
+            property_type: 0,
+            minimum: 0,
+            maximum: 1,
+            default_value: i32::from(default_value),
+        })
+    }
+
+    /// Creates an integer property with 2 to 16 allowed values in -128..=127.
+    pub fn integer(
+        name: impl Into<String>,
+        minimum: i32,
+        maximum: i32,
+        default_value: i32,
+    ) -> SjmlResult<Self> {
+        let name = name.into();
+        validate_block_state_property_name(&name)?;
+        let value_count = i64::from(maximum) - i64::from(minimum) + 1;
+        if minimum < MIN_BLOCK_INTEGER_PROPERTY_VALUE
+            || maximum > MAX_BLOCK_INTEGER_PROPERTY_VALUE
+            || !(2..=MAX_BLOCK_INTEGER_PROPERTY_VALUES as i64).contains(&value_count)
+            || !(minimum..=maximum).contains(&default_value)
+        {
+            return Err(invalid_argument(
+                "integer block-state properties need 2..=16 values in -128..=127 and a valid default",
+            ));
+        }
+        Ok(Self {
+            name,
+            property_type: 1,
+            minimum,
+            maximum,
+            default_value,
+        })
+    }
+
+    /// Returns the canonical vanilla property name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn abi_values(&self) -> [i32; 4] {
+        [
+            self.property_type,
+            self.minimum,
+            self.maximum,
+            self.default_value,
+        ]
+    }
 }
 
 /// A fixed selection and collision shape for a module-registered block.
@@ -1400,6 +1478,17 @@ extern "C" {
         push_reaction: i32,
         sound: i32,
     ) -> i32;
+    #[link_name = "add_block_state_property"]
+    fn imported_add_block_state_property(
+        path_pointer: i32,
+        path_length: i32,
+        property_name_pointer: i32,
+        property_name_length: i32,
+        property_type: i32,
+        minimum: i32,
+        maximum: i32,
+        default_value: i32,
+    ) -> i32;
     #[link_name = "register_block_entity"]
     fn imported_register_block_entity(
         path_pointer: i32,
@@ -1954,6 +2043,39 @@ pub fn register_block(path: &str, definition: BlockDefinition) -> SjmlResult<()>
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = definition;
+        Err(unsupported_target())
+    }
+}
+
+/// Adds one Boolean or bounded integer property to a block already staged by this module.
+///
+/// Declare properties during `#[mod_register]`, after `register_block` and before registry freeze.
+/// A block may declare at most seven properties and expose at most 128 possible states. These
+/// properties can then be read through `world::block_properties` and changed through
+/// `world::set_block_properties` while the block is in a loaded chunk.
+pub fn add_block_state_property(path: &str, property: &BlockStateProperty) -> SjmlResult<()> {
+    validate_path(path)?;
+    let [property_type, minimum, maximum, default_value] = property.abi_values();
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies both bounded UTF-8 values and validates the scalar declaration.
+        let status = unsafe {
+            imported_add_block_state_property(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                property.name.as_ptr() as usize as u32 as i32,
+                property.name.len() as u32 as i32,
+                property_type,
+                minimum,
+                maximum,
+                default_value,
+            )
+        };
+        return status_result(status, "host rejected the block state property");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (property_type, minimum, maximum, default_value);
         Err(unsupported_target())
     }
 }
@@ -3790,6 +3912,20 @@ fn validate_path(path: &str) -> SjmlResult<()> {
     Ok(())
 }
 
+fn validate_block_state_property_name(name: &str) -> SjmlResult<()> {
+    if name.is_empty()
+        || name.len() > MAX_BLOCK_STATE_PROPERTY_NAME_BYTES
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    {
+        return Err(invalid_argument(
+            "block state property name must contain 1..=32 lowercase ASCII letters, digits, or '_'",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_villager_registry_id(value: &str, label: &str) -> SjmlResult<()> {
     let Some((namespace, path)) = value.split_once(':') else {
         return Err(invalid_argument(&format!(
@@ -3962,6 +4098,34 @@ mod tests {
                 12
             ]
         );
+    }
+
+    #[test]
+    fn block_state_property_builders_keep_codes_bounds_and_defaults() {
+        assert_eq!(MAX_BLOCK_STATE_PROPERTIES, 7);
+        assert_eq!(MAX_BLOCK_STATE_VARIANTS, 128);
+        assert_eq!(MAX_BLOCK_INTEGER_PROPERTY_VALUES, 16);
+        let powered = BlockStateProperty::boolean("powered", true).unwrap();
+        assert_eq!(powered.name(), "powered");
+        assert_eq!(powered.abi_values(), [0, 0, 1, 1]);
+        let charge = BlockStateProperty::integer("charge", 0, 3, 1).unwrap();
+        assert_eq!(charge.name(), "charge");
+        assert_eq!(charge.abi_values(), [1, 0, 3, 1]);
+
+        for invalid in [
+            BlockStateProperty::boolean("Upper", false),
+            BlockStateProperty::boolean("bad.name", false),
+            BlockStateProperty::boolean("", false),
+            BlockStateProperty::boolean("x".repeat(33), false),
+            BlockStateProperty::integer("charge", 0, 16, 0),
+            BlockStateProperty::integer("charge", 10, 9, 9),
+            BlockStateProperty::integer("charge", 1, 1, 1),
+            BlockStateProperty::integer("charge", 0, 3, 4),
+            BlockStateProperty::integer("charge", -129, -128, -128),
+            BlockStateProperty::integer("charge", 127, 128, 127),
+        ] {
+            assert_eq!(invalid.unwrap_err().code(), ErrorCode::InvalidArgument);
+        }
     }
 
     #[test]
@@ -4450,6 +4614,13 @@ mod tests {
         );
         assert_eq!(
             register_block("ruby_block", BlockDefinition::default())
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        let powered = BlockStateProperty::boolean("powered", false).unwrap();
+        assert_eq!(
+            add_block_state_property("ruby_block", &powered)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

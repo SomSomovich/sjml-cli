@@ -251,9 +251,9 @@ pub use recipe::{
 };
 pub use registry::{
     BlockBehavior, BlockEntityModelDefinition, BlockPushReaction, BlockShape, BlockSound,
-    EntityModelDefinition, IntegerComponentDefinition, ItemFood, ItemFoodEffect, ItemFoodEffects,
-    ItemRarity, ModelAnimation, ModelAnimationAxis, ModelCuboid, VillagerTradeItem,
-    VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS, MAX_ITEM_FOOD_EFFECTS,
+    BlockStateProperty, EntityModelDefinition, IntegerComponentDefinition, ItemFood,
+    ItemFoodEffect, ItemFoodEffects, ItemRarity, ModelAnimation, ModelAnimationAxis, ModelCuboid,
+    VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS, MAX_ITEM_FOOD_EFFECTS,
     MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
 };
 pub use render::{
@@ -458,29 +458,32 @@ pub mod prelude {
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
     pub use crate::registry::{
-        add_to_creative_tab, custom_registry_value, register_attribute_effect, register_block,
-        register_block_entity, register_block_entity_model, register_block_with_behavior,
-        register_block_with_shape, register_boolean_component, register_brewing_recipe,
-        register_cooking_recipe, register_creative_tab, register_custom_registry,
-        register_custom_value, register_effect_tick, register_entity, register_entity_ai_goal,
-        register_entity_model, register_fluid, register_fluid_with_visuals,
-        register_integer_component, register_item, register_particle, register_potion,
-        register_recipe_serializer, register_shaped_recipe, register_shapeless_recipe,
-        register_smithing_transform_recipe, register_sound, register_string_component,
-        register_villager_trade, set_block_behavior, set_block_shape, set_entity_attribute,
-        set_item_attribute_modifier, set_item_boolean_component, set_item_food,
-        set_item_food_with_effects, set_item_integer_component, set_item_rarity,
+        add_block_state_property, add_to_creative_tab, custom_registry_value,
+        register_attribute_effect, register_block, register_block_entity,
+        register_block_entity_model, register_block_with_behavior, register_block_with_shape,
+        register_boolean_component, register_brewing_recipe, register_cooking_recipe,
+        register_creative_tab, register_custom_registry, register_custom_value,
+        register_effect_tick, register_entity, register_entity_ai_goal, register_entity_model,
+        register_fluid, register_fluid_with_visuals, register_integer_component, register_item,
+        register_particle, register_potion, register_recipe_serializer, register_shaped_recipe,
+        register_shapeless_recipe, register_smithing_transform_recipe, register_sound,
+        register_string_component, register_villager_trade, set_block_behavior, set_block_shape,
+        set_entity_attribute, set_item_attribute_modifier, set_item_boolean_component,
+        set_item_food, set_item_food_with_effects, set_item_integer_component, set_item_rarity,
         set_item_string_component, AttributeModifierOperation, BlockBehavior, BlockDefinition,
-        BlockEntityModelDefinition, BlockPushReaction, BlockShape, BlockSound,
+        BlockEntityModelDefinition, BlockPushReaction, BlockShape, BlockSound, BlockStateProperty,
         CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
         EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
         FluidVisualDefinition, IntegerComponentDefinition, ItemAttributeModifier,
         ItemAttributeSlot, ItemDefinition, ItemFood, ItemFoodEffect, ItemFoodEffects, ItemRarity,
         ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition,
         ShapedRecipeKey, ShapelessRecipeDefinition, SmithingTransformRecipeDefinition,
-        StringComponentDefinition, VillagerTradeItem, VillagerTradeOffer, MAX_BOUND_MODEL_CUBOIDS,
+        StringComponentDefinition, VillagerTradeItem, VillagerTradeOffer,
+        MAX_BLOCK_INTEGER_PROPERTY_VALUE, MAX_BLOCK_INTEGER_PROPERTY_VALUES,
+        MAX_BLOCK_STATE_PROPERTIES, MAX_BLOCK_STATE_VARIANTS, MAX_BOUND_MODEL_CUBOIDS,
         MAX_ITEM_ATTRIBUTE_MODIFIERS, MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT, MAX_ITEM_FOOD_EFFECTS,
         MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
+        MIN_BLOCK_INTEGER_PROPERTY_VALUE,
     };
     pub use crate::render;
     pub use crate::render::{

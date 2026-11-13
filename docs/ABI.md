@@ -6,11 +6,11 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.72.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.73.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.72.0 adds
-static bounded vanilla and modded attribute modifiers to registered items. ABI 1.71.0 adds
+incompatible. Build metadata does not affect version ordering. ABI 1.73.0 adds bounded Boolean and integer
+properties to module-registered block states. ABI 1.72.0 adds static bounded vanilla and modded attribute modifiers to registered items. ABI 1.71.0 adds
 an owner-scoped synchronous `item.use_on_entity` callback for registered items.
 ABI 1.70.0 adds
 an owner-scoped synchronous `item.use_on_block` callback for registered items.

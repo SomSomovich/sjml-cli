@@ -111,6 +111,15 @@ fn register_test_content() -> SjmlResult<()> {
             .push_reaction(BlockPushReaction::PushOnly)
             .sound(BlockSound::Amethyst),
     )?;
+    registry::register_block("gametest_stateful_block", BlockDefinition::default())?;
+    registry::add_block_state_property(
+        "gametest_stateful_block",
+        &BlockStateProperty::boolean("powered", false)?,
+    )?;
+    registry::add_block_state_property(
+        "gametest_stateful_block",
+        &BlockStateProperty::integer("charge", 0, 3, 1)?,
+    )?;
     registry::register_block("gametest_interactive_block", BlockDefinition::default())?;
     let mut block_model = BlockEntityModelDefinition::new();
     block_model.add_cuboid([0.125, 0.0, 0.125], [0.875, 0.75, 0.875], 0xFF20_C0FF)?;
@@ -1305,6 +1314,75 @@ fn inspect_world_collision(arguments: BlockBatchArguments) -> SjmlResult<String>
         ));
     }
     Ok("loaded block collision and unloaded-chunk query succeeded".to_owned())
+}
+
+#[command(name = "world.block.custom_state")]
+fn inspect_and_mutate_custom_block_state(arguments: BlockMutationArguments) -> SjmlResult<String> {
+    let world = world::get("minecraft:overworld")?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the overworld must already be loaded",
+        )
+    })?;
+    let position = BlockPos {
+        x: arguments.x,
+        y: arguments.y,
+        z: arguments.z,
+    };
+    const BLOCK_ID: &str = "sjml_game_test:content/gametest_stateful_block";
+    let initial = world::block_properties(world, position)?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the custom block must be in a loaded chunk",
+        )
+    })?;
+    if !initial
+        .iter()
+        .any(|property| property.name == "powered" && property.value == "false")
+        || !initial
+            .iter()
+            .any(|property| property.name == "charge" && property.value == "1")
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "custom block state defaults were not visible through the world API",
+        ));
+    }
+    world::set_block_properties(
+        world,
+        position,
+        BLOCK_ID,
+        &[
+            world::BlockProperty {
+                name: "powered".to_owned(),
+                value: "true".to_owned(),
+            },
+            world::BlockProperty {
+                name: "charge".to_owned(),
+                value: "3".to_owned(),
+            },
+        ],
+    )?;
+    let changed = world::block_properties(world, position)?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the custom block must remain loaded",
+        )
+    })?;
+    if !changed
+        .iter()
+        .any(|property| property.name == "powered" && property.value == "true")
+        || !changed
+            .iter()
+            .any(|property| property.name == "charge" && property.value == "3")
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "custom block state changes were not visible through the world API",
+        ));
+    }
+    world::set_block_properties(world, position, BLOCK_ID, &initial)?;
+    Ok("custom Boolean and integer block states read, changed, and restored".to_owned())
 }
 
 #[derive(StableDecode)]
