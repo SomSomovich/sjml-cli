@@ -1254,6 +1254,15 @@ fn register_content() -> SjmlResult<()> {
     })?;
     registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::RandomLookAround { priority: 7 })?;
     registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::Retaliate { priority: 0 })?;
+    registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::WaterAvoidingRandomStroll {
+        priority: 4, speed: 0.8,
+    })?;
+    registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::Panic {
+        priority: 1, speed: 1.2,
+    })?;
+    registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::RandomSwimming {
+        priority: 5, speed: 0.7,
+    })?;
     registry::set_entity_attribute("ruby_mite", EntityAttribute::MaxHealth, 40.0)?;
     registry::set_entity_attribute("ruby_mite", EntityAttribute::MovementSpeed, 0.3)?;
     Ok(())
@@ -1265,9 +1274,11 @@ block-entity-type, and entity-type registry events. Registered entities have
 no AI goals by default. `register_entity_ai_goal` adds up to sixteen bounded
 vanilla goals after the entity declaration; goal priorities are 0–31, movement
 speeds are 0.01–8, and look ranges are 1–64 blocks. The supported goals are
-swimming, random strolling, looking at players, melee attacking, random looking,
-targeting nearby players, and retaliating against a recent attacker. Goals are
-attached to the declared entity type before any instance can spawn. Raw guest
+swimming, random strolling, water-avoiding strolling, panic fleeing, random
+swimming, looking at players, melee attacking, random looking, targeting nearby
+players, and retaliating against a recent attacker. Random swimming selects a
+new vanilla path every 120 ticks. Goals are attached to the declared entity
+type before any instance can spawn. See [registered entity AI goals](ENTITY_AI_GOALS.md). Raw guest
 callbacks, custom goal code, and guest-defined synchronized fields remain
 unavailable. `EntityAttribute` values are applied during
 `EntityAttributeCreationEvent`; supported base attributes are max health

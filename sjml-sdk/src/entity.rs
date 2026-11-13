@@ -1642,21 +1642,19 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, apply_effect, clear_custom_name, custom_name, damage, fire_ticks,
-        navigate_to, raycast, remove_effect, set_custom_name, set_fire_ticks, set_velocity,
-        clear_target, set_target, target,
-        validate_active_effects, validate_custom_name, validate_entity_raycast,
-        validate_navigation_target, validate_spatial_query, within, ActiveEffect,
-        ActiveEffectsResponse, EntityCustomNameResponse, EntityNavigationRequest,
+        active_effects, apply_effect, clear_custom_name, clear_target, custom_name, damage,
+        fire_ticks, navigate_to, raycast, remove_effect, set_custom_name, set_fire_ticks,
+        set_target, set_velocity, target, validate_active_effects, validate_custom_name,
+        validate_entity_raycast, validate_navigation_target, validate_spatial_query, within,
+        ActiveEffect, ActiveEffectsResponse, EntityCustomNameResponse, EntityNavigationRequest,
         EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityTargetResult,
-        EntityVelocity,
-        SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
+        EntityVelocity, SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
         MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
         MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
         MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
-        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE,
-        MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_VELOCITY_COMPONENT,
-        MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
+        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
+        MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
+        NAVIGATION_WRITE_CAPABILITY,
     };
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,

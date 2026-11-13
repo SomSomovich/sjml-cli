@@ -280,6 +280,27 @@ fn register_test_content() -> SjmlResult<()> {
             must_see: true,
         },
     )?;
+    registry::register_entity_ai_goal(
+        "gametest_ai",
+        EntityAiGoal::WaterAvoidingRandomStroll {
+            priority: 5,
+            speed: 0.75,
+        },
+    )?;
+    registry::register_entity_ai_goal(
+        "gametest_ai",
+        EntityAiGoal::Panic {
+            priority: 2,
+            speed: 1.25,
+        },
+    )?;
+    registry::register_entity_ai_goal(
+        "gametest_ai",
+        EntityAiGoal::RandomSwimming {
+            priority: 6,
+            speed: 0.5,
+        },
+    )?;
     registry::register_fluid("gametest_fluid", FluidDefinition::default())?;
     registry::register_particle("gametest_particle")?;
     registry::register_sound("gametest_sound")?;

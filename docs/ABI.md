@@ -915,10 +915,12 @@ same module has declared that entity. At most sixteen goals may be attached
 to one type, 512 per module, and 8,192 total; priority is 0–31. Goal tags are
 `0` swim, `1` random stroll,
 `2` look at player, `3` melee attack, `4` random look around, `5` target
-player, and `6` retaliate. `value_bits` is finite speed 0.01–8 for tags 1 and
-3, finite range 1–64 for tag 2, and exactly positive zero for the other tags.
-`flags` is zero except tags 3 and 5, where 0/1 select melee long-memory or
-player-target must-see behavior. Invalid tags, parameters, entity ownership,
+player, `6` retaliate, `7` water-avoiding random stroll, `8` panic, and `9`
+random swimming. `value_bits` is finite speed 0.01–8 for tags 1, 3, 7, 8,
+and 9; finite range 1–64 for tag 2; and exactly positive zero for tags 0,
+4–6. `flags` is zero except tags 3 and 5, where 0/1 select melee
+long-memory or player-target must-see behavior. Random swimming uses a fixed
+vanilla target-selection interval of 120 ticks. Invalid tags, parameters, entity ownership,
 and attempts after the entity registry phase closes return
 `INVALID_ARGUMENT` or `PERMISSION_DENIED` without allocating a Minecraft goal.
 Model imports run only during `mod_register` and require `content.register`.

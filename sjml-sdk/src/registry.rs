@@ -636,6 +636,12 @@ pub enum EntityAiGoal {
     Swim { priority: u32 },
     /// Walk to nearby positions at a bounded movement speed.
     RandomStroll { priority: u32, speed: f32 },
+    /// Wander only along paths that avoid water at a bounded movement speed.
+    WaterAvoidingRandomStroll { priority: u32, speed: f32 },
+    /// Flee at a bounded movement speed after taking damage or catching fire.
+    Panic { priority: u32, speed: f32 },
+    /// Swim to a random position while in water at a bounded movement speed.
+    RandomSwimming { priority: u32, speed: f32 },
     /// Look at a nearby player within a bounded distance.
     LookAtPlayer { priority: u32, range: f32 },
     /// Attack a visible nearby target at a bounded movement speed.
@@ -3415,6 +3421,9 @@ fn valid_entity_ai_goal(goal: EntityAiGoal) -> bool {
         | EntityAiGoal::RandomLookAround { priority }
         | EntityAiGoal::Retaliate { priority } => valid_priority(priority),
         EntityAiGoal::RandomStroll { priority, speed }
+        | EntityAiGoal::WaterAvoidingRandomStroll { priority, speed }
+        | EntityAiGoal::Panic { priority, speed }
+        | EntityAiGoal::RandomSwimming { priority, speed }
         | EntityAiGoal::MeleeAttack {
             priority, speed, ..
         } => valid_priority(priority) && speed.is_finite() && (0.01..=8.0).contains(&speed),
@@ -3425,7 +3434,7 @@ fn valid_entity_ai_goal(goal: EntityAiGoal) -> bool {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn entity_ai_goal_wire(goal: EntityAiGoal) -> (i32, u32, f32, i32) {
     match goal {
         EntityAiGoal::Swim { priority } => (0, priority, 0.0, 0),
@@ -3441,6 +3450,9 @@ fn entity_ai_goal_wire(goal: EntityAiGoal) -> (i32, u32, f32, i32) {
             (5, priority, 0.0, i32::from(must_see))
         }
         EntityAiGoal::Retaliate { priority } => (6, priority, 0.0, 0),
+        EntityAiGoal::WaterAvoidingRandomStroll { priority, speed } => (7, priority, speed, 0),
+        EntityAiGoal::Panic { priority, speed } => (8, priority, speed, 0),
+        EntityAiGoal::RandomSwimming { priority, speed } => (9, priority, speed, 0),
     }
 }
 
@@ -5084,6 +5096,18 @@ mod tests {
                 priority: 1,
                 speed: f32::NAN,
             },
+            EntityAiGoal::WaterAvoidingRandomStroll {
+                priority: 1,
+                speed: 8.1,
+            },
+            EntityAiGoal::Panic {
+                priority: 32,
+                speed: 1.0,
+            },
+            EntityAiGoal::RandomSwimming {
+                priority: 1,
+                speed: 0.0,
+            },
             EntityAiGoal::LookAtPlayer {
                 priority: 1,
                 range: 64.1,
@@ -5106,6 +5130,35 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn added_entity_ai_goals_keep_stable_wire_tags_and_speed_bounds() {
+        assert_eq!(
+            entity_ai_goal_wire(EntityAiGoal::WaterAvoidingRandomStroll {
+                priority: 5,
+                speed: 0.75,
+            }),
+            (7, 5, 0.75, 0)
+        );
+        assert_eq!(
+            entity_ai_goal_wire(EntityAiGoal::Panic {
+                priority: 2,
+                speed: 1.25,
+            }),
+            (8, 2, 1.25, 0)
+        );
+        assert_eq!(
+            entity_ai_goal_wire(EntityAiGoal::RandomSwimming {
+                priority: 6,
+                speed: 0.5,
+            }),
+            (9, 6, 0.5, 0)
+        );
+        assert_eq!(
+            entity_ai_goal_wire(EntityAiGoal::Retaliate { priority: 0 }).0,
+            6
         );
     }
 
