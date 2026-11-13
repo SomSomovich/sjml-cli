@@ -1239,6 +1239,14 @@ fixed shape to an exact state combination. See
 [`BLOCK_STATE_SHAPES.md`](BLOCK_STATE_SHAPES.md) for bounds, permissions, and
 examples.
 
+Registered blocks can opt into vanilla random-tick selection during the same
+callback with `registry::set_block_random_ticking(path, true)`. Subscribe to
+`block.random_tick` to receive the separate `BlockRandomTick` snapshot. The
+owner-only synchronous callback runs on the logical server thread; scheduled
+`block.tick` and random-tick callbacks share a total limit of 512 per server
+tick. See [`BLOCK_TICK.md`](BLOCK_TICK.md) for the registration and event
+contract.
+
 Registered items may declare up to 16 static attribute modifiers during the
 same callback. Use `ItemAttributeModifier::new` with a fully qualified
 attribute registry ID, a module-local modifier path, a finite amount within

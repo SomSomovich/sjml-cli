@@ -18,6 +18,12 @@ Registered blocks can subscribe to their own scheduled ticks with
 snapshot. See the [block tick guide](../docs/BLOCK_TICK.md) for ownership,
 thread, capability, and quota limits.
 
+Owners can opt registered blocks into vanilla random-tick selection during
+`#[mod_register]` with `registry::set_block_random_ticking`, then subscribe to
+the separate `block.random_tick` event and its `BlockRandomTick` snapshot. Both
+tick callbacks share a per-server-tick host budget; see the same guide for the
+full contract.
+
 Physical-client modules can veto vanilla attack, use-item, and pick-block
 actions through `client.action_attempt`. The synchronous callback requires
 `events.subscribe`, `events.cancel`, and `client.input.action_cancel`; see the

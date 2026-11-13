@@ -1470,6 +1470,8 @@ extern "C" {
         requires_correct_tool: i32,
         has_item_form: i32,
     ) -> i32;
+    #[link_name = "set_block_random_ticking"]
+    fn imported_set_block_random_ticking(path_pointer: i32, path_length: i32, enabled: i32) -> i32;
     #[link_name = "set_block_shape"]
     fn imported_set_block_shape(
         path_pointer: i32,
@@ -2077,6 +2079,35 @@ pub fn register_block(path: &str, definition: BlockDefinition) -> SjmlResult<()>
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = definition;
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables vanilla random ticks for a block registered by this module.
+///
+/// Call during `#[mod_register]`, after [`register_block`] and before registry freeze. Random
+/// ticks use Minecraft's normal random-tick selection and are delivered as the distinct
+/// synchronous `block.random_tick` event, only to the module that owns the registered block.
+/// Calls outside registration, for unknown blocks, or for another module's blocks are rejected
+/// by the host. The host runs callbacks on the logical server thread and includes them in the
+/// shared per-server-tick callback budget with scheduled `block.tick` events.
+pub fn set_block_random_ticking(path: &str, enabled: bool) -> SjmlResult<()> {
+    validate_path(path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded UTF-8 path and validates the registration phase.
+        let status = unsafe {
+            imported_set_block_random_ticking(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                i32::from(enabled),
+            )
+        };
+        return status_result(status, "host rejected the block random-ticking setting");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = enabled;
         Err(unsupported_target())
     }
 }
@@ -4228,6 +4259,22 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn random_tick_registration_validates_paths_before_host_access() {
+        assert_eq!(
+            set_block_random_ticking("valid_block", true)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_block_random_ticking("../other", true)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
         );
     }
 

@@ -16,6 +16,8 @@ mod block_grow_attempt;
 mod block_inventory_custom_name;
 #[path = "gametest/block_inventory_move.rs"]
 mod block_inventory_move;
+#[path = "gametest/block_random_tick.rs"]
+mod block_random_tick;
 #[path = "gametest/block_tick.rs"]
 mod block_tick;
 #[path = "gametest/block_use.rs"]
@@ -149,6 +151,12 @@ fn register_test_content() -> SjmlResult<()> {
         "gametest_scheduled_block",
         &BlockStateProperty::boolean("ticked", false)?,
     )?;
+    registry::register_block("gametest_random_block", BlockDefinition::default())?;
+    registry::add_block_state_property(
+        "gametest_random_block",
+        &BlockStateProperty::boolean("ticked", false)?,
+    )?;
+    registry::set_block_random_ticking("gametest_random_block", true)?;
     let mut block_model = BlockEntityModelDefinition::new();
     block_model.add_cuboid([0.125, 0.0, 0.125], [0.875, 0.75, 0.875], 0xFF20_C0FF)?;
     block_model.set_texture("sjml_game_test:textures/block/gametest_model.png")?;
@@ -475,6 +483,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     player_item_use_attempt::initialize()?;
     block_use::initialize()?;
     block_tick::initialize()?;
+    block_random_tick::initialize()?;
     player_fished_attempt::initialize()?;
     player_attack_attempt::initialize()?;
     entity_heal_attempt::initialize()?;

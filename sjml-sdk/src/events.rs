@@ -1044,7 +1044,41 @@ impl BlockTick {
     }
 }
 
-/// One named, detached property on a block state delivered in [`BlockTick`].
+/// Synchronous, non-cancellable callback for one vanilla random tick of a module-owned registered block.
+///
+/// Opt a block in during `#[mod_register]` with
+/// [`registry::set_block_random_ticking`], then subscribe to the distinct
+/// `block.random_tick` event. The host dispatches only to the module that declared
+/// `block_id`, on the logical server thread, and caps the combined `block.tick`
+/// and `block.random_tick` callbacks at 512 for each server tick. Snapshot fields
+/// use the same bounded schema-v1 layout as [`BlockTick`], but this event has its
+/// own event name and ABI export. No client-side callback is emitted.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockRandomTick {
+    /// Canonical ID of the registered block whose random tick ran.
+    pub block_id: String,
+    /// Resource location of the dimension containing the block.
+    pub dimension_id: String,
+    /// Block position where Minecraft invoked the random tick.
+    pub position: BlockPos,
+    /// Logical-server tick count at dispatch time.
+    pub tick_count: i64,
+    /// Detached property values from the exact block state being ticked.
+    pub properties: Vec<BlockTickProperty>,
+}
+
+impl BlockRandomTick {
+    /// Returns the value of a captured property, if the block declared it.
+    pub fn property(&self, name: &str) -> Option<&str> {
+        self.properties
+            .iter()
+            .find(|property| property.name == name)
+            .map(|property| property.value.as_str())
+    }
+}
+
+/// One named, detached property on a block state delivered in [`BlockTick`] or [`BlockRandomTick`].
 #[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
 pub struct BlockTickProperty {
@@ -1537,17 +1571,18 @@ mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
         BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockGrowAttempt, BlockPlace,
-        BlockPlaceAttempt, BlockTick, BlockTickProperty, BlockUseAction, ClientAction,
-        ClientActionAttempt, ClientActionHand, ClientChatSendAttempt, ClientItemTooltip,
-        ClientTick, EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt, EntityDamaged,
-        EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
-        EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick,
-        EventPriority, ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines,
-        ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
-        PlayerAdvancementEarned, PlayerAttackAttempt, PlayerDropAttempt, PlayerFishedAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt,
-        PlayerMoved, PlayerRespawned, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        BlockPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty, BlockUseAction,
+        ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
+        ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt,
+        EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
+        EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned,
+        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
+        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAttackAttempt,
+        PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt,
+        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -1785,6 +1820,46 @@ mod tests {
             "Rust encoding must match the host v1 schema"
         );
         assert_eq!(from_bytes::<BlockTick>(&encoded).unwrap(), event);
+        assert_eq!(event.property("powered"), Some("true"));
+        assert_eq!(event.property("missing"), None);
+    }
+
+    #[test]
+    fn block_random_tick_has_distinct_subscription_name_and_matches_snapshot_schema() {
+        let event = BlockRandomTick {
+            block_id: "ruby_pack:content/random_block".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            position: BlockPos { x: -3, y: 70, z: 9 },
+            tick_count: 42,
+            properties: vec![
+                BlockTickProperty {
+                    name: "charge".to_owned(),
+                    value: "3".to_owned(),
+                },
+                BlockTickProperty {
+                    name: "powered".to_owned(),
+                    value: "true".to_owned(),
+                },
+            ],
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.block_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&event.position.x.to_le_bytes());
+        expected.extend_from_slice(&event.position.y.to_le_bytes());
+        expected.extend_from_slice(&event.position.z.to_le_bytes());
+        expected.extend_from_slice(&event.tick_count.to_le_bytes());
+        expected.extend_from_slice(&2_i32.to_le_bytes());
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        append_test_string(&mut expected, "charge");
+        append_test_string(&mut expected, "3");
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        append_test_string(&mut expected, "powered");
+        append_test_string(&mut expected, "true");
+        assert_eq!(encoded, expected);
+        assert_eq!(from_bytes::<BlockRandomTick>(&encoded).unwrap(), event);
         assert_eq!(event.property("powered"), Some("true"));
         assert_eq!(event.property("missing"), None);
     }
