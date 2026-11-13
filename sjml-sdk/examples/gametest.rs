@@ -2094,8 +2094,20 @@ fn inspect_player_controls(arguments: PlayerArguments) -> SjmlResult<String> {
 
     let original_motion = player::motion(target_player)?;
     let temporary_velocity = player::PlayerVelocity::new(0.125, -0.25, 0.5)?;
+    let requested_yaw = if original_motion.yaw <= 35_970.0 {
+        original_motion.yaw + 30.0
+    } else {
+        original_motion.yaw - 30.0
+    };
+    let temporary_yaw = (requested_yaw + 180.0).rem_euclid(360.0) - 180.0;
+    let temporary_pitch = if original_motion.pitch <= 75.0 {
+        original_motion.pitch + 15.0
+    } else {
+        original_motion.pitch - 15.0
+    };
     let temporary_motion = (|| {
         player::set_velocity(target_player, temporary_velocity)?;
+        player::set_rotation(target_player, requested_yaw, temporary_pitch)?;
         player::motion(target_player)
     })();
     let restore_motion = player::set_velocity(
@@ -2106,8 +2118,11 @@ fn inspect_player_controls(arguments: PlayerArguments) -> SjmlResult<String> {
             original_motion.velocity_z,
         )?,
     );
+    let restore_rotation =
+        player::set_rotation(target_player, original_motion.yaw, original_motion.pitch);
     let temporary_motion = temporary_motion?;
     restore_motion?;
+    restore_rotation?;
     let restored_motion = player::motion(target_player)?;
 
     if temporary_abilities.flying != temporary_flying
@@ -2127,7 +2142,10 @@ fn inspect_player_controls(arguments: PlayerArguments) -> SjmlResult<String> {
         || (restored_motion.velocity_x - original_motion.velocity_x).abs() > 0.0001
         || (restored_motion.velocity_y - original_motion.velocity_y).abs() > 0.0001
         || (restored_motion.velocity_z - original_motion.velocity_z).abs() > 0.0001
-        || restored_motion.yaw != original_motion.yaw
+        || (temporary_motion.yaw - temporary_yaw).abs() > 0.0001
+        || temporary_motion.pitch != temporary_pitch
+        || ((restored_motion.yaw - original_motion.yaw + 180.0).rem_euclid(360.0) - 180.0).abs()
+            > 0.0001
         || restored_motion.pitch != original_motion.pitch
     {
         return Err(SjmlError::new(

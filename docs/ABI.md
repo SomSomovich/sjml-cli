@@ -2171,13 +2171,14 @@ default mode. Static registration and client calls fail closed. See
 `motion` requires `entity.read` and returns the current velocity and yaw/pitch
 rotation of the active login session. `set_velocity` additionally requires the
 separately requested and granted `player.motion.write` capability and accepts
-only finite components within ±64 blocks per tick. The host synchronizes
-motion to the player and validates the owning server thread and live session.
-Static registration and client calls fail closed. The Rust SDK's
-`PlayerMotion::look_direction()` derives a normalized `[f64; 3]` vector locally
-from the decoded yaw and pitch using Minecraft's look-direction convention; it
-adds no host import and does not alter the 36-byte schema-v1 record. See
-[player motion](PLAYER_MOTION.md).
+only finite components within ±64 blocks per tick. `set_rotation` requires
+the separate `player.rotation.write` capability, accepts finite yaw within
+±36,000 degrees and pitch within -90..=90, and synchronizes the normalized
+rotation without changing position or velocity. Both setters validate the
+active login session and owning server thread; static registration and client
+calls fail closed. The Rust SDK's `PlayerMotion::look_direction()` derives a
+normalized `[f64; 3]` vector locally from decoded yaw/pitch without changing
+the 36-byte schema-v1 record. See [player motion](PLAYER_MOTION.md).
 `abilities` requires `entity.read` and returns four strict boolean bytes after
 schema version 1. `set_flying` additionally requires `player.abilities.write`,
 accepts only 0 or 1, and cannot enable flight unless the player's existing

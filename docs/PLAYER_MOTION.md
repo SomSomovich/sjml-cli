@@ -1,19 +1,21 @@
-# Server-side player motion
+# Server-side player motion and rotation
 
 `player::motion` reads one live player session's velocity and rotation.
-`player::set_velocity` replaces its three velocity components. Rotation is
-read-only through this API. Velocity is measured in blocks per tick.
+`player::set_velocity` replaces its three velocity components, and
+`player::set_rotation` changes yaw and pitch. Velocity is measured in blocks
+per tick.
 
 Request `entity.read` to read motion and resolve player handles. Setting
-velocity additionally requires `player.motion.write`; the server administrator
-must grant every requested capability:
+velocity additionally requires `player.motion.write`; changing rotation
+requires the separate `player.rotation.write`. The server administrator must
+grant every requested capability:
 
 ```toml
 [[modules]]
 id = "main"
 path = "modules/main.wasm"
 side = "server"
-permissions = ["entity.read", "player.motion.write"]
+permissions = ["entity.read", "player.motion.write", "player.rotation.write"]
 ```
 
 ```rust
@@ -26,6 +28,14 @@ fn boost_player(handle: PlayerHandle) -> SjmlResult<()> {
 }
 ```
 
+```rust
+use sjml::prelude::*;
+
+fn face_player(handle: PlayerHandle, yaw: f32, pitch: f32) -> SjmlResult<()> {
+    player::set_rotation(handle, yaw, pitch)
+}
+```
+
 The Rust API is `player::motion(handle: PlayerHandle) ->
 SjmlResult<PlayerMotion>` and `player::set_velocity(handle: PlayerHandle,
 velocity: PlayerVelocity) -> SjmlResult<()>`. `PlayerMotion` contains
@@ -33,18 +43,24 @@ velocity: PlayerVelocity) -> SjmlResult<()>`. `PlayerMotion` contains
 `PlayerVelocity::new(x, y, z)` rejects non-finite components and components
 outside -64..=64 blocks per tick. The host repeats these checks for direct ABI
 callers and also rejects non-finite rotations from the player provider.
+`player::set_rotation(handle: PlayerHandle, yaw: f32, pitch: f32) ->
+SjmlResult<()>` requires `player.rotation.write` as well as `entity.read`.
+Yaw must be finite and within ±36,000 degrees; pitch must be finite and within
+-90..=90 degrees. The host wraps yaw to Minecraft's equivalent angle and
+synchronizes the authoritative rotation to the player and tracking clients
+without changing position or velocity.
 
-Both calls require a valid module-scoped `PlayerHandle` for an active login
+All calls require a valid module-scoped `PlayerHandle` for an active login
 session and run synchronously on the owning logical-server thread. Handles
 survive respawn within the same login session, become stale when logout begins,
 and are limited to 1,024 per module. Client contexts and static registration
-fail closed with `PERMISSION_DENIED`. The setter marks the motion for server
-tracking and synchronizes the player owner; it never loads a chunk or changes
-dimensions.
+fail closed with `PERMISSION_DENIED`. The velocity setter synchronizes motion
+to the player and never loads a chunk or changes dimensions. The rotation
+setter synchronizes the player's rotation and preserves position and velocity.
 
 ## ABI
 
-Both imports belong to `sjml_player_v1`, use `i32` arguments and return an
+All imports belong to `sjml_player_v1`, use `i32` arguments and return an
 `i32` status (zero for success, otherwise a stable ABI error). The `motion`
 signature is
 `(handle_ptr: i32, handle_len: i32, output_ptr: i32, output_capacity: i32) -> i32`.
@@ -62,3 +78,11 @@ All three components must be finite and within ±64. Unknown schemas return
 `INVALID_ARGUMENT`. The import is available only when both `entity.read` and
 `player.motion.write` are requested and granted. Static registration and
 client contexts return `PERMISSION_DENIED`.
+
+The `set_rotation` signature is
+`(handle_ptr: i32, handle_len: i32, yaw_bits: i32, pitch_bits: i32) -> i32`.
+The handle is exactly 24 bytes; `yaw_bits` and `pitch_bits` are the IEEE-754
+bit patterns of two `f32` degree values. The host enforces the same finite and
+range bounds as the SDK. The import is available only when both `entity.read`
+and `player.rotation.write` are requested and granted. Static registration
+and client contexts return `PERMISSION_DENIED`.

@@ -16,6 +16,32 @@ fn native_player_motion_and_velocity_mutation_report_unsupported_imports() {
 }
 
 #[test]
+fn player_rotation_setter_validates_angles_and_uses_its_native_import() {
+    let handle = PlayerHandle::new(1, 2, 3, 4).unwrap();
+    for (yaw, pitch) in [
+        (f32::NAN, 0.0),
+        (f32::INFINITY, 0.0),
+        (player::MAX_PLAYER_ROTATION_YAW + 0.1, 0.0),
+        (0.0, f32::NEG_INFINITY),
+        (0.0, -90.1),
+        (0.0, 90.1),
+    ] {
+        assert_eq!(
+            player::set_rotation(handle, yaw, pitch).unwrap_err().code(),
+            ErrorCode::InvalidArgument,
+            "yaw={yaw}, pitch={pitch} should be rejected"
+        );
+    }
+    assert_eq!(
+        player::set_rotation(handle, 270.0, -90.0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode,
+        "valid angles should reach the native unsupported-import path"
+    );
+}
+
+#[test]
 fn player_motion_uses_schema_v1_velocity_and_rotation_field_order() {
     let motion = player::PlayerMotion {
         velocity_x: 1.25,

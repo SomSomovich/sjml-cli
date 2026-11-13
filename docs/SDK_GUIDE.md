@@ -2149,13 +2149,14 @@ to that live server login session, not the world's default game mode. See
 
 `player::motion(handle)` reads a live server player's velocity and yaw/pitch
 rotation. `player::set_velocity(handle, velocity)` sets bounded velocity and
-requires the additional `player.motion.write` capability. Velocity components
-are limited to ±64 blocks per tick. `PlayerMotion::look_direction()` locally
-derives a normalized `[f64; 3]` vector from the stored yaw and pitch, with no
-additional host call or ABI data. It uses Minecraft's angle convention:
-`x = -sin(yaw) * cos(pitch)`, `y = -sin(pitch)`, and
-`z = cos(yaw) * cos(pitch)`; yaw 0 and pitch 0 point toward positive Z. See
-[player motion](PLAYER_MOTION.md).
+requires the additional `player.motion.write` capability;
+`player::set_rotation(handle, yaw, pitch)` changes look direction under the
+separate `player.rotation.write` capability without moving the player or
+changing velocity. Velocity components are limited to ±64 blocks per tick;
+yaw is finite within ±36,000 degrees and pitch is finite within -90..=90.
+`PlayerMotion::look_direction()` derives a normalized `[f64; 3]` vector
+locally from yaw and pitch using Minecraft's angle convention. See
+[player motion and rotation](PLAYER_MOTION.md).
 
 `player::equipment(handle)` reads detached item IDs, counts, stack limits, and
 durability for main hand, offhand, and the four armor slots. It requires only

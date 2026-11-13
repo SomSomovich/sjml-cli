@@ -345,6 +345,8 @@ pub const MAX_PLAYER_HEALTH: f32 = 1_000_000.0;
 pub const MAX_PLAYER_FOOD_LEVEL: u32 = 20;
 /// Maximum experience level accepted by [`set_experience`].
 pub const MAX_PLAYER_EXPERIENCE_LEVEL: u32 = 20_000;
+/// Maximum absolute yaw accepted by [`set_rotation`].
+pub const MAX_PLAYER_ROTATION_YAW: f32 = 36_000.0;
 /// Maximum duration accepted for a player item cooldown, in server ticks.
 pub const MAX_PLAYER_ITEM_COOLDOWN_TICKS: u32 = 72_000;
 /// Maximum UTF-8 size accepted for a namespaced item ID used with player cooldown APIs.
@@ -917,6 +919,13 @@ extern "C" {
         handle_length: i32,
         velocity: i32,
         velocity_length: i32,
+    ) -> i32;
+    #[link_name = "set_rotation"]
+    fn imported_set_rotation(
+        handle: i32,
+        handle_length: i32,
+        yaw_bits: i32,
+        pitch_bits: i32,
     ) -> i32;
     #[link_name = "action_bar"]
     fn imported_action_bar(handle: i32, handle_length: i32, text: i32, text_length: i32) -> i32;
@@ -2353,6 +2362,45 @@ pub fn set_velocity(handle: PlayerHandle, velocity: PlayerVelocity) -> SjmlResul
     }
 }
 
+/// Sets a live server player's yaw and pitch without changing position or velocity.
+///
+/// Requires `entity.read` and `player.rotation.write`. Yaw must be finite and within
+/// ±36,000 degrees; pitch must be finite and within -90..=90 degrees. The server
+/// synchronizes the authoritative rotation to the player and tracking clients.
+pub fn set_rotation(handle: PlayerHandle, yaw: f32, pitch: f32) -> SjmlResult<()> {
+    if !yaw.is_finite() || yaw.abs() > MAX_PLAYER_ROTATION_YAW {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player yaw must be finite and within ±36,000 degrees",
+        ));
+    }
+    if !pitch.is_finite() || !(-90.0..=90.0).contains(&pitch) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player pitch must be finite and within -90..=90 degrees",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        // SAFETY: the handle is a bounded stable value and both angles are validated above.
+        let status = unsafe {
+            imported_set_rotation(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                yaw.to_bits() as i32,
+                pitch.to_bits() as i32,
+            )
+        };
+        status_result(status, "host rejected the player rotation mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn read_output<T: StableDecode>(
     capacity: u32,
@@ -2394,14 +2442,14 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, apply_effect, clear_team, set_team, team, teleport, teleport_to_world,
-        validate_player_tab_list_pair, validate_player_tab_list_text, validate_player_team_name,
-        validate_player_title_text, vitals, PlayerMotion, PlayerTeamResponse, PlayerTeleport,
-        PlayerTitleTimings, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
-        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_STATISTIC_VALUE,
-        MAX_PLAYER_TAB_LIST_TEXT_BYTES, MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS,
-        MAX_PLAYER_TEAM_NAME_BYTES, MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES,
-        MAX_TELEPORT_COORDINATE,
+        active_effects, apply_effect, clear_team, set_rotation, set_team, team, teleport,
+        teleport_to_world, validate_player_tab_list_pair, validate_player_tab_list_text,
+        validate_player_team_name, validate_player_title_text, vitals, PlayerMotion,
+        PlayerTeamResponse, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
+        MAX_PLAYER_ACTIVE_EFFECTS, MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES,
+        MAX_PLAYER_ROTATION_YAW, MAX_PLAYER_STATISTIC_VALUE, MAX_PLAYER_TAB_LIST_TEXT_BYTES,
+        MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS, MAX_PLAYER_TEAM_NAME_BYTES,
+        MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
     };
     use crate::{ActiveEffect, ErrorCode, PlayerHandle, StableDecode, WorldHandle};
 
@@ -2550,6 +2598,32 @@ mod tests {
         ] {
             assert_direction_close(motion_with_rotation(yaw, 0.0).look_direction(), expected);
         }
+    }
+
+    #[test]
+    fn player_rotation_setter_validates_yaw_and_pitch_before_host_access() {
+        let handle = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(MAX_PLAYER_ROTATION_YAW, 36_000.0);
+        for (yaw, pitch) in [
+            (f32::NAN, 0.0),
+            (f32::INFINITY, 0.0),
+            (MAX_PLAYER_ROTATION_YAW + 0.1, 0.0),
+            (0.0, f32::NEG_INFINITY),
+            (0.0, -90.1),
+            (0.0, 90.1),
+        ] {
+            assert_eq!(
+                set_rotation(handle, yaw, pitch).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+                "yaw={yaw}, pitch={pitch} should be rejected"
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            set_rotation(handle, 270.0, -90.0).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid angles should reach the non-WASM unsupported-target path"
+        );
     }
 
     #[test]
