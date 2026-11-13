@@ -26,6 +26,10 @@ pub const MAX_FISHED_ITEM_COUNT: u32 = 1_000_000;
 pub const CLIENT_ACTION_CANCEL_CAPABILITY: &str = "client.input.action_cancel";
 /// Separate grant required to observe player advancement criterion progress.
 pub const PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY: &str = "player.advancement.observe";
+/// Separate grant required to observe player equipment changes.
+pub const PLAYER_EQUIPMENT_OBSERVE_CAPABILITY: &str = "player.equipment.observe";
+/// Maximum count represented by one detached `player.equipment_changed` item snapshot.
+pub const MAX_PLAYER_EQUIPMENT_ITEM_COUNT: u32 = 1_000_000;
 /// Maximum callbacks invoked for one physical-client action attempt.
 pub const MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS: usize = 64;
 
@@ -194,6 +198,165 @@ fn validate_advancement_progress(event: &PlayerAdvancementProgressEvent) -> Sjml
             ErrorCode::PayloadTooLarge,
             "advancement progress event string exceeds the 256-byte limit",
         ));
+    }
+    Ok(())
+}
+
+/// Non-cancellable equipment transition emitted from NeoForge's server-side living-entity tick hook.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerEquipmentChanged {
+    /// Canonical UUID string of the player whose equipment changed.
+    pub player_id: String,
+    /// Vanilla equipment slot that changed.
+    pub slot: PlayerEquipmentSlot,
+    /// Bounded item description before the change; `None` means the slot was empty.
+    pub previous: Option<PlayerEquipmentItemSnapshot>,
+    /// Bounded item description after the change; `None` means the slot is now empty.
+    pub current: Option<PlayerEquipmentItemSnapshot>,
+}
+
+/// Vanilla player equipment slots supported by the schema-v1 notification.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum PlayerEquipmentSlot {
+    MainHand,
+    OffHand,
+    Feet,
+    Legs,
+    Chest,
+    Head,
+    Body,
+}
+
+impl PlayerEquipmentSlot {
+    fn code(self) -> u32 {
+        match self {
+            Self::MainHand => 0,
+            Self::OffHand => 1,
+            Self::Feet => 2,
+            Self::Legs => 3,
+            Self::Chest => 4,
+            Self::Head => 5,
+            Self::Body => 6,
+        }
+    }
+
+    fn from_code(value: u32) -> SjmlResult<Self> {
+        match value {
+            0 => Ok(Self::MainHand),
+            1 => Ok(Self::OffHand),
+            2 => Ok(Self::Feet),
+            3 => Ok(Self::Legs),
+            4 => Ok(Self::Chest),
+            5 => Ok(Self::Head),
+            6 => Ok(Self::Body),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("player equipment slot code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+/// Bounded registry and durability fields for one equipped stack.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerEquipmentItemSnapshot {
+    /// Canonical registry ID of the item.
+    pub item_id: String,
+    /// Stack count, bounded to one million.
+    pub count: u32,
+    /// Current durability damage (zero for non-damageable items).
+    pub damage: u32,
+    /// Maximum durability (zero for non-damageable items).
+    pub max_damage: u32,
+}
+
+impl StableEncode for PlayerEquipmentChanged {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_equipment_changed(self)?;
+        encoder.write_u32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encoder.write_u32(self.slot.code())?;
+        encode_equipment_item_option(&self.previous, encoder)?;
+        encode_equipment_item_option(&self.current, encoder)
+    }
+}
+
+impl StableDecode for PlayerEquipmentChanged {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let version = decoder.read_u32()?;
+        if version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!("PlayerEquipmentChanged schema version {version} is unsupported"),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            slot: PlayerEquipmentSlot::from_code(decoder.read_u32()?)?,
+            previous: decode_equipment_item_option(decoder)?,
+            current: decode_equipment_item_option(decoder)?,
+        };
+        validate_player_equipment_changed(&event)?;
+        Ok(event)
+    }
+}
+
+fn encode_equipment_item_option(
+    item: &Option<PlayerEquipmentItemSnapshot>,
+    encoder: &mut Encoder,
+) -> SjmlResult<()> {
+    let Some(item) = item else {
+        return encoder.write_u8(0);
+    };
+    encoder.write_u8(1)?;
+    encode_bounded_event_string(&item.item_id, encoder)?;
+    encoder.write_u32(item.count)?;
+    encoder.write_u32(item.damage)?;
+    encoder.write_u32(item.max_damage)
+}
+
+fn decode_equipment_item_option(
+    decoder: &mut Decoder<'_>,
+) -> SjmlResult<Option<PlayerEquipmentItemSnapshot>> {
+    match decoder.read_u8()? {
+        0 => Ok(None),
+        1 => Ok(Some(PlayerEquipmentItemSnapshot {
+            item_id: decode_bounded_event_string(decoder)?,
+            count: decoder.read_u32()?,
+            damage: decoder.read_u32()?,
+            max_damage: decoder.read_u32()?,
+        })),
+        value => Err(SjmlError::new(
+            ErrorCode::InvalidBoolean,
+            format!("optional item wire value must be 0 or 1, found {value}"),
+        )),
+    }
+}
+
+fn validate_player_equipment_changed(event: &PlayerEquipmentChanged) -> SjmlResult<()> {
+    let invalid = || {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player equipment event contains an invalid UUID, slot, item ID, count, or durability",
+        )
+    };
+    if !canonical_uuid(&event.player_id) {
+        return Err(invalid());
+    }
+    for item in [&event.previous, &event.current].into_iter().flatten() {
+        if !canonical_resource_location(&item.item_id)
+            || item.count == 0
+            || item.count > MAX_PLAYER_EQUIPMENT_ITEM_COUNT
+            || item.damage > item.max_damage
+        {
+            return Err(invalid());
+        }
+        if item.item_id.len() > 256 {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "player equipment item ID exceeds the 256-byte limit",
+            ));
+        }
     }
     Ok(())
 }
@@ -1812,10 +1975,12 @@ mod tests {
         InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
         ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
         PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
+        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
         PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
         PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned,
         PlayerSleepAttempt, PlayerTick, PlayerVillagerTraded, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+        MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -2097,6 +2262,154 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidUtf8
+        );
+    }
+
+    #[test]
+    fn player_equipment_change_round_trips_stable_slots_and_bounded_old_new_stacks() {
+        let event = PlayerEquipmentChanged {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            slot: PlayerEquipmentSlot::MainHand,
+            previous: Some(PlayerEquipmentItemSnapshot {
+                item_id: "minecraft:iron_sword".into(),
+                count: 1,
+                damage: 5,
+                max_damage: 250,
+            }),
+            current: Some(PlayerEquipmentItemSnapshot {
+                item_id: "minecraft:diamond_sword".into(),
+                count: 1,
+                damage: 2,
+                max_damage: 1_561,
+            }),
+        };
+
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        expected.extend_from_slice(&(event.player_id.len() as u32).to_le_bytes());
+        expected.extend_from_slice(event.player_id.as_bytes());
+        expected.extend_from_slice(&0_u32.to_le_bytes());
+        for item in [
+            event.previous.as_ref().unwrap(),
+            event.current.as_ref().unwrap(),
+        ] {
+            expected.push(1);
+            expected.extend_from_slice(&(item.item_id.len() as u32).to_le_bytes());
+            expected.extend_from_slice(item.item_id.as_bytes());
+            expected.extend_from_slice(&item.count.to_le_bytes());
+            expected.extend_from_slice(&item.damage.to_le_bytes());
+            expected.extend_from_slice(&item.max_damage.to_le_bytes());
+        }
+        assert_eq!(to_bytes(&event).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<PlayerEquipmentChanged>(&expected).unwrap(),
+            event
+        );
+
+        let empty_to_equipped = PlayerEquipmentChanged {
+            slot: PlayerEquipmentSlot::Head,
+            previous: None,
+            ..event
+        };
+        assert_eq!(
+            from_bytes::<PlayerEquipmentChanged>(&to_bytes(&empty_to_equipped).unwrap()).unwrap(),
+            empty_to_equipped
+        );
+    }
+
+    #[test]
+    fn player_equipment_change_rejects_invalid_identity_slot_option_item_and_bounds() {
+        let base = PlayerEquipmentChanged {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            slot: PlayerEquipmentSlot::OffHand,
+            previous: None,
+            current: Some(PlayerEquipmentItemSnapshot {
+                item_id: "minecraft:shield".into(),
+                count: 1,
+                damage: 0,
+                max_damage: 0,
+            }),
+        };
+        let invalid_uuid = PlayerEquipmentChanged {
+            player_id: "not-a-uuid".into(),
+            ..base.clone()
+        };
+        assert_eq!(
+            to_bytes(&invalid_uuid).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let invalid_id = PlayerEquipmentChanged {
+            current: Some(PlayerEquipmentItemSnapshot {
+                item_id: "Minecraft:shield".into(),
+                ..base.current.clone().unwrap()
+            }),
+            ..base.clone()
+        };
+        assert_eq!(
+            to_bytes(&invalid_id).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let zero_count = PlayerEquipmentChanged {
+            current: Some(PlayerEquipmentItemSnapshot {
+                count: 0,
+                ..base.current.clone().unwrap()
+            }),
+            ..base.clone()
+        };
+        assert_eq!(
+            to_bytes(&zero_count).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let oversized_count = PlayerEquipmentChanged {
+            current: Some(PlayerEquipmentItemSnapshot {
+                count: MAX_PLAYER_EQUIPMENT_ITEM_COUNT + 1,
+                ..base.current.clone().unwrap()
+            }),
+            ..base.clone()
+        };
+        assert_eq!(
+            to_bytes(&oversized_count).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let invalid_damage = PlayerEquipmentChanged {
+            current: Some(PlayerEquipmentItemSnapshot {
+                damage: 1,
+                ..base.current.clone().unwrap()
+            }),
+            ..base
+        };
+        assert_eq!(
+            to_bytes(&invalid_damage).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let mut invalid_slot = to_bytes(&PlayerEquipmentChanged {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            slot: PlayerEquipmentSlot::MainHand,
+            previous: None,
+            current: None,
+        })
+        .unwrap();
+        invalid_slot[44..48].copy_from_slice(&99_u32.to_le_bytes());
+        assert_eq!(
+            from_bytes::<PlayerEquipmentChanged>(&invalid_slot)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let mut invalid_option = to_bytes(&PlayerEquipmentChanged {
+            player_id: "00000000-0000-0000-0000-000000000001".into(),
+            slot: PlayerEquipmentSlot::MainHand,
+            previous: None,
+            current: None,
+        })
+        .unwrap();
+        invalid_option[48] = 2;
+        assert_eq!(
+            from_bytes::<PlayerEquipmentChanged>(&invalid_option)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidBoolean
         );
     }
 

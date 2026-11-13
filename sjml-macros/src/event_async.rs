@@ -286,6 +286,23 @@ mod tests {
     }
 
     #[test]
+    fn accepts_non_cancellable_player_equipment_change_notifications() {
+        let generated = expand_event_async(
+            quote!(name = "player.equipment_changed"),
+            quote! {
+                async fn on_equipment_changed(event: PlayerEquipmentChanged) -> SjmlResult<()> {
+                    let _slot = event.slot;
+                    Ok(())
+                }
+            },
+        )
+        .to_string();
+
+        assert!(generated.contains("sjml_v1_event_player.equipment_changed"));
+        assert!(generated.contains("task :: spawn"));
+    }
+
+    #[test]
     fn requires_async_unit_result_and_one_typed_argument() {
         diagnostic(
             expand_event_async(

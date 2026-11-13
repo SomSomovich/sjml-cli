@@ -32,6 +32,8 @@ pub const MAX_ITEM_FOOD_EFFECT_ID_BYTES: usize = 256;
 pub const MAX_ITEM_FOOD_EFFECT_DURATION_TICKS: u32 = 72_000;
 /// Maximum static vanilla damage capacity for one registered item.
 pub const MAX_ITEM_MAX_DAMAGE: u32 = 1_000_000;
+/// Maximum static vanilla stack size for one registered item.
+pub const MAX_ITEM_MAX_STACK_SIZE: u32 = 99;
 /// Maximum UTF-8 size of one fully qualified static item crafting remainder ID.
 pub const MAX_ITEM_CRAFTING_REMAINDER_ID_BYTES: usize = 256;
 /// Maximum number of vanilla attribute modifiers on one registered item.
@@ -1591,6 +1593,12 @@ extern "C" {
     ) -> i32;
     #[link_name = "set_item_max_damage"]
     fn imported_set_item_max_damage(path_pointer: i32, path_length: i32, max_damage: i32) -> i32;
+    #[link_name = "set_item_max_stack_size"]
+    fn imported_set_item_max_stack_size(
+        path_pointer: i32,
+        path_length: i32,
+        max_stack_size: i32,
+    ) -> i32;
     #[link_name = "set_item_crafting_remainder"]
     fn imported_set_item_crafting_remainder(
         item_path_pointer: i32,
@@ -2142,6 +2150,38 @@ pub fn set_item_max_damage(item_path: &str, max_damage: u32) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = max_damage;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets a registered item's vanilla maximum stack size.
+///
+/// Call this from `#[mod_register]` after declaring a standalone item with
+/// [`register_item`]. `max_stack_size` must be in `1..=99`. The host rejects
+/// block items, items registered by another module, duplicate declarations,
+/// and stack sizes above `1` when vanilla durability is also configured.
+pub fn set_item_max_stack_size(item_path: &str, max_stack_size: u32) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    if !(1..=MAX_ITEM_MAX_STACK_SIZE).contains(&max_stack_size) {
+        return Err(invalid_argument(
+            "item max stack size must be between 1 and 99",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the size and item owner.
+        let status = unsafe {
+            imported_set_item_max_stack_size(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                max_stack_size as i32,
+            )
+        };
+        return status_result(status, "host rejected the item max-stack-size declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = max_stack_size;
         Err(unsupported_target())
     }
 }
@@ -6458,6 +6498,36 @@ mod tests {
         );
         assert_eq!(
             set_item_max_damage("../tool", 20).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_max_stack_size_is_bounded_and_paths_validate_before_import() {
+        assert_eq!(MAX_ITEM_MAX_STACK_SIZE, 99);
+        assert_eq!(
+            set_item_max_stack_size("bundle", 1).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_max_stack_size("bundle", MAX_ITEM_MAX_STACK_SIZE)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_item_max_stack_size("bundle", 0).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_max_stack_size("bundle", MAX_ITEM_MAX_STACK_SIZE + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_max_stack_size("../bundle", 16).unwrap_err().code(),
             ErrorCode::InvalidArgument
         );
     }

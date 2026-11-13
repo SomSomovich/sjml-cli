@@ -221,11 +221,13 @@ pub use events::{
     ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock,
     ModuleItemUseOnEntity, PlayerItemCrafted, PlayerItemUseAttempt, PlayerSleepAttempt, PlayerTick,
     PlayerVillagerTraded, CLIENT_ACTION_CANCEL_CAPABILITY, MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS,
-    PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY,
+    MAX_PLAYER_EQUIPMENT_ITEM_COUNT, PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY,
+    PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
 };
 pub use events::{
     FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
 };
+pub use events::{PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot};
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
     GlDepthFunction, GlExecutionReport, GlFramebufferAttachment, GlIndexType, GlPrimitiveMode,
@@ -453,12 +455,15 @@ pub mod prelude {
         EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, InventoryChanged,
         ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock,
         ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAdvancementProgressEvent,
-        PlayerAttackAttempt, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerJoined, PlayerLeft,
-        PlayerMoved, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt, ResourcesReloaded,
-        ServerTick, WorldLifecycle, CLIENT_ACTION_CANCEL_CAPABILITY, DEFAULT_SERVER_TICK_INTERVAL,
+        PlayerAttackAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
+        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt,
+        PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt, PlayerTick,
+        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        CLIENT_ACTION_CANCEL_CAPABILITY, DEFAULT_SERVER_TICK_INTERVAL,
         MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL, PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_SERVER_TICK_INTERVAL,
+        PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY, PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
     };
     pub use crate::events::{
         FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,

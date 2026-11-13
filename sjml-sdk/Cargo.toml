@@ -37,5 +37,9 @@ crate-type = ["cdylib"]
 name = "client_cursor_moved"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "player_equipment_changed"
+crate-type = ["cdylib"]
+
 [dependencies]
 sjml-macros.workspace = true

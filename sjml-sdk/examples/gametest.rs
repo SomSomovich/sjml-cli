@@ -14,6 +14,8 @@ mod block_fluid_place_attempt;
 mod block_grow_attempt;
 #[path = "gametest/block_inventory_custom_name.rs"]
 mod block_inventory_custom_name;
+#[path = "gametest/block_inventory_lore.rs"]
+mod block_inventory_lore;
 #[path = "gametest/block_inventory_move.rs"]
 mod block_inventory_move;
 #[path = "gametest/block_random_tick.rs"]
@@ -60,6 +62,8 @@ mod player_advancements;
 mod player_attack_attempt;
 #[path = "gametest/player_bossbar.rs"]
 mod player_bossbar;
+#[path = "gametest/player_equipment_changed.rs"]
+mod player_equipment_changed;
 #[path = "gametest/player_fished_attempt.rs"]
 mod player_fished_attempt;
 #[path = "gametest/player_inventory_custom_name.rs"]
@@ -256,6 +260,8 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::register_block_entity_model("gametest_machine", block_model)?;
     registry::register_item("gametest_ruby", ItemDefinition::default())?;
+    registry::register_item("gametest_stack_size", ItemDefinition::default())?;
+    registry::set_item_max_stack_size("gametest_stack_size", 12)?;
     registry::register_item("gametest_crafting_container", ItemDefinition::default())?;
     registry::set_item_crafting_remainder("gametest_crafting_container", "minecraft:bucket")?;
     registry::register_item("gametest_epic_rarity", ItemDefinition::default())?;
@@ -568,6 +574,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("menu.action", EventPriority::Normal)?;
     gameplay_events::initialize()?;
     player_tick::initialize()?;
+    player_equipment_changed::initialize()?;
     player_item_use_attempt::initialize()?;
     block_use::initialize()?;
     block_tick::initialize()?;

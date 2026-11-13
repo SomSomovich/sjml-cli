@@ -16,13 +16,17 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.90.0`, the Rust SDK/macros are `0.88.0`, and the ABI is
-`1.80.0`. ABI compatibility remains major-version based: host 0.90.0 accepts ABI
-`1.0.x` through `1.80.0`; it rejects later contracts it does not know. Packages
-using the current APIs declare ABI `^1.80.0` and host range `^0.90.0`.
+The current host is `0.91.0`, the Rust SDK/macros are `0.89.0`, and the ABI is
+`1.81.0`. ABI compatibility remains major-version based: host 0.91.0 accepts ABI
+`1.0.x` through `1.81.0`; it rejects later contracts it does not know. Packages
+using the current APIs declare ABI `^1.81.0` and host range `^0.91.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.81.0
+
+`player.equipment_changed` requires `events.subscribe` and `player.equipment.observe`; it reports bounded detached previous/current item snapshots for server-player equipment changes. Block-inventory lore access requires the existing `inventory.read` or `inventory.write` grants and never loads an unavailable position. `registry::set_item_max_stack_size` is restricted to registration-time changes for standalone items owned by the calling module; damageable items must retain stack size one. See [player equipment changes](PLAYER_EQUIPMENT_CHANGED.md), [block-inventory lore](BLOCK_INVENTORY_LORE.md), and [item stack size](ITEM_STACK_SIZE.md).
 
 ### New permissions and block-behavior schema in ABI 1.80.0
 
@@ -348,6 +352,7 @@ Host 0.88.0 / ABI 1.78.0 / SDK/macros 0.86.0 adds owner-scoped client-screen clo
 
 Host 0.89.0 / ABI 1.79.0 / SDK/macros 0.87.0 adds criterion-level advancement progress notifications, loaded-world game-event dispatch, and a separate permission for glowing-flag writes. It also completes item-pickup vetoes and plain-text player inventory lore with live GameTest coverage. The private CLI's generated-project template and examples now declare the matching versions. Gradle passed 1,190 host tests, 449 core tests (one skipped), and all 136 required GameTests. The private CLI 0.1.19 workspace passed 26 CLI, 45 macro, 363 SDK unit, 167 SDK integration, and 12 documentation tests; strict Clippy, SDK/example wasm32 checks, and offline tests for all example workspaces passed. Visible client behavior and remote multiplayer remain unverified; no release was made to crates.io or the public CLI repository.
 
-Host 0.90.0 / ABI 1.80.0 / SDK/macros 0.88.0 adds per-state friction overrides for registered blocks, bounded loaded-only fluid-tick scheduling, and sampled physical-client cursor movement. The fluid scheduler requires `world.fluid_tick.schedule` and never loads chunks. NeoForge 21.1.265 has no raw global mouse-move event, so cursor deltas are sampled at most once per client tick and reset when the screen/window/cursor context changes.
 
 Host 0.90.0 / ABI 1.80.0 / SDK/macros 0.88.0 adds per-state friction overrides for registered blocks, bounded loaded-only fluid-tick scheduling, and sampled physical-client cursor movement. The fluid scheduler requires `world.fluid_tick.schedule` and never loads chunks. NeoForge 21.1.265 has no raw global mouse-move event, so cursor deltas are sampled at most once per client tick and reset when the screen/window/cursor context changes. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,197 host tests and 454 core tests (one skipped), with all 137 required GameTests passing. Cargo passed 26 CLI, 45 macro, 365 SDK unit, 167 SDK integration, and 12 doc tests; strict Clippy, SDK wasm32 compilation, and native/Clippy/wasm32 checks for the root, multi-module, world-render, and OpenGL-geometry example workspaces passed. These headless checks do not verify visible cursor behavior or remote multiplayer; no crates.io publication or public CLI sync was made.
+
+Host 0.91.0 / ABI 1.81.0 / SDK/macros 0.89.0 adds bounded server-player equipment-change notifications, safe plain-text lore access for existing stacks in loaded block inventories, and registration-time max stack sizes for module-owned standalone items. Lore changes preserve other stack components, and damageable registered items remain stack size one. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,209 host tests, 456 core tests (one skipped), and all 140 required GameTests. Cargo passed 26 CLI, 46 macro, 371 SDK unit, 168 SDK integration, and 12 doc tests; strict Clippy, SDK wasm32, and all four example workspace test/Clippy/wasm32 checks passed. These headless checks do not verify visible client behavior or remote multiplayer; no crates.io publication or public CLI sync was made.

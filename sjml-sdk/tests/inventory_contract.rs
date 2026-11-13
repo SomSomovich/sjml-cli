@@ -216,6 +216,50 @@ fn native_custom_item_name_api_validates_before_reporting_unsupported_import() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn native_block_inventory_lore_api_checks_the_plain_text_contract() {
+    let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+    let position = BlockPos { x: 0, y: 64, z: 0 };
+
+    assert_eq!(
+        inventory::set_lore(world, position, 0, &[])
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::set_lore(world, position, 0, &["line\nfeed".to_owned()])
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::set_lore(world, position, 0, &["é".repeat(129)])
+            .unwrap_err()
+            .code(),
+        ErrorCode::PayloadTooLarge,
+    );
+    assert_eq!(
+        inventory::read_lore(world, position, 4096)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::clear_lore(world, position, 4096)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument,
+    );
+    assert_eq!(
+        inventory::set_lore(world, position, 0, &["Valid".to_owned()])
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode,
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn native_block_container_move_validates_endpoints_and_count_before_import() {
     let world = WorldHandle::new(1, 2, 3, 4).unwrap();
     let source = BlockPos { x: 0, y: 64, z: 0 };

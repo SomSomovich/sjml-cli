@@ -17,6 +17,15 @@ pub const MAX_STRING_COMPONENT_PATH_BYTES: usize = 256;
 pub const MAX_CUSTOM_ITEM_NAME_BYTES: usize = 1024;
 /// Maximum Unicode scalar values accepted when setting a custom item name.
 pub const MAX_CUSTOM_ITEM_NAME_CHARS: usize = 256;
+/// Maximum plain-text lore lines stored on one block inventory stack.
+pub const MAX_BLOCK_INVENTORY_LORE_LINES: usize = 8;
+/// Maximum UTF-8 byte length of one plain-text block inventory lore line.
+pub const MAX_BLOCK_INVENTORY_LORE_LINE_BYTES: usize = 256;
+/// Maximum Unicode scalar count of one plain-text block inventory lore line.
+pub const MAX_BLOCK_INVENTORY_LORE_LINE_CODE_POINTS: usize = 256;
+/// Maximum stable schema-v1 bytes in one block inventory lore payload.
+pub const MAX_BLOCK_INVENTORY_LORE_BYTES: u32 = 2 * 4
+    + MAX_BLOCK_INVENTORY_LORE_LINES as u32 * (4 + MAX_BLOCK_INVENTORY_LORE_LINE_BYTES as u32);
 /// Maximum UTF-8 bytes returned for one item registry ID.
 pub const MAX_ITEM_ID_BYTES: usize = 256;
 /// Maximum encoded bytes returned for one optional item stack snapshot.
@@ -137,6 +146,37 @@ impl ItemStackSnapshot {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+const BLOCK_INVENTORY_LORE_SCHEMA: u32 = 1;
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode)]
+#[sjml(version = 1)]
+struct BlockInventoryLorePayload {
+    lines: Vec<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for BlockInventoryLorePayload {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != BLOCK_INVENTORY_LORE_SCHEMA {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported block inventory lore schema",
+            ));
+        }
+        let count = decoder.read_length(MAX_BLOCK_INVENTORY_LORE_LINES)?;
+        let mut lines = Vec::with_capacity(count);
+        for _ in 0..count {
+            let line = String::decode(decoder)?;
+            validate_lore_line(&line)?;
+            lines.push(line);
+        }
+        Ok(Self { lines })
+    }
+}
+
 /// Stable value snapshot of every handler slot. Empty slots are `None`.
 #[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -221,6 +261,37 @@ extern "C" {
 
     #[link_name = "clear_custom_name"]
     fn imported_clear_custom_name(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+    ) -> i32;
+
+    #[link_name = "read_lore"]
+    fn imported_read_lore(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "set_lore"]
+    fn imported_set_lore(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        payload: i32,
+        payload_length: i32,
+    ) -> i32;
+
+    #[link_name = "clear_lore"]
+    fn imported_clear_lore(
         world: i32,
         world_length: i32,
         position: i32,
@@ -740,6 +811,165 @@ pub fn clear_custom_name(world: WorldHandle, position: BlockPos, slot: u32) -> S
     }
 }
 
+/// Reads the bounded plain-text lore from an existing block-container stack.
+///
+/// Literal text is returned with styles and event data removed. An empty vector means the
+/// component is absent, or the selected slot is empty. The host reads only loaded block entities
+/// implementing Minecraft's `Container`; it never loads a chunk. Lore supports up to eight lines
+/// of at most 256 UTF-8 bytes and Unicode scalar values each.
+///
+/// Requires `world.read` and `inventory.read`, and runs synchronously on the server thread.
+pub fn read_lore(world: WorldHandle, position: BlockPos, slot: u32) -> SjmlResult<Vec<String>> {
+    validate_slot(slot)?;
+    validate_inventory_position(position)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        let response: BlockInventoryLorePayload =
+            read_output_with_capacity(MAX_BLOCK_INVENTORY_LORE_BYTES, |output, capacity| {
+                // SAFETY: stable input buffers and the output allocation stay live through this call.
+                unsafe {
+                    imported_read_lore(
+                        world.as_ptr() as usize as u32 as i32,
+                        world.len() as i32,
+                        position.as_ptr() as usize as u32 as i32,
+                        position.len() as i32,
+                        slot as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            })?;
+        validate_lore_lines(&response.lines, true)?;
+        Ok(response.lines)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets one to eight plain literal lore lines on an existing block-container stack.
+///
+/// Each line is limited to 256 UTF-8 bytes and Unicode scalar values and cannot contain control
+/// characters. Use [`clear_lore`] to remove lore. The host changes only Minecraft's vanilla lore
+/// component and preserves item identity, count, damage, and every other component. Writes are
+/// unsided and require a loaded block entity implementing `Container`; chunks are never loaded.
+///
+/// Requires `world.read` and `inventory.write`, and runs synchronously on the server thread.
+pub fn set_lore(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    lines: &[String],
+) -> SjmlResult<()> {
+    validate_slot(slot)?;
+    validate_inventory_position(position)?;
+    validate_lore_lines(lines, false)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        let payload = to_bytes(&BlockInventoryLorePayload {
+            lines: lines.to_vec(),
+        })?;
+        if payload.len() > MAX_BLOCK_INVENTORY_LORE_BYTES as usize {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "block inventory lore exceeds its 2,088-byte ABI limit",
+            ));
+        }
+        // SAFETY: stable input buffers remain live for this synchronous host call; the host copies them.
+        let status = unsafe {
+            imported_set_lore(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                payload.as_ptr() as usize as u32 as i32,
+                payload.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the block inventory lore update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, lines);
+        Err(unsupported_target())
+    }
+}
+
+/// Clears only Minecraft's vanilla lore component on an existing block-container stack.
+///
+/// The item's identity, count, damage, and other components are preserved. The host requires a
+/// loaded block entity implementing `Container`; chunks are never loaded. Requires `world.read`
+/// and `inventory.write` and runs synchronously on the server thread.
+pub fn clear_lore(world: WorldHandle, position: BlockPos, slot: u32) -> SjmlResult<()> {
+    validate_slot(slot)?;
+    validate_inventory_position(position)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: stable input buffers remain live for this synchronous host call.
+        let status = unsafe {
+            imported_clear_lore(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+            )
+        };
+        status_result(status, "host rejected the block inventory lore clear")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_lore_lines(lines: &[String], allow_empty: bool) -> SjmlResult<()> {
+    if lines.len() > MAX_BLOCK_INVENTORY_LORE_LINES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "block inventory lore supports at most eight lines",
+        ));
+    }
+    if !allow_empty && lines.is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block inventory lore must contain one to eight lines; use clear_lore to remove it",
+        ));
+    }
+    for line in lines {
+        validate_lore_line(line)?;
+    }
+    Ok(())
+}
+
+fn validate_lore_line(line: &str) -> SjmlResult<()> {
+    if line.len() > MAX_BLOCK_INVENTORY_LORE_LINE_BYTES
+        || line.chars().count() > MAX_BLOCK_INVENTORY_LORE_LINE_CODE_POINTS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "block inventory lore lines are limited to 256 UTF-8 bytes and characters",
+        ));
+    }
+    if line.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block inventory lore lines cannot contain control characters",
+        ));
+    }
+    Ok(())
+}
+
 /// Writes one module-owned integer component on an existing, non-empty container slot.
 ///
 /// The component path must have been registered by this module. The host checks the registered
@@ -1008,11 +1238,14 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_custom_name, move_stack, read_boolean_component, read_integer_component,
-        set_custom_name, transfer, validate_custom_name, validate_slot, validate_transfer_count,
-        write_boolean_component, write_integer_component, BlockPos, Direction, InventoryEndpoint,
-        ItemStackSnapshot, MAX_CUSTOM_ITEM_NAME_BYTES, MAX_CUSTOM_ITEM_NAME_CHARS,
-        MAX_INVENTORY_COORDINATE, MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
+        clear_custom_name, clear_lore, move_stack, read_boolean_component, read_integer_component,
+        read_lore, set_custom_name, set_lore, transfer, validate_custom_name, validate_lore_line,
+        validate_lore_lines, validate_slot, validate_transfer_count, write_boolean_component,
+        write_integer_component, BlockPos, Direction, InventoryEndpoint, ItemStackSnapshot,
+        MAX_BLOCK_INVENTORY_LORE_BYTES, MAX_BLOCK_INVENTORY_LORE_LINES,
+        MAX_BLOCK_INVENTORY_LORE_LINE_BYTES, MAX_CUSTOM_ITEM_NAME_BYTES,
+        MAX_CUSTOM_ITEM_NAME_CHARS, MAX_INVENTORY_COORDINATE, MAX_INVENTORY_SLOTS,
+        MAX_ITEM_TRANSFER_COUNT,
     };
     use crate::{ErrorCode, WorldHandle};
 
@@ -1327,6 +1560,96 @@ mod tests {
         assert_eq!(
             crate::from_bytes::<Option<i32>>(&[1, 0xf4, 0xff, 0xff, 0xff]).unwrap(),
             Some(-12)
+        );
+    }
+
+    #[test]
+    fn block_inventory_lore_payload_matches_schema_v1_wire_format() {
+        let lines = vec!["Café 🪨".to_owned(), "§cplain".to_owned()];
+        let payload = super::BlockInventoryLorePayload {
+            lines: lines.clone(),
+        };
+        let encoded = crate::to_bytes(&payload).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&(lines.len() as u32).to_le_bytes());
+        for line in &lines {
+            expected.extend_from_slice(&(line.len() as u32).to_le_bytes());
+            expected.extend_from_slice(line.as_bytes());
+        }
+        assert_eq!(encoded, expected);
+        assert_eq!(
+            crate::from_bytes::<super::BlockInventoryLorePayload>(&encoded).unwrap(),
+            payload
+        );
+        assert_eq!(MAX_BLOCK_INVENTORY_LORE_BYTES, 2088);
+    }
+
+    #[test]
+    fn block_inventory_lore_validates_the_player_contract_limits() {
+        assert_eq!(validate_lore_lines(&["Café 🪨".to_owned()], false), Ok(()));
+        assert_eq!(validate_lore_lines(&[], true), Ok(()));
+        assert_eq!(
+            validate_lore_lines(&[], false).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_lore_lines(
+                &vec!["line".to_owned(); MAX_BLOCK_INVENTORY_LORE_LINES + 1],
+                false,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_lore_line(&"é".repeat(MAX_BLOCK_INVENTORY_LORE_LINE_BYTES / 2 + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_lore_line("line\nfeed").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn block_inventory_lore_api_validates_before_unsupported_native_import() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        assert_eq!(
+            set_lore(world, position, 0, &[]).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_lore(
+                world,
+                position,
+                MAX_INVENTORY_SLOTS as u32,
+                &["line".to_owned()]
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            read_lore(world, position, MAX_INVENTORY_SLOTS as u32)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            clear_lore(world, position, MAX_INVENTORY_SLOTS as u32)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_lore(world, position, 0, &["line".to_owned()])
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
         );
     }
 }
