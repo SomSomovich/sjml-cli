@@ -58,6 +58,10 @@ pub const MAX_ENTITY_RIDING_SNAPSHOT_RESPONSE_BYTES: usize = 4
     + MAX_ENTITY_PASSENGERS * MAX_ENTITY_RIDING_RELATIONSHIP_BYTES;
 /// Capability required with `entity.read` to start or stop a non-player entity riding.
 pub const MOUNT_WRITE_CAPABILITY: &str = "entity.mount.write";
+/// Capability required with `entity.read` to set or clear a loaded Mob's target.
+pub const TARGET_WRITE_CAPABILITY: &str = "entity.target.write";
+/// Maximum response bytes for the versioned optional loaded-Mob target handle.
+pub const MAX_ENTITY_TARGET_RESPONSE_BYTES: usize = 4 + 1 + 24;
 
 /// Current identity, type, dimension, and coordinates of one loaded non-player entity.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -273,6 +277,12 @@ extern "C" {
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "riding_snapshot"]
     fn imported_riding_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "target"]
+    fn imported_target(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_target"]
+    fn imported_set_target(mob: i32, mob_length: i32, target: i32, target_length: i32) -> i32;
+    #[link_name = "clear_target"]
+    fn imported_clear_target(handle: i32, length: i32) -> i32;
     #[link_name = "start_riding"]
     fn imported_start_riding(
         passenger: i32,
@@ -379,6 +389,13 @@ struct EntityRaycastQuery {
 #[sjml(version = 1)]
 struct EntityRaycastResult {
     handle: Option<EntityHandle>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct EntityTargetResult {
+    target: Option<EntityHandle>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -679,6 +696,92 @@ pub fn riding_snapshot(handle: EntityHandle) -> SjmlResult<EntityRidingSnapshot>
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads a loaded Mob's current loaded non-player target handle, if it has one.
+///
+/// Requires `entity.read` and runs synchronously on the owning logical-server thread.
+/// Player targets and Mobs without a target are reported as `None`; target handles
+/// are created only for loaded non-player living entities in the same dimension.
+pub fn target(mob: EntityHandle) -> SjmlResult<Option<EntityHandle>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&mob)?;
+        let response = read_output::<EntityTargetResult>(
+            MAX_ENTITY_TARGET_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: handle bytes and the bounded output allocation live through this import.
+                unsafe {
+                    imported_target(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        Ok(response.target)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = mob;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets one loaded non-player living entity as the current target of a loaded Mob.
+///
+/// Requires `entity.read` and [`TARGET_WRITE_CAPABILITY`]. Both handles must belong
+/// to this module and identify live entities on the same logical server and in the
+/// same dimension; the target cannot be a player or the Mob itself. The host calls
+/// Minecraft synchronously on the owning server thread and does not load chunks.
+pub fn set_target(mob: EntityHandle, target: EntityHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mob = to_bytes(&mob)?;
+        let target = to_bytes(&target)?;
+        // SAFETY: both fixed-width handles remain live during the synchronous import.
+        let status = unsafe {
+            imported_set_target(
+                mob.as_ptr() as usize as u32 as i32,
+                mob.len() as i32,
+                target.as_ptr() as usize as u32 as i32,
+                target.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the entity target update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (mob, target);
+        Err(unsupported_target())
+    }
+}
+
+/// Clears a loaded Mob's current target.
+///
+/// Requires `entity.read` and [`TARGET_WRITE_CAPABILITY`]. The Mob handle must be
+/// live and owned by this module; the operation runs on the owning server thread
+/// and never loads chunks.
+pub fn clear_target(mob: EntityHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&mob)?;
+        // SAFETY: the fixed-width handle remains live during the synchronous import.
+        let status = unsafe {
+            imported_clear_target(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the entity target clear request")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = mob;
         Err(unsupported_target())
     }
 }
@@ -1541,16 +1644,20 @@ mod tests {
     use super::{
         active_effects, apply_effect, clear_custom_name, custom_name, damage, fire_ticks,
         navigate_to, raycast, remove_effect, set_custom_name, set_fire_ticks, set_velocity,
+        clear_target, set_target, target,
         validate_active_effects, validate_custom_name, validate_entity_raycast,
         validate_navigation_target, validate_spatial_query, within, ActiveEffect,
         ActiveEffectsResponse, EntityCustomNameResponse, EntityNavigationRequest,
-        EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityVelocity,
+        EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityTargetResult,
+        EntityVelocity,
         SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
         MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
         MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
         MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
-        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_VELOCITY_COMPONENT,
+        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE,
+        MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_VELOCITY_COMPONENT,
         MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
+        TARGET_WRITE_CAPABILITY,
     };
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
@@ -1771,6 +1878,55 @@ mod tests {
         assert_eq!(
             crate::from_bytes::<EntityRaycastResult>(&encoded_miss).unwrap(),
             miss
+        );
+    }
+
+    #[test]
+    fn entity_target_response_matches_the_host_optional_handle_schema() {
+        assert_eq!(MAX_ENTITY_TARGET_RESPONSE_BYTES, 4 + 1 + 24);
+        let target = EntityTargetResult {
+            target: Some(EntityHandle::new(1, 2, 3, 4).unwrap()),
+        };
+        let encoded_target = to_bytes(&target).unwrap();
+        assert_eq!(encoded_target.len(), MAX_ENTITY_TARGET_RESPONSE_BYTES);
+        assert_eq!(
+            u32::from_le_bytes(encoded_target[0..4].try_into().unwrap()),
+            1
+        );
+        assert_eq!(encoded_target[4], 1);
+        assert_eq!(
+            &encoded_target[5..],
+            &to_bytes(&target.target.unwrap()).unwrap()[..]
+        );
+        assert_eq!(
+            crate::from_bytes::<EntityTargetResult>(&encoded_target).unwrap(),
+            target
+        );
+
+        let absent = EntityTargetResult { target: None };
+        let encoded_absent = to_bytes(&absent).unwrap();
+        assert_eq!(
+            encoded_absent,
+            [1_u32.to_le_bytes().as_slice(), &[0]].concat()
+        );
+        assert_eq!(
+            crate::from_bytes::<EntityTargetResult>(&encoded_absent).unwrap(),
+            absent
+        );
+    }
+
+    #[test]
+    fn target_accessors_fail_closed_without_a_wasm_host() {
+        let mob = EntityHandle::new(1, 2, 3, 4).unwrap();
+        let target_handle = EntityHandle::new(1, 2, 4, 4).unwrap();
+        assert_eq!(target(mob).unwrap_err().code(), ErrorCode::UnknownErrorCode);
+        assert_eq!(
+            set_target(mob, target_handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            clear_target(mob).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
         );
     }
 

@@ -32,6 +32,8 @@ mod entity_join_attempt;
 mod entity_navigation;
 #[path = "gametest/entity_riding.rs"]
 mod entity_riding;
+#[path = "gametest/entity_target.rs"]
+mod entity_target;
 #[path = "gametest/entity_tick.rs"]
 mod entity_tick;
 #[path = "gametest/gameplay_events.rs"]
