@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.86.0`, the Rust SDK/macros are `0.84.0`, and the ABI is
-`1.76.0`. ABI compatibility remains major-version based: host 0.86.0 accepts ABI
-`1.0.x` through `1.76.0`; it rejects later contracts it does not know. Packages
-using newer APIs declare ABI `^1.76.0` and host range `^0.86.0`.
+The current host is `0.87.0`, the Rust SDK/macros are `0.85.0`, and the ABI is
+`1.77.0`. ABI compatibility remains major-version based: host 0.87.0 accepts ABI
+`1.0.x` through `1.77.0`; it rejects later contracts it does not know. Packages
+using newer APIs declare ABI `^1.77.0` and host range `^0.87.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -322,3 +322,5 @@ Host 0.85.0 / ABI 1.75.0 / SDK/macros 0.83.0 adds module-owned vanilla boss bars
 
 
 Host 0.86.0 / ABI 1.76.0 / SDK/macros 0.84.0 adds module-owned player tab-list contributions and dummy scoreboard objectives, completed-trade notifications, ordinary item spawning into loaded chunks, exact-state block behavior predicates and sound. It also splits the compatibility test guest to keep each export below the instruction-fuel limit. The integrated Gradle `--configuration-cache test build runGameTestServer` run passed 1,152 host tests, 434 core tests (one skipped), and all 125 required GameTests. The Cargo workspace passed 26 CLI, 43 macro, and 347 SDK tests plus doc tests and strict Clippy. The SDK and root, multi-module, world-render, and OpenGL-geometry example workspaces passed `wasm32-unknown-unknown` checks; those example workspaces also passed offline tests. The private CLI crate is 0.1.16 locally; this did not publish to crates.io or synchronize the public CLI repository.
+
+Host 0.87.0 / ABI 1.77.0 / SDK/macros 0.85.0 adds bounded block update options, host-evaluated translation/scale model keyframes, registered-item grants to live player inventories with returned overflow, and exact-value player statistic setters. These APIs use explicit permissions, bounds, and typed host bindings. Gradle `--configuration-cache --offline test build runGameTestServer` passed 1,164 host tests, 434 core tests (one skipped), and all 129 required GameTests. The private CLI 0.1.17 workspace passed 26 CLI, 43 macro, 355 SDK unit, 157 SDK integration, and 12 documentation tests, strict Clippy, SDK/example WebAssembly checks, and offline tests for all four example workspaces. The private CLI crate is 0.1.17 locally; no crates.io publication or public CLI sync was made.
