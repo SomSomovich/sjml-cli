@@ -23,6 +23,8 @@ pub const MAX_PLAYER_INVENTORY_SLOTS: usize = 128;
 pub const MAX_PLAYER_INVENTORY_SLOT_INDEX: u32 = 40;
 /// Maximum item count accepted by the host before applying the registered item's and slot's limits.
 pub const MAX_PLAYER_INVENTORY_SLOT_COUNT: u32 = 4096;
+/// Maximum item count accepted by one player inventory grant request.
+pub const MAX_PLAYER_INVENTORY_GIVE_COUNT: u32 = 4096;
 /// Maximum UTF-8 item registry ID length accepted by the player inventory writer.
 pub const MAX_PLAYER_INVENTORY_ITEM_ID_BYTES: usize = 256;
 /// Maximum durability value accepted for a live player inventory item.
@@ -61,6 +63,17 @@ extern "C" {
         item_id: i32,
         item_id_length: i32,
         count: i32,
+    ) -> i32;
+
+    #[link_name = "give_player_item"]
+    fn imported_give_player_item(
+        player: i32,
+        player_length: i32,
+        item_id: i32,
+        item_id_length: i32,
+        count: i32,
+        inserted_output: i32,
+        inserted_capacity: i32,
     ) -> i32;
 
     #[link_name = "set_player_damage"]
@@ -409,6 +422,65 @@ pub fn set_slot(
         let _ = (player, item_id, count);
         Err(unsupported_target())
     }
+}
+
+/// Gives a bounded count of a registered item's ordinary default stack to a live player's inventory.
+///
+/// The host fills compatible stacks first, then empty hotbar/main-storage slots (`0..=35`); armor and
+/// offhand slots are never used. The item ID must be canonical and registered, and `count` is
+/// limited to `1..=4096`. The host creates only the item's default components; the guest cannot
+/// supply stack components or NBT. The return value is the number inserted, which can be less than
+/// requested when inventory space is limited. The remainder stays with the caller; it is never
+/// dropped or silently discarded. Existing stacks merge only when their item and components match.
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`. This runs only
+/// in a logical-server context on the owning server thread and fails for stale or foreign handles.
+pub fn give_item(player: PlayerHandle, item_id: &str, count: u32) -> SjmlResult<u32> {
+    validate_give_item(item_id, count)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        let mut inserted = 0i32;
+        // SAFETY: the handle, item ID, and writable four-byte result remain live through the import.
+        let status = unsafe {
+            imported_give_player_item(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                item_id.as_ptr() as usize as u32 as i32,
+                item_id.len() as i32,
+                count as i32,
+                (&mut inserted as *mut i32) as usize as u32 as i32,
+                core::mem::size_of::<i32>() as i32,
+            )
+        };
+        status_result(status, "host rejected the player inventory item grant")?;
+        if inserted < 0 || inserted as u32 > count {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid inserted item count",
+            ));
+        }
+        Ok(inserted as u32)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, item_id, count);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_give_item(item_id: &str, count: u32) -> SjmlResult<()> {
+    if !valid_item_id(item_id)
+        || item_id == "minecraft:air"
+        || count == 0
+        || count > MAX_PLAYER_INVENTORY_GIVE_COUNT
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player item grants require a canonical non-air item ID and count in 1..=4096",
+        ));
+    }
+    Ok(())
 }
 
 /// Sets the current durability on a nonempty damageable stack in a live player's inventory.
@@ -834,14 +906,15 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_item_custom_name, read_enchantment_level, remove_enchantment, set_damage,
+        clear_item_custom_name, give_item, read_enchantment_level, remove_enchantment, set_damage,
         set_enchantment_level, set_item_custom_name, set_slot, validate_custom_name,
-        validate_damage, validate_enchantment_access, validate_inventory,
+        validate_damage, validate_enchantment_access, validate_give_item, validate_inventory,
         PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES,
         MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS,
         MAX_PLAYER_INVENTORY_DAMAGE, MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES,
-        MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL, MAX_PLAYER_INVENTORY_SLOTS,
-        MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+        MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL, MAX_PLAYER_INVENTORY_GIVE_COUNT,
+        MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
+        MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use super::{
@@ -912,6 +985,39 @@ mod tests {
                 ErrorCode::InvalidArgument
             );
         }
+    }
+
+    #[test]
+    fn player_item_grant_rejects_invalid_registry_ids_and_unbounded_counts() {
+        for (item_id, count) in [
+            ("Minecraft:stone", 1),
+            ("minecraft:air", 1),
+            ("minecraft:stone", 0),
+            ("minecraft:stone", MAX_PLAYER_INVENTORY_GIVE_COUNT + 1),
+            ("", 1),
+        ] {
+            assert_eq!(
+                validate_give_item(item_id, count).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert!(validate_give_item("minecraft:diamond", MAX_PLAYER_INVENTORY_GIVE_COUNT).is_ok());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_item_grant_fails_closed_after_local_validation() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            give_item(player, "minecraft:diamond", 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            give_item(player, "minecraft:air", 1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]

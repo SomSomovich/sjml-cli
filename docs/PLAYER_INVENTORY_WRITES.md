@@ -47,3 +47,6 @@ session for each call. Foreign or stale handles, client contexts, static registr
 off-thread are denied. The ABI imports are
 `sjml_inventory_v1.set_player_slot(player_ptr, player_len, slot, item_id_ptr, item_id_len, count) -> i32`
 and `sjml_inventory_v1.set_player_damage(player_ptr, player_len, slot, damage) -> i32`.
+For adding an ordinary default item stack without replacing a slot, see
+[giving items to a player](PLAYER_INVENTORY_GIVE.md); it reports how many
+items fit and never drops the remainder.

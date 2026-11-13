@@ -2501,7 +2501,7 @@ it contains no components, NBT, or mutable stack references. It never mutates
 or synchronizes inventory. Static-registration and client calls fail closed.
 See [player inventory reads](PLAYER_INVENTORY.md).
 
-## Player inventory slot and durability writes
+## Player inventory writes and ordinary item grants
 
 These server-only imports require `entity.read` and `inventory.write`. They
 accept a module-owned live player handle and a slot from `0` through `40`.
@@ -2517,6 +2517,11 @@ rejects a value at or above the item's maximum damage so this operation cannot
 break the item. Both imports run on the owning server thread and broadcast the
 change through the player's active menu. Stale handles, empty or
 nondamageable stacks, client/static contexts, and invalid values are rejected.
+`give_player_item(player_ptr, player_len, item_id_ptr, item_id_len, count,
+inserted_ptr, inserted_capacity) -> i32` inserts an ordinary default item stack
+into hotbar/main-storage slots `0..=35` and writes the inserted item count to
+an exactly four-byte output span. It merges compatible stacks first and never
+drops uninserted items. See [player inventory grants](PLAYER_INVENTORY_GIVE.md).
 
 ## Module-owned components on player inventory stacks
 

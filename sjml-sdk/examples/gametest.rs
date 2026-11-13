@@ -64,6 +64,8 @@ mod player_fished_attempt;
 mod player_inventory_custom_name;
 #[path = "gametest/player_inventory_enchantment.rs"]
 mod player_inventory_enchantment;
+#[path = "gametest/player_inventory_give.rs"]
+mod player_inventory_give;
 #[path = "gametest/player_item_use_attempt.rs"]
 mod player_item_use_attempt;
 #[path = "gametest/player_respawn_point.rs"]

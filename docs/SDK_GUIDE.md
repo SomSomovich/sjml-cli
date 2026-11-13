@@ -137,6 +137,7 @@ and loaded block-state property snapshots. These use `client.input`,
 `entity.read` with `inventory.read`, `entity.read` with
 `entity.attributes.write`, and `world.read`, respectively. See
 [mouse-wheel input](CLIENT_INPUT_SCROLL.md), [player inventory](PLAYER_INVENTORY.md),
+[giving items to a player](PLAYER_INVENTORY_GIVE.md),
 [live entity attributes](ENTITY_ATTRIBUTES.md), and
 [block-state properties](WORLD_BLOCK_PROPERTIES.md).
 

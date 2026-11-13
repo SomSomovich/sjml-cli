@@ -12,7 +12,7 @@ mod player_inventory;
 pub use player_inventory::read as player_inventory_read;
 pub use player_inventory::{
     clear_item_custom_name as player_inventory_clear_item_custom_name,
-    set_damage as player_inventory_set_damage,
+    give_item as player_inventory_give_item, set_damage as player_inventory_set_damage,
     set_item_custom_name as player_inventory_set_item_custom_name,
     set_slot as player_inventory_set_slot, PlayerInventorySlotUpdate,
 };
@@ -36,6 +36,30 @@ fn player_inventory_snapshot_round_trips_the_shared_inventory_schema() {
     assert_eq!(
         sjml::from_bytes::<Option<InventorySnapshot>>(&bytes).unwrap(),
         Some(snapshot)
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn public_player_item_grant_validates_then_fails_closed_without_a_wasm_host() {
+    let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+    assert_eq!(
+        player_inventory_give_item(player, "minecraft:diamond", 8)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        player_inventory_give_item(player, "minecraft:air", 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        player_inventory_give_item(player, "minecraft:stone", 4097)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
     );
 }
 

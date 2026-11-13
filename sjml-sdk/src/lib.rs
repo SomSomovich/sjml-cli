@@ -263,7 +263,8 @@ pub use player_advancement::{
     MAX_PLAYER_ADVANCEMENT_CRITERION_ID_BYTES, MAX_PLAYER_ADVANCEMENT_PROGRESS_BYTES,
 };
 pub use player_inventory::{
-    PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
+    give_item as give_player_item, PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_GIVE_COUNT,
+    MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
     MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
 };
 pub use player_statistics::{
@@ -502,7 +503,8 @@ pub mod prelude {
     };
     pub use crate::player_inventory;
     pub use crate::player_inventory::{
-        PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES,
+        give_item as give_player_item, PlayerInventorySlotUpdate,
+        MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_GIVE_COUNT,
         MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
         MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
