@@ -260,6 +260,14 @@ velocity between 0.1 and 4 blocks per tick. Every intersected chunk must already
 be loaded. A module may launch at most four projectiles per server tick across
 all dimensions. Vanilla egg hatching and snowball Blaze damage remain enabled.
 
+`world::spawn_item` requires both `world.read` and `world.write`. IDs resolve
+only through the current item registry, stack count must fit the item's
+registered stack limit, and only the default item stack is created; guests
+cannot attach NBT or arbitrary data components. Position bounds, loaded chunks,
+world border, and build height are checked before insertion. A per-module
+16-spawn server-tick quota and finite 4-block/tick velocity limit bound the
+operation. No chunk-loading accessor is used.
+
 
 Typed block-entity persistence is restricted to a module's own registered block
 entities and requires `block_entity.data.read`; writes/removals also require

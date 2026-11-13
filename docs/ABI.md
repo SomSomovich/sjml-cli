@@ -1800,6 +1800,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `schedule_block_tick` | `handle_ptr, handle_len, x, y, z, block_id_ptr, block_id_len, delay_ticks` | Schedule one normal tick for the matching registered block at an already-loaded position; status only |
 | `notify_neighbors_at` | `handle_ptr, handle_len, x, y, z` | Run the ordinary vanilla neighbor update at a loaded position; status only |
 | `spawn_entity` | `query_ptr, query_len` | Spawn one registered, non-player entity from a bounded schema-v1 world/type/position record; status only |
+| `spawn_item` | `query_ptr, query_len` | Spawn one bounded ordinary stack from the current item registry, with loaded-only position checks and bounded velocity; status only |
 | `spawn_particle` | `handle_ptr, handle_len, x, y, z, particle_id_ptr, particle_id_len` | Spawn one registered simple particle at the center of a loaded block; status only |
 | `play_sound` | `handle_ptr, handle_len, x, y, z, sound_id_ptr, sound_id_len, volume_bits, pitch_bits` | Play one registered sound at the center of a loaded block; status only |
 | `weather` | `(handle_ptr: i32, handle_len: i32, output_ptr: i32, output_capacity: i32) -> i32` | Write an 18-byte schema-v1 weather snapshot |
@@ -1996,6 +1997,18 @@ must fit build height, the world border, and already loaded chunks; no chunk is
 loaded. The module can spawn at most eight entities per server tick. Invalid
 types or positions return `INVALID_ARGUMENT`, rate limits return `SERVICE_BUSY`,
 and static-registration calls are denied.
+
+`spawn_item` requires `world.read` and `world.write`. Its schema-v1 request is
+little-endian: `u32(1)`, the 24-byte module-owned world handle, a `u32` UTF-8
+item-ID byte length and canonical lowercase `namespace:path` bytes, a `u32`
+count, three `f64` position coordinates, and three `f64` velocity components.
+The total request is at most 340 bytes. IDs must name a non-air item in the
+current server item registry; count is limited to 1–64 and to that item's
+registered stack size. Positions must fit the build height, world border, and
+already-loaded chunks. Velocity may be zero and has a magnitude limit of 4.0
+blocks per tick. A module may spawn 16 stacks per logical-server tick. Static
+registration, client contexts, invalid values, and unloaded positions are
+rejected; this call never loads a chunk or accepts NBT/data components.
 
 `spawn_particle` has the same handle, thread, build-height, loaded-chunk, and
 `world.write` checks. It accepts only a registered `SimpleParticleType`, emits

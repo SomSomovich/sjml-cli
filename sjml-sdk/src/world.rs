@@ -44,6 +44,12 @@ pub const MIN_WORLD_PROJECTILE_SPEED: f64 = 0.1;
 pub const MAX_WORLD_PROJECTILE_SPEED: f64 = 4.0;
 /// Maximum vanilla projectiles one module can spawn per logical-server tick.
 pub const MAX_WORLD_PROJECTILES_PER_TICK: usize = 4;
+/// Maximum ordinary item stacks one module can spawn per logical-server tick.
+pub const MAX_WORLD_ITEM_SPAWNS_PER_TICK: usize = 16;
+/// Maximum stack count accepted by [`spawn_item`] before the host checks the item's own limit.
+pub const MAX_WORLD_ITEM_STACK_COUNT: u32 = 64;
+/// Maximum magnitude accepted for [`ItemSpawnVelocity`], in blocks per tick.
+pub const MAX_WORLD_ITEM_SPAWN_SPEED: f64 = 4.0;
 /// Maximum number of block positions visited by one collision query.
 pub const MAX_WORLD_COLLISION_BLOCKS: usize = 4096;
 /// Maximum bytes in one canonical entity registry ID accepted by [`spawn_entity`].
@@ -429,6 +435,24 @@ pub struct ProjectileVelocity {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+}
+
+/// Bounded initial velocity for one ordinary world-spawned item stack.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemSpawnVelocity {
+    /// Initial X velocity in blocks per tick.
+    pub x: f64,
+    /// Initial Y velocity in blocks per tick.
+    pub y: f64,
+    /// Initial Z velocity in blocks per tick.
+    pub z: f64,
+}
+
+impl ItemSpawnVelocity {
+    /// Creates a velocity value; [`spawn_item`] validates finite components and the 4.0 magnitude bound.
+    pub const fn new(x: f64, y: f64, z: f64) -> Self {
+        Self { x, y, z }
+    }
 }
 
 impl ProjectileVelocity {
@@ -969,6 +993,21 @@ struct WorldProjectileSpawnRequest {
     velocity_z: f64,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct WorldItemSpawnRequest {
+    world: WorldHandle,
+    item_id: String,
+    count: u32,
+    x: f64,
+    y: f64,
+    z: f64,
+    velocity_x: f64,
+    velocity_y: f64,
+    velocity_z: f64,
+}
+
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_world_v1")]
 extern "C" {
@@ -1100,6 +1139,8 @@ extern "C" {
     fn imported_spawn_entity(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_projectile"]
     fn imported_spawn_projectile(query: i32, query_length: i32) -> i32;
+    #[link_name = "spawn_item"]
+    fn imported_spawn_item(query: i32, query_length: i32) -> i32;
     #[link_name = "set_block"]
     fn imported_set_block(
         handle: i32,
@@ -2917,6 +2958,74 @@ pub fn spawn_projectile(
     }
 }
 
+/// Spawns one ordinary item stack in an already-loaded logical-server world.
+///
+/// The module must request and receive `world.read` and `world.write`. The item ID may name any
+/// item registered on the current server, including another mod's item. The host constructs only
+/// the item's default stack: this API cannot set NBT or arbitrary data components. Count must be
+/// 1..=64 and may not exceed the registered item's stack limit. Position must be finite, inside
+/// build height and the world border, and fully inside already-loaded chunks. Velocity may be zero
+/// and its magnitude is limited to 4.0 blocks per tick. Each module may spawn at most 16 stacks per
+/// server tick; the call never loads a chunk.
+pub fn spawn_item(
+    world: WorldHandle,
+    item_id: &str,
+    count: u32,
+    position: RaycastPoint,
+    velocity: ItemSpawnVelocity,
+) -> SjmlResult<()> {
+    validate_resource_id(item_id, "item")?;
+    if count == 0 || count > MAX_WORLD_ITEM_STACK_COUNT {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "item stack count must be in 1..=64",
+        ));
+    }
+    if !valid_raycast_point(position) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "item coordinates must be finite and within ±30,000,000",
+        ));
+    }
+    if !valid_item_spawn_velocity(velocity) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "item velocity must be finite and have magnitude at most 4.0 blocks per tick",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldItemSpawnRequest {
+            world,
+            item_id: item_id.to_owned(),
+            count,
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            velocity_x: velocity.x,
+            velocity_y: velocity.y,
+            velocity_z: velocity.z,
+        })?;
+        // SAFETY: the encoded request remains allocated and readable for this synchronous import.
+        let status = unsafe {
+            imported_spawn_item(query.as_ptr() as usize as u32 as i32, query.len() as i32)
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the ordinary item spawn",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
 fn validate_raycast(start: RaycastPoint, end: RaycastPoint) -> SjmlResult<()> {
     if !valid_raycast_point(start) || !valid_raycast_point(end) {
         return Err(SjmlError::new(
@@ -2942,6 +3051,16 @@ fn valid_projectile_velocity(velocity: ProjectileVelocity) -> bool {
     }
     let speed = velocity.x.hypot(velocity.y).hypot(velocity.z);
     (MIN_WORLD_PROJECTILE_SPEED..=MAX_WORLD_PROJECTILE_SPEED).contains(&speed)
+}
+
+fn valid_item_spawn_velocity(velocity: ItemSpawnVelocity) -> bool {
+    velocity.x.is_finite()
+        && velocity.y.is_finite()
+        && velocity.z.is_finite()
+        && velocity.x.abs() <= MAX_WORLD_ITEM_SPAWN_SPEED
+        && velocity.y.abs() <= MAX_WORLD_ITEM_SPAWN_SPEED
+        && velocity.z.abs() <= MAX_WORLD_ITEM_SPAWN_SPEED
+        && velocity.x.hypot(velocity.y).hypot(velocity.z) <= MAX_WORLD_ITEM_SPAWN_SPEED
 }
 
 fn validate_aabb(bounds: Aabb) -> SjmlResult<()> {
@@ -3475,26 +3594,28 @@ mod tests {
         entity_type_tag_members, fluid_at, fluid_tag_members, integer_game_rule, item_has_tag,
         item_tag_members, loaded_chunks, notify_neighbors_at, play_sound, raycast,
         schedule_block_tick, set_block, set_block_properties, set_daylight_cycle_enabled,
-        set_game_time, set_integer_game_rule, set_time, spawn_entity, spawn_particle,
+        set_game_time, set_integer_game_rule, set_time, spawn_entity, spawn_item, spawn_particle,
         spawn_projectile, structures_at, tag_members, validate_biome_ids,
         validate_block_property_updates, validate_loaded_chunk_query,
         validate_loaded_chunk_results, validate_structure_ids, validate_tag_member_ids,
         validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse, BlockPropertiesMutation,
         BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateBatch,
         BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse, ChunkPos,
-        DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemTagQuery, ItemTagResponse,
-        LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity, RaycastBlockMode,
-        RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery, StructuresAtResponse,
-        TagMembersQuery, TagMembersResponse, TagRegistry, VanillaProjectileKind, WeatherCondition,
-        WeatherSnapshot, WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule,
-        WorldGameRuleMutation, WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
-        WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot,
+        DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity,
+        ItemTagQuery, ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
+        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery,
+        StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
+        VanillaProjectileKind, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
+        WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery,
+        WorldGameRuleSnapshot, WorldIntegerGameRule, WorldIntegerGameRuleMutation,
+        WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot, WorldItemSpawnRequest,
         WorldProjectileSpawnRequest, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
         MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
         MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
         MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_TAG_ID_BYTES,
         MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
         MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
+        MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED, MAX_WORLD_ITEM_STACK_COUNT,
         MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
         MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_PROJECTILE_SPEED, MAX_WORLD_STRUCTURES_AT,
         MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES, MAX_WORLD_STRUCTURE_ID_BYTES,
@@ -4834,6 +4955,86 @@ mod tests {
         expected.extend_from_slice(&0.5_f64.to_le_bytes());
         expected.extend_from_slice(&(-0.25_f64).to_le_bytes());
         assert_eq!(crate::to_bytes(&request).unwrap(), expected);
+    }
+
+    #[test]
+    fn item_spawn_request_matches_the_java_little_endian_contract() {
+        let request = WorldItemSpawnRequest {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            item_id: "minecraft:diamond".to_owned(),
+            count: 3,
+            x: 1.5,
+            y: 64.0,
+            z: -2.25,
+            velocity_x: 0.25,
+            velocity_y: 1.0,
+            velocity_z: -0.5,
+        };
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&17_u32.to_le_bytes());
+        expected.extend_from_slice(b"minecraft:diamond");
+        expected.extend_from_slice(&3_u32.to_le_bytes());
+        expected.extend_from_slice(&1.5_f64.to_le_bytes());
+        expected.extend_from_slice(&64.0_f64.to_le_bytes());
+        expected.extend_from_slice(&(-2.25_f64).to_le_bytes());
+        expected.extend_from_slice(&0.25_f64.to_le_bytes());
+        expected.extend_from_slice(&1.0_f64.to_le_bytes());
+        expected.extend_from_slice(&(-0.5_f64).to_le_bytes());
+        assert_eq!(crate::to_bytes(&request).unwrap(), expected);
+    }
+
+    #[test]
+    fn item_spawn_rejects_invalid_ids_counts_positions_and_velocity_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = RaycastPoint::new(0.5, 64.0, 0.5);
+        let velocity = ItemSpawnVelocity::new(0.0, 0.0, 0.0);
+        for id in ["", "diamond", "Minecraft:diamond", "minecraft:bad path"] {
+            assert_eq!(
+                spawn_item(world, id, 1, position, velocity)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for count in [0, MAX_WORLD_ITEM_STACK_COUNT + 1] {
+            assert_eq!(
+                spawn_item(world, "minecraft:diamond", count, position, velocity)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for velocity in [
+            ItemSpawnVelocity::new(4.01, 0.0, 0.0),
+            ItemSpawnVelocity::new(3.0, 3.0, 0.0),
+            ItemSpawnVelocity::new(f64::INFINITY, 0.0, 0.0),
+            ItemSpawnVelocity::new(f64::NAN, 0.0, 0.0),
+        ] {
+            assert_eq!(
+                spawn_item(world, "minecraft:diamond", 1, position, velocity)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            spawn_item(
+                world,
+                "minecraft:diamond",
+                1,
+                RaycastPoint::new(f64::NAN, 64.0, 0.5),
+                ItemSpawnVelocity::new(0.0, 0.0, 0.0),
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(MAX_WORLD_ITEM_SPAWNS_PER_TICK, 16);
+        assert_eq!(MAX_WORLD_ITEM_SPAWN_SPEED, 4.0);
     }
 
     #[test]

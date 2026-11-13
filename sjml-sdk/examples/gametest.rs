@@ -86,6 +86,8 @@ mod world_block_tag;
 mod world_difficulty;
 #[path = "gametest/world_fluid_state.rs"]
 mod world_fluid_state;
+#[path = "gametest/world_item_spawn.rs"]
+mod world_item_spawn;
 #[path = "gametest/world_item_tag.rs"]
 mod world_item_tag;
 #[path = "gametest/world_light_at.rs"]

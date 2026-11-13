@@ -248,6 +248,8 @@ SDK 0.80.0 adds bounded static vanilla and modded attribute modifiers for regist
 The block-entity API also supports a bounded typed persistent key/value store for block entities registered by the calling module. It requires separate data read/write grants; see `docs/BLOCK_ENTITY_PERSISTENT_DATA.md` in the workspace.
 The world API also supports capability-gated launches of vanilla snowballs and eggs with bounded velocity; see `docs/VANILLA_PROJECTILES.md` in the workspace. Vanilla collision behavior is preserved.
 
+`world::spawn_item` creates one ordinary default item stack from the server's current item registry. It requires `world.read` and `world.write`, accepts a loaded position and a finite velocity bounded to 4 blocks per tick, and has a 16-stack-per-module/tick quota. It does not accept custom NBT or arbitrary data components; see `docs/WORLD_ITEM_SPAWN.md`.
+
 Server-side modules can create one module-owned vanilla boss bar per live player with
 `player_bossbar::create`, update it through its `PlayerBossBarId`, and remove it explicitly.
 The API requires `entity.read` and `player.bossbar.write`, and cleans bars on logout, module
