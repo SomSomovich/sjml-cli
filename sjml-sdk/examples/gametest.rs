@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[path = "gametest/block_fertilize_attempt.rs"]
 mod block_fertilize_attempt;
+#[path = "gametest/block_fluid_place_attempt.rs"]
+mod block_fluid_place_attempt;
 #[path = "gametest/block_grow_attempt.rs"]
 mod block_grow_attempt;
 #[path = "gametest/block_inventory_custom_name.rs"]
@@ -457,6 +459,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     entity_breed_attempt::initialize()?;
     block_grow_attempt::initialize()?;
     block_fertilize_attempt::initialize()?;
+    block_fluid_place_attempt::initialize()?;
     entity_tick::initialize()?;
     Ok(())
 }

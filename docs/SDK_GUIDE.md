@@ -837,6 +837,12 @@ result and never forces growth. Its detached `BlockGrowAttempt` contains the
 dimension ID, block position, and block ID. See
 [cancellable block growth](BLOCK_GROW_ATTEMPTS.md).
 
+`block.fluid_place_attempt` synchronously vetoes one fluid-driven block-state
+placement through NeoForge's `BlockEvent.FluidPlaceBlockEvent`. Its detached
+`BlockFluidPlaceAttempt` provides the fluid ID, original/result block IDs, and
+target/source positions. A veto does not stop the fluid from flowing on later
+ticks. See [fluid placement attempts](BLOCK_FLUID_PLACE_ATTEMPTS.md).
+
 `player.fished_attempt` is a synchronous cancellable server callback for
 NeoForge's fishing-catch event. Its `PlayerFishedAttempt` and nested
 `FishedDropSnapshot` contain detached IDs and bounded values only; returning

@@ -40,6 +40,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.breed_attempt"
             | "block.grow_attempt"
             | "block.fertilize_attempt"
+            | "block.fluid_place_attempt"
             | "player.fished_attempt"
             | "world.explosion_attempt"
             | "client.screen.key_pressed"
@@ -384,6 +385,13 @@ mod tests {
                 quote! { async fn fertilize_attempt(_: BlockFertilizeAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "block.fertilize_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "block.fluid_place_attempt"),
+                quote! { async fn fluid_place_attempt(_: BlockFluidPlaceAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.fluid_place_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

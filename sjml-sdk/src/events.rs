@@ -1079,6 +1079,30 @@ pub struct BlockFertilizeAttempt {
     pub valid_target: bool,
 }
 
+/// Synchronous cancellable attempt by a fluid to place or replace a block on the logical server.
+///
+/// Return `Ok(true)` from a `block.fluid_place_attempt` handler to cancel this one placement.
+/// A veto prevents the block state change that the fluid was about to make; it does not stop the
+/// fluid itself from flowing or alter later ticks. The snapshot carries only detached registry
+/// IDs and positions, with block-state properties omitted. Both `events.subscribe` and
+/// `events.cancel` are required.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockFluidPlaceAttempt {
+    /// Resource location of the dimension where the block would be placed.
+    pub dimension_id: String,
+    /// Position whose block state the fluid attempted to replace.
+    pub target_position: BlockPos,
+    /// Position of the fluid state that caused the placement; may equal `target_position`.
+    pub liquid_position: BlockPos,
+    /// Registry ID of the fluid type that caused the placement.
+    pub fluid_id: String,
+    /// Registry ID of the block state present before the attempt.
+    pub original_block_id: String,
+    /// Registry ID of the block state Minecraft intended to place.
+    pub result_block_id: String,
+}
+
 /// Synchronous, non-cancellable `block.place` snapshot from the logical server.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -1466,14 +1490,14 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
-        BlockFertilizeAttempt, BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockTick,
-        BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
-        ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
-        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
-        ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
-        ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
+        BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockGrowAttempt, BlockPlace,
+        BlockPlaceAttempt, BlockTick, BlockTickProperty, BlockUseAction, ClientAction,
+        ClientActionAttempt, ClientActionHand, ClientChatSendAttempt, ClientItemTooltip,
+        ClientTick, EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt, EntityDamaged,
+        EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
+        EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick,
+        EventPriority, ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines,
+        ItemUseAction, ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
         PlayerAdvancementEarned, PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted,
         PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved,
         PlayerRespawned, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
@@ -1792,6 +1816,46 @@ mod tests {
         assert_eq!(
             from_bytes::<BlockFertilizeAttempt>(&encoded).unwrap(),
             dispenser
+        );
+    }
+
+    #[test]
+    fn block_fluid_place_attempt_matches_host_schema_v1_bytes() {
+        let event = BlockFluidPlaceAttempt {
+            dimension_id: "minecraft:overworld".to_owned(),
+            target_position: BlockPos {
+                x: -4,
+                y: 72,
+                z: 19,
+            },
+            liquid_position: BlockPos {
+                x: -5,
+                y: 72,
+                z: 19,
+            },
+            fluid_id: "minecraft:lava".to_owned(),
+            original_block_id: "minecraft:air".to_owned(),
+            result_block_id: "minecraft:fire".to_owned(),
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.dimension_id);
+        for position in [event.target_position, event.liquid_position] {
+            expected.extend_from_slice(&1_i32.to_le_bytes());
+            expected.extend_from_slice(&position.x.to_le_bytes());
+            expected.extend_from_slice(&position.y.to_le_bytes());
+            expected.extend_from_slice(&position.z.to_le_bytes());
+        }
+        append_test_string(&mut expected, &event.fluid_id);
+        append_test_string(&mut expected, &event.original_block_id);
+        append_test_string(&mut expected, &event.result_block_id);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<BlockFluidPlaceAttempt>(&encoded).unwrap(),
+            event
         );
     }
 

@@ -280,6 +280,11 @@ NeoForge restores the block snapshots when a handler vetoes; the successful
 `block.place` notification remains unchanged. Any matching authorized veto
 cancels the full placement, including a multi-place operation.
 
+`block.fluid_place_attempt` uses the same two event capabilities and runs
+synchronously on the logical-server thread. It receives only bounded registry
+IDs and block positions, can veto the one `FluidPlaceBlockEvent`, and cannot
+mutate the target state or stop later fluid flow.
+
 `entity.death_attempt` requires the same two capabilities and runs synchronously
 on the logical-server thread. A guest receives a detached identity and position
 snapshot; returning `true` cancels the death transition and the host restores the

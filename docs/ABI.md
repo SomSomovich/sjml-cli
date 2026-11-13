@@ -699,7 +699,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
-`block.break_attempt`, `block.place`, `block.place_attempt`, `block.grow_attempt`, `player.interacted`,
+`block.break_attempt`, `block.place`, `block.place_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.fluid_place_attempt`, `player.interacted`,
 `player.interaction`, `player.drop_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
@@ -712,8 +712,8 @@ Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `client.chat.send_attempt`, `client.action_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
-`entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`,
-`player.fished_attempt`, or `world.explosion_attempt` additionally
+`entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`, `block.fertilize_attempt`,
+`block.fluid_place_attempt`, `player.fished_attempt`, or `world.explosion_attempt` additionally
 requires the module to request and receive the separate `events.cancel`
 capability. `client.action_attempt` additionally requires the separate
 `client.input.action_cancel` capability. Static registration instances cannot subscribe. Server event
@@ -2728,3 +2728,18 @@ Identifiers and payload bounds are documented in
 sets the NeoForge `BonemealEvent` unsuccessful and cancels fertilizer use;
 false preserves the event's current result. Guest callbacks are synchronous
 and owner-scoped; canceled events are not dispatched.
+
+## Fluid block placement attempt
+
+The synchronous cancellable `sjml_v1_event_block.fluid_place_attempt`
+callback requires both `events.subscribe` and `events.cancel`. Its schema-v1
+`BlockFluidPlaceAttempt` consists of little-endian `u32(1)`, a length-prefixed
+`dimension_id`, schema-v1 target and liquid-source `BlockPos` values, then
+length-prefixed `fluid_id`, `original_block_id`, and `result_block_id`. Resource
+locations must be canonical lowercase IDs, each string is limited to 256
+bytes, and the complete payload is capped at 2 KiB. The payload contains no
+live Minecraft objects or block-state properties. NeoForge's cancellable
+`BlockEvent.FluidPlaceBlockEvent` is captured on the owning logical-server
+thread; a true guest result vetoes only that attempted block-state placement.
+The fluid may continue flowing and later ticks are independent. See
+[fluid placement attempts](BLOCK_FLUID_PLACE_ATTEMPTS.md).

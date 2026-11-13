@@ -194,7 +194,7 @@ pub use entity_attributes::{AttributeValues, LivingAttribute};
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use events::BlockGrowAttempt;
 pub use events::EntityBreedAttempt;
-pub use events::{BlockFertilizeAttempt, BlockTick, BlockTickProperty};
+pub use events::{BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockTick, BlockTickProperty};
 pub use events::{
     BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
     ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
@@ -395,18 +395,18 @@ pub mod prelude {
     pub use crate::events::EntityBreedAttempt;
     pub use crate::events::{
         subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
-        BlockFertilizeAttempt, BlockPlace, BlockPlaceAttempt, BlockTick, BlockTickProperty,
-        BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
-        ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit, ClientScreenFormValue,
-        ClientTick, EffectTickEvent, EntityDamageAttempt, EntityDamaged, EntityDeath,
-        EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
-        ExplosionAttempt, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
-        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
-        PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
-        PlayerItemUseAttempt, PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt,
-        PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        CLIENT_ACTION_CANCEL_CAPABILITY, DEFAULT_SERVER_TICK_INTERVAL,
+        BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockPlace, BlockPlaceAttempt, BlockTick,
+        BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
+        ClientChatSendAttempt, ClientItemTooltip, ClientScreenAction, ClientScreenFormSubmit,
+        ClientScreenFormValue, ClientTick, EffectTickEvent, EntityDamageAttempt, EntityDamaged,
+        EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt, EntityHealAttempt,
+        EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick,
+        EventPriority, ExplosionAttempt, InventoryChanged, ItemTooltipLines, ItemUseAction,
+        ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
+        PlayerAdvancementEarned, PlayerDropAttempt, PlayerInteracted, PlayerInteractionAttempt,
+        PlayerItemCrafted, PlayerItemUseAttempt, PlayerJoined, PlayerLeft, PlayerMoved,
+        PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        WorldLifecycle, CLIENT_ACTION_CANCEL_CAPABILITY, DEFAULT_SERVER_TICK_INTERVAL,
         MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
         MAX_INVENTORY_CHANGE_SLOT, MAX_SERVER_TICK_INTERVAL,
     };

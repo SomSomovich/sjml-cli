@@ -882,6 +882,20 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_block_fluid_place_attempt_exports_the_sync_boolean_callback() {
+        let generated = expand_event(
+            quote!(name = "block.fluid_place_attempt"),
+            quote! {
+                fn deny_fluid_placement(event: BlockFluidPlaceAttempt) -> SjmlResult<bool> { Ok(true) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_block.fluid_place_attempt"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
     fn cancellable_player_fished_attempt_exports_the_sync_boolean_callback() {
         let generated = expand_event(
             quote!(name = "player.fished_attempt"),
