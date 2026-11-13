@@ -70,6 +70,8 @@ mod player_item_use_attempt;
 mod player_respawn_point;
 #[path = "gametest/player_statistics.rs"]
 mod player_statistics;
+#[path = "gametest/player_tab_list.rs"]
+mod player_tab_list;
 #[path = "gametest/player_tick.rs"]
 mod player_tick;
 #[path = "gametest/scoreboard.rs"]

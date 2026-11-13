@@ -252,3 +252,10 @@ Server-side modules can create one module-owned vanilla boss bar per live player
 `player_bossbar::create`, update it through its `PlayerBossBarId`, and remove it explicitly.
 The API requires `entity.read` and `player.bossbar.write`, and cleans bars on logout, module
 deactivation, and server stop. See `docs/PLAYER_BOSS_BARS.md` in the workspace.
+
+Server-side modules can set or clear their own literal player-list header and
+footer with `player::set_tab_list` and `player::clear_tab_list`. The host
+recomposes active SJML module contributions in deterministic order and removes
+only the calling module's text on clear or shutdown. Both calls require
+`entity.read` and `player.ui.tab_list`; see `docs/PLAYER_TAB_LIST.md` in the
+workspace.

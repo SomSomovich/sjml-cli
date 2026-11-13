@@ -3,7 +3,8 @@
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
 //! `player.abilities.write`; item cooldown changes require `player.cooldown.write`; action-bar messages require `player.ui.actionbar`, and title packets
-//! require `player.ui.title`; advancement changes require `player.advancement.write`; vanilla custom-stat
+//! require `player.ui.title`; module-owned tab-list header/footer changes require
+//! `player.ui.tab_list`; advancement changes require `player.advancement.write`; vanilla custom-stat
 //! changes require `player.statistics.write`. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
@@ -718,6 +719,10 @@ pub const MAX_ACTION_BAR_TEXT_CODE_POINTS: usize = 256;
 pub const MAX_PLAYER_TITLE_TEXT_BYTES: usize = 1024;
 /// Maximum Unicode scalar values accepted for a literal player title or subtitle.
 pub const MAX_PLAYER_TITLE_TEXT_CODE_POINTS: usize = 256;
+/// Maximum UTF-8 size accepted for a literal player-list header or footer contribution.
+pub const MAX_PLAYER_TAB_LIST_TEXT_BYTES: usize = 1024;
+/// Maximum Unicode scalar values accepted for a player-list header or footer contribution.
+pub const MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS: usize = 256;
 /// Maximum fade or stay duration, in ticks, for a player title.
 pub const MAX_PLAYER_TITLE_TIMING_TICKS: u32 = 6_000;
 /// Largest valid selected hotbar index; vanilla players have slots `0..=8`.
@@ -915,6 +920,17 @@ extern "C" {
         stay: i32,
         fade_out: i32,
     ) -> i32;
+    #[link_name = "set_tab_list"]
+    fn imported_set_tab_list(
+        handle: i32,
+        handle_length: i32,
+        header: i32,
+        header_length: i32,
+        footer: i32,
+        footer_length: i32,
+    ) -> i32;
+    #[link_name = "clear_tab_list"]
+    fn imported_clear_tab_list(handle: i32, handle_length: i32) -> i32;
 }
 
 /// Returns every online player, sorted by canonical UUID. Before server binding and in client
@@ -1329,6 +1345,98 @@ fn validate_player_title_text(text: &str, allow_blank: bool) -> SjmlResult<()> {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "player title text must not contain control characters",
+        ));
+    }
+    Ok(())
+}
+
+/// Sets this module's literal header and footer contribution in an online player's tab list.
+///
+/// Either field may be empty, but both may not be blank; call [`clear_tab_list`] to remove this
+/// module's contribution. Text is not parsed as JSON or a translation key and is limited to
+/// 1,024 UTF-8 bytes and 256 Unicode scalar values per field, without control characters. Active
+/// SJML modules' contributions are composed in deterministic text order, so clearing or closing
+/// one module leaves the other modules' text intact. A single module can own one contribution per
+/// player. The host caps contributions at 32 modules per player and the composed field at 32 KiB.
+///
+/// Requires declared and administrator-granted `entity.read` and `player.ui.tab_list`. Only
+/// logical-server modules may use this operation. Each module is limited to ten updates per
+/// five-second window.
+pub fn set_tab_list(handle: PlayerHandle, header: &str, footer: &str) -> SjmlResult<()> {
+    validate_player_tab_list_pair(header, footer)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the handle and both UTF-8 slices remain live during the synchronous host call.
+        let status = unsafe {
+            imported_set_tab_list(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                header.as_ptr() as usize as u32 as i32,
+                header.len() as i32,
+                footer.as_ptr() as usize as u32 as i32,
+                footer.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the player tab-list text")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Removes only this module's header/footer contribution from an online player's tab list.
+///
+/// Other active SJML modules' contributions are recomposed and remain visible. This operation
+/// requires declared and administrator-granted `entity.read` and `player.ui.tab_list` and is
+/// available only to logical-server modules.
+pub fn clear_tab_list(handle: PlayerHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains live through the synchronous import.
+        let status = unsafe {
+            imported_clear_tab_list(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+            )
+        };
+        status_result(status, "host rejected clearing the player tab-list text")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_player_tab_list_pair(header: &str, footer: &str) -> SjmlResult<()> {
+    validate_player_tab_list_text(header)?;
+    validate_player_tab_list_text(footer)?;
+    if header.trim().is_empty() && footer.trim().is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "set_tab_list requires a nonblank header or footer; use clear_tab_list to remove the contribution",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_player_tab_list_text(text: &str) -> SjmlResult<()> {
+    if text.len() > MAX_PLAYER_TAB_LIST_TEXT_BYTES
+        || text.chars().count() > MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player tab-list text exceeds 1024 UTF-8 bytes or 256 code points",
+        ));
+    }
+    if text.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player tab-list text must not contain control characters",
         ));
     }
     Ok(())
@@ -2225,11 +2333,12 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         active_effects, apply_effect, clear_team, set_team, team, teleport, teleport_to_world,
-        validate_player_team_name, validate_player_title_text, vitals, PlayerMotion,
-        PlayerTeamResponse, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
-        MAX_PLAYER_ACTIVE_EFFECTS, MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES,
-        MAX_PLAYER_TEAM_NAME_BYTES, MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES,
-        MAX_TELEPORT_COORDINATE,
+        validate_player_tab_list_pair, validate_player_tab_list_text, validate_player_team_name,
+        validate_player_title_text, vitals, PlayerMotion, PlayerTeamResponse, PlayerTeleport,
+        PlayerTitleTimings, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
+        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_TAB_LIST_TEXT_BYTES,
+        MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS, MAX_PLAYER_TEAM_NAME_BYTES,
+        MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
     };
     use crate::{ActiveEffect, ErrorCode, PlayerHandle, StableDecode, WorldHandle};
 
@@ -2434,6 +2543,39 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn player_tab_list_text_is_literal_bounded_and_can_clear_one_side() {
+        assert!(validate_player_tab_list_pair("Header", "").is_ok());
+        assert!(validate_player_tab_list_pair("", "Footer").is_ok());
+        assert!(validate_player_tab_list_text("").is_ok());
+        assert_eq!(
+            validate_player_tab_list_pair("", "").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_player_tab_list_text("header\nfooter")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_player_tab_list_text(&"x".repeat(MAX_PLAYER_TAB_LIST_TEXT_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_player_tab_list_text(&"😀".repeat(MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert!(
+            validate_player_tab_list_text(&"😀".repeat(MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS))
+                .is_ok()
         );
     }
 

@@ -2035,6 +2035,8 @@ signatures but calls return `PERMISSION_DENIED`.
 | `teleport` | `(handle_ptr: i32, handle_len: i32, destination_ptr: i32, destination_len: i32) -> i32` | Teleport the current player session within its current dimension; status only |
 | `action_bar` | `(handle_ptr: i32, handle_len: i32, text_ptr: i32, text_len: i32) -> i32` | Send literal action-bar text; requires `entity.read` and `player.ui.actionbar` |
 | `title` | `(handle_ptr, handle_len, title_ptr, title_len, subtitle_ptr, subtitle_len, fade_in_ticks, stay_ticks, fade_out_ticks) -> i32` | Send literal title and optional subtitle; requires `entity.read` and `player.ui.title` |
+| `set_tab_list` | `(handle_ptr, handle_len, header_ptr, header_len, footer_ptr, footer_len) -> i32` | Set this module's literal player-list header/footer contribution; requires `entity.read` and `player.ui.tab_list` |
+| `clear_tab_list` | `(handle_ptr, handle_len) -> i32` | Remove only this module's player-list contribution and recompose the remaining active SJML contributions; requires `entity.read` and `player.ui.tab_list` |
 | `has_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len, out_ptr, out_capacity` | Write one stable boolean byte for the live player's cooldown state; requires `entity.read` |
 | `set_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len, ticks` | Set the vanilla cooldown to 1–72,000 server ticks; requires `entity.read` and `player.cooldown.write` |
 | `clear_item_cooldown` | `handle_ptr, handle_len, item_id_ptr, item_id_len` | Remove the vanilla item cooldown; requires `entity.read` and `player.cooldown.write` |
@@ -2128,6 +2130,18 @@ blank, while the subtitle may be empty. Each animation timing must be in
 `0..=6000` ticks. Calls are server-only, validate the live login session and
 server thread, and are limited to ten sends per module per five seconds. See
 [player title and subtitle messages](PLAYER_TITLES.md).
+
+`set_tab_list` and `clear_tab_list` require the separately requested and
+granted `player.ui.tab_list` capability alongside `entity.read`. Header and
+footer are independent literal UTF-8 fields; either may be empty, but both may
+not be blank in `set_tab_list`. Each field is limited to 1,024 bytes and 256
+Unicode scalar values and rejects control characters. One contribution per
+module and player is retained. Active SJML contributions are ordered by their
+text and joined with newlines; clearing or closing one module leaves other
+modules' contributions intact. The host allows at most 32 contributors per
+player, limits each composed field to 32 KiB, and rate-limits each module to
+ten updates per five seconds. Calls validate the current live session and run
+on the owning server thread. See [player-list header and footer](PLAYER_TAB_LIST.md).
 
 Player team imports use `sjml_player_v1`. Reads require `entity.read`; `set_team`
 and `clear_team` additionally require `player.team.write`. Team IDs are limited
