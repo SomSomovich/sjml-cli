@@ -1408,6 +1408,37 @@ pub struct EntityFallAttempt {
     pub damage_multiplier: f32,
 }
 
+/// Synchronous cancellable attempt to mount or dismount an entity on the logical server.
+///
+/// NeoForge fires `entity.mount_attempt` before changing either entity's riding relationship.
+/// Return `Ok(true)` to cancel the attempted mount or dismount. The detached snapshot carries the
+/// acting entity, an optional mounted entity, the dimension, and the action direction. Both
+/// `events.subscribe` and `events.cancel` are required, and the callback must remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityMountAttempt {
+    /// Canonical UUID of the entity attempting to mount or dismount.
+    pub entity_id: String,
+    /// Registry ID of the acting entity type.
+    pub entity_type_id: String,
+    /// Resource location of the entities' level.
+    pub dimension_id: String,
+    /// Entity being mounted; NeoForge may omit it for a dismount event.
+    pub mounted_entity: Option<EntityMountTarget>,
+    /// True for a mount attempt and false for a dismount attempt.
+    pub mounting: bool,
+}
+
+/// Detached identity of the entity that a mount attempt targets.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityMountTarget {
+    /// Canonical UUID of the target entity.
+    pub entity_id: String,
+    /// Registry ID of the target entity type.
+    pub entity_type_id: String,
+}
+
 /// Synchronous cancellable knockback attempt for a living entity on the logical server.
 ///
 /// NeoForge 21.1.265 fires this before applying knockback. The event exposes original and current
@@ -2658,23 +2689,23 @@ mod tests {
         ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
         EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
         EntityEffectApplicationAttempt, EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
-        ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
-        ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock,
-        ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAdvancementProgressEvent,
-        PlayerAttackAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
-        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
-        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
-        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt,
-        PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned,
-        PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
-        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
-        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
-        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        EntityKnockbackAttempt, EntityMountAttempt, EntityMountTarget, EntitySpawned,
+        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
+        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
+        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
+        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
+        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt,
+        PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction,
+        PlayerRespawned, PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt,
+        PlayerTotemUseAttemptAction, PlayerVillagerTraded, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
+        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
+        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -3870,6 +3901,53 @@ mod tests {
             "Rust bytes must match host schema-v1 layout"
         );
         assert_eq!(from_bytes::<EntityFallAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn cancellable_entity_mount_attempt_encodes_optional_target_and_action() {
+        let event = EntityMountAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            mounted_entity: Some(EntityMountTarget {
+                entity_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+                entity_type_id: "minecraft:minecart".to_owned(),
+            }),
+            mounting: true,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.entity_id);
+        append_test_string(&mut expected, &event.entity_type_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        expected.push(1);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        let mounted = event.mounted_entity.as_ref().unwrap();
+        append_test_string(&mut expected, &mounted.entity_id);
+        append_test_string(&mut expected, &mounted.entity_type_id);
+        expected.push(1);
+        assert_eq!(
+            encoded, expected,
+            "Rust bytes must match host schema-v1 layout"
+        );
+        assert_eq!(from_bytes::<EntityMountAttempt>(&encoded).unwrap(), event);
+
+        let dismount = EntityMountAttempt {
+            mounted_entity: None,
+            mounting: false,
+            ..event
+        };
+        let encoded = to_bytes(&dismount).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &dismount.entity_id);
+        append_test_string(&mut expected, &dismount.entity_type_id);
+        append_test_string(&mut expected, &dismount.dimension_id);
+        expected.extend_from_slice(&[0, 0]);
+        assert_eq!(encoded, expected);
+        assert_eq!(
+            from_bytes::<EntityMountAttempt>(&encoded).unwrap(),
+            dismount
+        );
     }
 
     #[test]

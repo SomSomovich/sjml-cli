@@ -25,10 +25,15 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.94.0
-and core ABI 1.86.0. Live
+unverified. This guide describes the private SDK workspace target 0.95.0
+and core ABI 1.87.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
+SDK 0.95.0 adds synchronous cancellable `entity.mount_attempt` for vetoing a
+mount or dismount before Minecraft changes the riding relation. Its detached
+snapshot includes an optional target identity and action direction. Both
+`events.subscribe` and `events.cancel` are required. See
+[entity mount attempts](ENTITY_MOUNT_ATTEMPTS.md).
 SDK 0.94.0 adds synchronous cancellable `block.farmland_trample_attempt` and
 `entity.fall_attempt`. A true farmland callback result preserves farmland after an
 eligible landing; a true fall callback prevents fall damage from being applied.
@@ -459,7 +464,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.94.0"
+sjml-sdk = "0.95.0"
 ```
 
 For development against this checkout, use
@@ -472,7 +477,7 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.92.0/sjml/). Those links cover the latest registry release (0.92.0); the private 0.94.0
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.92.0/sjml/). Those links cover the latest registry release (0.92.0); the private 0.95.0
 workspace adds the event types described above.
 
 | Module | Main API |

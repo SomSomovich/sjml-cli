@@ -16,15 +16,24 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.96.0`, Rust SDK/macros `0.94.0`, private CLI
-`0.1.26`, and ABI `1.86.0`. ABI compatibility remains major-version based: host
-0.96.0 accepts ABI `1.0.x` through `1.86.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.86.0` and host range
-`^0.96.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.97.0`, Rust SDK/macros `0.95.0`, private CLI
+`0.1.27`, and ABI `1.87.0`. ABI compatibility remains major-version based: host
+0.97.0 accepts ABI `1.0.x` through `1.87.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.87.0` and host range
+`^0.97.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.87.0
+
+`entity.mount_attempt` synchronously reports an entity mount or dismount before
+the riding relation changes. A handler returning true cancels the attempt.
+Its detached snapshot includes the acting entity's identity, dimension,
+mount/dismount direction, and an optional target identity. Both event grants are
+required, and async handlers are rejected. See
+[entity mount attempts](ENTITY_MOUNT_ATTEMPTS.md).
 
 ### APIs added in ABI 1.86.0
 

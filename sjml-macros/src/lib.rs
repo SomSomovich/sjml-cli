@@ -992,6 +992,7 @@ mod tests {
             "entity.shield_block_attempt",
             "entity.teleport_attempt",
             "entity.fall_attempt",
+            "entity.mount_attempt",
         ] {
             let generated = expand_event_async(
                 quote!(name = #name),

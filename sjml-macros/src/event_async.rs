@@ -36,6 +36,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.death_attempt"
             | "entity.damage_attempt"
             | "entity.fall_attempt"
+            | "entity.mount_attempt"
             | "entity.knockback_attempt"
             | "entity.shield_block_attempt"
             | "entity.teleport_attempt"

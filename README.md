@@ -52,7 +52,7 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.94.0"`; that crate must be available from a configured Cargo registry. This
+"0.95.0"`; that crate must be available from a configured Cargo registry. This
 private target version is not published yet, so use `--sdk-path` to compile the
 generated project until the matching SDK crates are released.
 
@@ -61,6 +61,7 @@ generated project until the matching SDK crates are released.
 - [Rust SDK guide](docs/SDK_GUIDE.md), [registered block scheduled ticks](docs/BLOCK_TICK.md), [persistent block-entity data](docs/BLOCK_ENTITY_PERSISTENT_DATA.md), [bounded vanilla projectile launches](docs/VANILLA_PROJECTILES.md), [registered entity AI goals](docs/ENTITY_AI_GOALS.md), [client action attempts](docs/CLIENT_ACTION_ATTEMPTS.md), [block tag membership](docs/WORLD_BLOCK_TAGS.md), [item tag membership](docs/WORLD_ITEM_TAGS.md), [registry tag members](docs/WORLD_TAG_MEMBERS.md), [registered block-state properties](docs/BLOCK_STATE_PROPERTIES.md), [block-state shapes](docs/BLOCK_STATE_SHAPES.md), [block-state light](docs/BLOCK_STATE_LIGHT.md), [state-aware block behavior](docs/BLOCK_STATE_BEHAVIOR.md), [entity health](docs/ENTITY_HEALTH.md), [entity equipment](docs/ENTITY_EQUIPMENT.md), [player boss bars](docs/PLAYER_BOSS_BARS.md), [player tab-list text](docs/PLAYER_TAB_LIST.md), [ordinary item-stack spawning](docs/WORLD_ITEM_SPAWN.md), [world game-event dispatch](docs/WORLD_GAME_EVENTS.md), [live villager-trade notifications](docs/PLAYER_VILLAGER_TRADES.md), [module-owned scoreboard objectives](docs/SCOREBOARD_OBJECTIVES.md), [safe block update options](docs/WORLD_BLOCK_UPDATE_OPTIONS.md), [player inventory item grants](docs/PLAYER_INVENTORY_GIVE.md), [exact player statistic setters](docs/PLAYER_STATISTICS.md), [model translation and scale keyframes](docs/MODEL_ANIMATIONS.md), [interactive client screens and owner-scoped close](docs/CLIENT_SCREEN.md), [per-state block friction](docs/BLOCK_STATE_FRICTION.md), [loaded-only fluid tick scheduling](docs/WORLD_FLUID_TICKS.md), [sampled cursor movement](docs/CLIENT_CURSOR_MOVED.md), and [SDK API reference on docs.rs](https://docs.rs/sjml-sdk/0.92.0/sjml/)
 - [Registered block shapes](docs/WORLD_BLOCK_SHAPES.md)
 - [Registered block behavior](docs/WORLD_BLOCK_BEHAVIOR.md)
+- [Entity mount and dismount vetoes](docs/ENTITY_MOUNT_ATTEMPTS.md)
 - [Registered block use](docs/BLOCK_USE.md)
 - [Registered item use on blocks](docs/ITEM_USE_ON_BLOCK.md)
 - [Registered item use on entities](docs/ITEM_USE_ON_ENTITY.md)
