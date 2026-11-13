@@ -1472,6 +1472,46 @@ fn spawn_test_entity(arguments: BlockMutationArguments) -> SjmlResult<String> {
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
+struct ProjectileSpawnArguments {
+    kind: String,
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+#[command(name = "world.projectile.spawn")]
+fn spawn_test_projectile(arguments: ProjectileSpawnArguments) -> SjmlResult<String> {
+    let world = world::get("minecraft:overworld")?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the overworld must already be loaded",
+        )
+    })?;
+    let projectile = match arguments.kind.as_str() {
+        "snowball" => VanillaProjectileKind::Snowball,
+        "egg" => VanillaProjectileKind::Egg,
+        _ => {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "projectile kind must be snowball or egg",
+            ));
+        }
+    };
+    world::spawn_projectile(
+        world,
+        projectile,
+        RaycastPoint::new(
+            f64::from(arguments.x) + 0.5,
+            f64::from(arguments.y) + 0.5,
+            f64::from(arguments.z) + 0.5,
+        ),
+        ProjectileVelocity::new(1.25, 0.5, -0.25),
+    )?;
+    Ok("vanilla projectile spawned".to_owned())
+}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
 struct PlayerArguments {
     player_id: String,
 }

@@ -38,6 +38,12 @@ pub const MAX_WORLD_BLOCK_COORDINATE: i32 = 30_000_000;
 pub const MAX_WORLD_REDSTONE_SIGNAL: u8 = 15;
 /// Maximum encoded optional raycast hit, including the stable snapshot headers.
 pub const MAX_WORLD_RAYCAST_RESPONSE_BYTES: usize = 65_857;
+/// Minimum launch speed accepted by [`spawn_projectile`], in blocks per tick.
+pub const MIN_WORLD_PROJECTILE_SPEED: f64 = 0.1;
+/// Maximum launch speed accepted by [`spawn_projectile`], in blocks per tick.
+pub const MAX_WORLD_PROJECTILE_SPEED: f64 = 4.0;
+/// Maximum vanilla projectiles one module can spawn per logical-server tick.
+pub const MAX_WORLD_PROJECTILES_PER_TICK: usize = 4;
 /// Maximum number of block positions visited by one collision query.
 pub const MAX_WORLD_COLLISION_BLOCKS: usize = 4096;
 /// Maximum bytes in one canonical entity registry ID accepted by [`spawn_entity`].
@@ -407,6 +413,28 @@ pub struct RaycastPoint {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+}
+
+/// One supported built-in throwable. Vanilla collision behavior is preserved.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+pub enum VanillaProjectileKind {
+    Snowball = 0,
+    Egg = 1,
+}
+
+/// Per-tick launch velocity for a vanilla snowball or egg.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProjectileVelocity {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+impl ProjectileVelocity {
+    pub const fn new(x: f64, y: f64, z: f64) -> Self {
+        Self { x, y, z }
+    }
 }
 
 impl RaycastPoint {
@@ -927,6 +955,20 @@ struct WorldEntitySpawnRequest {
     z: f64,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct WorldProjectileSpawnRequest {
+    world: WorldHandle,
+    projectile: u8,
+    x: f64,
+    y: f64,
+    z: f64,
+    velocity_x: f64,
+    velocity_y: f64,
+    velocity_z: f64,
+}
+
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_world_v1")]
 extern "C" {
@@ -1056,6 +1098,8 @@ extern "C" {
     fn imported_collides(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "spawn_entity"]
     fn imported_spawn_entity(query: i32, query_length: i32) -> i32;
+    #[link_name = "spawn_projectile"]
+    fn imported_spawn_projectile(query: i32, query_length: i32) -> i32;
     #[link_name = "set_block"]
     fn imported_set_block(
         handle: i32,
@@ -2814,6 +2858,65 @@ pub fn spawn_entity(
     }
 }
 
+/// Launches one vanilla snowball or egg in an already-loaded server-world position.
+///
+/// The module must request and receive `world.read` and the separate
+/// `projectile.spawn` administrator capability. Only vanilla snowballs and eggs
+/// are accepted; their normal collision behavior remains unchanged. Positions
+/// must be finite, inside build height and the world border, and in loaded
+/// chunks. Velocity components must be finite and their magnitude must be
+/// between 0.1 and 4.0 blocks per tick. Each module can launch at most four per
+/// logical-server tick. No call loads a chunk.
+pub fn spawn_projectile(
+    world: WorldHandle,
+    projectile: VanillaProjectileKind,
+    position: RaycastPoint,
+    velocity: ProjectileVelocity,
+) -> SjmlResult<()> {
+    if !valid_raycast_point(position) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "projectile coordinates must be finite and within ±30,000,000",
+        ));
+    }
+    if !valid_projectile_velocity(velocity) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "projectile velocity must be finite and between 0.1 and 4.0 blocks per tick",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldProjectileSpawnRequest {
+            world,
+            projectile: projectile as u8,
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            velocity_x: velocity.x,
+            velocity_y: velocity.y,
+            velocity_z: velocity.z,
+        })?;
+        // SAFETY: the encoded request remains allocated and readable for this synchronous import.
+        let status = unsafe {
+            imported_spawn_projectile(query.as_ptr() as usize as u32 as i32, query.len() as i32)
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the vanilla projectile spawn",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, projectile);
+        Err(unsupported_target())
+    }
+}
+
 fn validate_raycast(start: RaycastPoint, end: RaycastPoint) -> SjmlResult<()> {
     if !valid_raycast_point(start) || !valid_raycast_point(end) {
         return Err(SjmlError::new(
@@ -2831,6 +2934,14 @@ fn validate_raycast(start: RaycastPoint, end: RaycastPoint) -> SjmlResult<()> {
         ));
     }
     Ok(())
+}
+
+fn valid_projectile_velocity(velocity: ProjectileVelocity) -> bool {
+    if !velocity.x.is_finite() || !velocity.y.is_finite() || !velocity.z.is_finite() {
+        return false;
+    }
+    let speed = velocity.x.hypot(velocity.y).hypot(velocity.z);
+    (MIN_WORLD_PROJECTILE_SPEED..=MAX_WORLD_PROJECTILE_SPEED).contains(&speed)
 }
 
 fn validate_aabb(bounds: Aabb) -> SjmlResult<()> {
@@ -3365,29 +3476,31 @@ mod tests {
         item_tag_members, loaded_chunks, notify_neighbors_at, play_sound, raycast,
         schedule_block_tick, set_block, set_block_properties, set_daylight_cycle_enabled,
         set_game_time, set_integer_game_rule, set_time, spawn_entity, spawn_particle,
-        structures_at, tag_members, validate_biome_ids, validate_block_property_updates,
-        validate_loaded_chunk_query, validate_loaded_chunk_results, validate_structure_ids,
-        validate_tag_member_ids, validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse,
-        BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
-        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse,
-        ChunkPos, DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemTagQuery,
-        ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, RaycastBlockMode,
+        spawn_projectile, structures_at, tag_members, validate_biome_ids,
+        validate_block_property_updates, validate_loaded_chunk_query,
+        validate_loaded_chunk_results, validate_structure_ids, validate_tag_member_ids,
+        validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse, BlockPropertiesMutation,
+        BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty, BlockStateBatch,
+        BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse, ChunkPos,
+        DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemTagQuery, ItemTagResponse,
+        LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity, RaycastBlockMode,
         RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery, StructuresAtResponse,
-        TagMembersQuery, TagMembersResponse, TagRegistry, WeatherCondition, WeatherSnapshot,
-        WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation,
-        WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
+        TagMembersQuery, TagMembersResponse, TagRegistry, VanillaProjectileKind, WeatherCondition,
+        WeatherSnapshot, WorldCollisionQuery, WorldEntitySpawnRequest, WorldGameRule,
+        WorldGameRuleMutation, WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
         WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot,
-        WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BIOME_IDS,
-        MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_PROPERTIES,
-        MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
-        MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
-        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
-        MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
+        WorldProjectileSpawnRequest, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
+        MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
+        MAX_WORLD_BLOCK_PROPERTIES, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
+        MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_TAG_ID_BYTES,
+        MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
+        MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_GAME_TIME_TICKS,
         MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
-        MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_STRUCTURES_AT,
+        MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_PROJECTILE_SPEED, MAX_WORLD_STRUCTURES_AT,
         MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES, MAX_WORLD_STRUCTURE_ID_BYTES,
         MAX_WORLD_TAG_ID_BYTES, MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES,
         MAX_WORLD_TAG_MEMBERS_QUERY_BYTES, MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES,
+        MIN_WORLD_PROJECTILE_SPEED,
     };
     use crate::{BlockPos, Direction, ErrorCode, StableDecode, WorldHandle};
 
@@ -4694,6 +4807,76 @@ mod tests {
         expected.extend_from_slice(&64.0_f64.to_le_bytes());
         expected.extend_from_slice(&(-2.25_f64).to_le_bytes());
         assert_eq!(crate::to_bytes(&request).unwrap(), expected);
+    }
+
+    #[test]
+    fn projectile_spawn_request_matches_the_java_little_endian_contract() {
+        let request = WorldProjectileSpawnRequest {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            projectile: VanillaProjectileKind::Snowball as u8,
+            x: 1.5,
+            y: 64.0,
+            z: -2.25,
+            velocity_x: 1.25,
+            velocity_y: 0.5,
+            velocity_z: -0.25,
+        };
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&1.5_f64.to_le_bytes());
+        expected.extend_from_slice(&64.0_f64.to_le_bytes());
+        expected.extend_from_slice(&(-2.25_f64).to_le_bytes());
+        expected.extend_from_slice(&1.25_f64.to_le_bytes());
+        expected.extend_from_slice(&0.5_f64.to_le_bytes());
+        expected.extend_from_slice(&(-0.25_f64).to_le_bytes());
+        assert_eq!(crate::to_bytes(&request).unwrap(), expected);
+    }
+
+    #[test]
+    fn projectile_spawn_rejects_bad_positions_and_speeds_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let kind = VanillaProjectileKind::Egg;
+        let position = RaycastPoint::new(0.5, 64.0, 0.5);
+        for velocity in [
+            ProjectileVelocity::new(0.0, 0.0, 0.0),
+            ProjectileVelocity::new(4.01, 0.0, 0.0),
+            ProjectileVelocity::new(f64::INFINITY, 0.0, 0.0),
+            ProjectileVelocity::new(f64::NAN, 0.0, 0.0),
+        ] {
+            assert_eq!(
+                spawn_projectile(world, kind, position, velocity)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            spawn_projectile(
+                world,
+                kind,
+                RaycastPoint::new(30_000_001.0, 64.0, 0.5),
+                ProjectileVelocity::new(1.0, 0.0, 0.0),
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            spawn_projectile(
+                world,
+                kind,
+                position,
+                ProjectileVelocity::new(MIN_WORLD_PROJECTILE_SPEED, 0.0, 0.0),
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(MAX_WORLD_PROJECTILE_SPEED, 4.0);
     }
 
     #[test]

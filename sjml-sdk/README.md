@@ -227,3 +227,4 @@ SDK 0.82.0 adds static geometry overrides for exact Boolean/integer block-state 
 SDK 0.81.0 adds bounded Boolean and integer state properties for registered blocks; see `docs/BLOCK_STATE_PROPERTIES.md` in the workspace.
 SDK 0.80.0 adds bounded static vanilla and modded attribute modifiers for registered items, including operation and equipment-slot selection. See `docs/ITEM_ATTRIBUTE_MODIFIERS.md` in the workspace.
 The block-entity API also supports a bounded typed persistent key/value store for block entities registered by the calling module. It requires separate data read/write grants; see `docs/BLOCK_ENTITY_PERSISTENT_DATA.md` in the workspace.
+The world API also supports capability-gated launches of vanilla snowballs and eggs with bounded velocity; see `docs/VANILLA_PROJECTILES.md` in the workspace. Vanilla collision behavior is preserved.
