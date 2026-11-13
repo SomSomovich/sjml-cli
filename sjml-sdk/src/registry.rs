@@ -642,6 +642,13 @@ pub enum EntityAiGoal {
     Panic { priority: u32, speed: f32 },
     /// Swim to a random position while in water at a bounded movement speed.
     RandomSwimming { priority: u32, speed: f32 },
+    /// Avoid nearby players at bounded range with separate walk and sprint speeds.
+    AvoidPlayer {
+        priority: u32,
+        range: f32,
+        walk_speed: f32,
+        sprint_speed: f32,
+    },
     /// Look at a nearby player within a bounded distance.
     LookAtPlayer { priority: u32, range: f32 },
     /// Attack a visible nearby target at a bounded movement speed.
@@ -1640,6 +1647,17 @@ extern "C" {
         goal: i32,
         priority: i32,
         value_bits: i32,
+        flags: i32,
+    ) -> i32;
+    #[link_name = "register_entity_ai_goal_v2"]
+    fn imported_register_entity_ai_goal_v2(
+        path_pointer: i32,
+        path_length: i32,
+        goal: i32,
+        priority: i32,
+        range_bits: i32,
+        walk_speed_bits: i32,
+        sprint_speed_bits: i32,
         flags: i32,
     ) -> i32;
     #[link_name = "register_villager_trade"]
@@ -2958,6 +2976,24 @@ pub fn register_entity_ai_goal(path: &str, goal: EntityAiGoal) -> SjmlResult<()>
     }
     #[cfg(target_arch = "wasm32")]
     {
+        if let Some((kind, priority, range, walk_speed, sprint_speed, flags)) =
+            entity_ai_goal_v2_wire(goal)
+        {
+            // SAFETY: the host copies this bounded path and scalar goal descriptor before returning.
+            let status = unsafe {
+                imported_register_entity_ai_goal_v2(
+                    path.as_ptr() as usize as u32 as i32,
+                    path.len() as u32 as i32,
+                    kind,
+                    priority as i32,
+                    range.to_bits() as i32,
+                    walk_speed.to_bits() as i32,
+                    sprint_speed.to_bits() as i32,
+                    flags,
+                )
+            };
+            return status_result(status, "host rejected an entity AI goal");
+        }
         let (kind, priority, value, flags) = entity_ai_goal_wire(goal);
         // SAFETY: the host copies this bounded path and scalar goal descriptor before returning.
         let status = unsafe {
@@ -3427,6 +3463,20 @@ fn valid_entity_ai_goal(goal: EntityAiGoal) -> bool {
         | EntityAiGoal::MeleeAttack {
             priority, speed, ..
         } => valid_priority(priority) && speed.is_finite() && (0.01..=8.0).contains(&speed),
+        EntityAiGoal::AvoidPlayer {
+            priority,
+            range,
+            walk_speed,
+            sprint_speed,
+        } => {
+            valid_priority(priority)
+                && range.is_finite()
+                && (1.0..=32.0).contains(&range)
+                && walk_speed.is_finite()
+                && (0.01..=8.0).contains(&walk_speed)
+                && sprint_speed.is_finite()
+                && (walk_speed..=8.0).contains(&sprint_speed)
+        }
         EntityAiGoal::LookAtPlayer { priority, range } => {
             valid_priority(priority) && range.is_finite() && (1.0..=64.0).contains(&range)
         }
@@ -3453,6 +3503,20 @@ fn entity_ai_goal_wire(goal: EntityAiGoal) -> (i32, u32, f32, i32) {
         EntityAiGoal::WaterAvoidingRandomStroll { priority, speed } => (7, priority, speed, 0),
         EntityAiGoal::Panic { priority, speed } => (8, priority, speed, 0),
         EntityAiGoal::RandomSwimming { priority, speed } => (9, priority, speed, 0),
+        EntityAiGoal::AvoidPlayer { .. } => unreachable!("AvoidPlayer uses the v2 host import"),
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn entity_ai_goal_v2_wire(goal: EntityAiGoal) -> Option<(i32, u32, f32, f32, f32, i32)> {
+    match goal {
+        EntityAiGoal::AvoidPlayer {
+            priority,
+            range,
+            walk_speed,
+            sprint_speed,
+        } => Some((10, priority, range, walk_speed, sprint_speed, 0)),
+        _ => None,
     }
 }
 
@@ -5108,6 +5172,48 @@ mod tests {
                 priority: 1,
                 speed: 0.0,
             },
+            EntityAiGoal::AvoidPlayer {
+                priority: 32,
+                range: 16.0,
+                walk_speed: 0.5,
+                sprint_speed: 1.0,
+            },
+            EntityAiGoal::AvoidPlayer {
+                priority: 1,
+                range: 0.99,
+                walk_speed: 0.5,
+                sprint_speed: 1.0,
+            },
+            EntityAiGoal::AvoidPlayer {
+                priority: 1,
+                range: 32.01,
+                walk_speed: 0.5,
+                sprint_speed: 1.0,
+            },
+            EntityAiGoal::AvoidPlayer {
+                priority: 1,
+                range: 16.0,
+                walk_speed: f32::NAN,
+                sprint_speed: 1.0,
+            },
+            EntityAiGoal::AvoidPlayer {
+                priority: 1,
+                range: 16.0,
+                walk_speed: 0.5,
+                sprint_speed: 0.49,
+            },
+            EntityAiGoal::AvoidPlayer {
+                priority: 1,
+                range: 16.0,
+                walk_speed: 8.01,
+                sprint_speed: 8.01,
+            },
+            EntityAiGoal::AvoidPlayer {
+                priority: 1,
+                range: 16.0,
+                walk_speed: 0.5,
+                sprint_speed: f32::INFINITY,
+            },
             EntityAiGoal::LookAtPlayer {
                 priority: 1,
                 range: 64.1,
@@ -5160,6 +5266,27 @@ mod tests {
             entity_ai_goal_wire(EntityAiGoal::Retaliate { priority: 0 }).0,
             6
         );
+        assert_eq!(
+            entity_ai_goal_v2_wire(EntityAiGoal::AvoidPlayer {
+                priority: 3,
+                range: 16.0,
+                walk_speed: 0.75,
+                sprint_speed: 1.5,
+            }),
+            Some((10, 3, 16.0, 0.75, 1.5, 0))
+        );
+        assert!(valid_entity_ai_goal(EntityAiGoal::AvoidPlayer {
+            priority: 0,
+            range: 1.0,
+            walk_speed: 0.01,
+            sprint_speed: 0.01,
+        }));
+        assert!(valid_entity_ai_goal(EntityAiGoal::AvoidPlayer {
+            priority: 31,
+            range: 32.0,
+            walk_speed: 8.0,
+            sprint_speed: 8.0,
+        }));
     }
 
     #[test]

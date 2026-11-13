@@ -1259,6 +1259,9 @@ fn register_content() -> SjmlResult<()> {
         priority: 6, range: 8.0,
     })?;
     registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::RandomLookAround { priority: 7 })?;
+    registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::AvoidPlayer {
+        priority: 3, range: 12.0, walk_speed: 0.8, sprint_speed: 1.4,
+    })?;
     registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::Retaliate { priority: 0 })?;
     registry::register_entity_ai_goal("ruby_mite", EntityAiGoal::WaterAvoidingRandomStroll {
         priority: 4, speed: 0.8,
@@ -1279,12 +1282,16 @@ The host creates generic Java backing classes during NeoForge's block,
 block-entity-type, and entity-type registry events. Registered entities have
 no AI goals by default. `register_entity_ai_goal` adds up to sixteen bounded
 vanilla goals after the entity declaration; goal priorities are 0–31, movement
-speeds are 0.01–8, and look ranges are 1–64 blocks. The supported goals are
-swimming, random strolling, water-avoiding strolling, panic fleeing, random
-swimming, looking at players, melee attacking, random looking, targeting nearby
-players, and retaliating against a recent attacker. Random swimming selects a
-new vanilla path every 120 ticks. Goals are attached to the declared entity
-type before any instance can spawn. See [registered entity AI goals](ENTITY_AI_GOALS.md). Raw guest
+speeds are 0.01–8, and look-at-player range is 1–64 blocks. The `AvoidPlayer`
+goal uses a 1–32 block range, walk and sprint speeds of 0.01–8, and requires
+sprint speed to be at least walk speed. Its target class is fixed to
+`net.minecraft.world.entity.player.Player`. The supported goals are swimming,
+random strolling, water-avoiding strolling, panic fleeing, random swimming,
+looking at players, avoiding players, melee attacking, random looking,
+targeting nearby players, and retaliating against a recent attacker. Random
+swimming selects a new vanilla path every 120 ticks. Goals are attached to the
+declared entity type before any instance can spawn. See [registered entity AI
+goals](ENTITY_AI_GOALS.md). Raw guest
 callbacks, custom goal code, and guest-defined synchronized fields remain
 unavailable. `EntityAttribute` values are applied during
 `EntityAttributeCreationEvent`; supported base attributes are max health

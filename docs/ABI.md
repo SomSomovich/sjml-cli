@@ -877,6 +877,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_model_keyframe_track` | `(path_ptr: i32, path_len: i32, track_ptr: i32, track_len: i32) -> i32` | Stage one bounded host-evaluated periodic keyframe rotation on a previously registered same-module entity or block-entity model/cuboid. |
 | `sjml_registry_v1.register_entity` | `(path_ptr: i32, path_len: i32, width_bits: i32, height_bits: i32, tracking_range: i32, update_interval: i32, fire_immune: i32) -> i32` | Stage a generic living `MobCategory.MISC` entity type. |
 | `sjml_registry_v1.register_entity_ai_goal` | `(path_ptr: i32, path_len: i32, goal: i32, priority: i32, value_bits: i32, flags: i32) -> i32` | Add one bounded vanilla goal to an entity declared by the same module. |
+| `sjml_registry_v1.register_entity_ai_goal_v2` | `(path_ptr: i32, path_len: i32, goal: i32, priority: i32, range_bits: i32, walk_speed_bits: i32, sprint_speed_bits: i32, flags: i32) -> i32` | Add the bounded AvoidPlayer goal to an entity declared by the same module. |
 | `sjml_registry_v1.register_fluid` | `(path_ptr: i32, path_len: i32, tick_rate: i32, level_decrease_per_block: i32, slope_find_distance: i32, explosion_resistance_bits: i32) -> i32` | Stage a flowing fluid pair, liquid block, and bucket with vanilla water visuals. |
 | `sjml_registry_v1.register_fluid_with_visuals` | `(path_ptr: i32, path_len: i32, tick_rate: i32, level_decrease_per_block: i32, slope_find_distance: i32, explosion_resistance_bits: i32, still_texture_ptr: i32, still_texture_len: i32, flowing_texture_ptr: i32, flowing_texture_len: i32) -> i32` | Stage a fluid with package-owned `block/` still and flowing texture IDs. |
 | `sjml_registry_v1.register_shapeless_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_lines_ptr: i32, ingredient_lines_len: i32) -> i32` | Stage a bounded shapeless recipe with one to nine item or item-tag ingredients. |
@@ -915,12 +916,18 @@ same module has declared that entity. At most sixteen goals may be attached
 to one type, 512 per module, and 8,192 total; priority is 0–31. Goal tags are
 `0` swim, `1` random stroll,
 `2` look at player, `3` melee attack, `4` random look around, `5` target
-player, `6` retaliate, `7` water-avoiding random stroll, `8` panic, and `9`
-random swimming. `value_bits` is finite speed 0.01–8 for tags 1, 3, 7, 8,
-and 9; finite range 1–64 for tag 2; and exactly positive zero for tags 0,
-4–6. `flags` is zero except tags 3 and 5, where 0/1 select melee
-long-memory or player-target must-see behavior. Random swimming uses a fixed
-vanilla target-selection interval of 120 ticks. Invalid tags, parameters, entity ownership,
+player, `6` retaliate, `7` water-avoiding random stroll, `8` panic, `9`
+random swimming, and `10` avoid player. The v1 import carries tags 0–9:
+`value_bits` is finite speed 0.01–8 for tags 1, 3, 7, 8, and 9; finite
+range 1–64 for tag 2; and exactly positive zero for tags 0, 4–6. `flags` is
+zero except tags 3 and 5, where 0/1 select melee long-memory or player-target
+must-see behavior. Random swimming uses a fixed vanilla target-selection
+interval of 120 ticks. The v2 import carries only tag 10: range is finite and
+1–32, walk and sprint speed are finite and 0.01–8, and sprint speed must be at
+least the walk speed; `flags` must be zero. Both imports require
+`content.register` during `mod_register`. LookAtPlayer always targets players,
+and AvoidPlayer always avoids players; guest code cannot provide Java classes.
+Invalid tags, parameters, entity ownership,
 and attempts after the entity registry phase closes return
 `INVALID_ARGUMENT` or `PERMISSION_DENIED` without allocating a Minecraft goal.
 Model imports run only during `mod_register` and require `content.register`.

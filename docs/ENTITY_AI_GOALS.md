@@ -22,6 +22,15 @@ fn register_content() -> SjmlResult<()> {
     )?;
     registry::register_entity_ai_goal(
         "river_mite",
+        EntityAiGoal::AvoidPlayer {
+            priority: 2,
+            range: 12.0,
+            walk_speed: 0.8,
+            sprint_speed: 1.4,
+        },
+    )?;
+    registry::register_entity_ai_goal(
+        "river_mite",
         EntityAiGoal::Retaliate { priority: 0 },
     )?;
     Ok(())
@@ -37,7 +46,8 @@ Every goal requires `content.register`. Priorities are `0..=31`; movement speeds
 | `WaterAvoidingRandomStroll` | Choose random paths that avoid water | Priority, speed |
 | `Panic` | Flee after damage or ignition | Priority, speed |
 | `RandomSwimming` | Swim to random water positions | Priority, speed; vanilla target selection interval is 120 ticks |
-| `LookAtPlayer` | Turn toward a nearby player | Priority, range in blocks (`1..=64`) |
+| `LookAtPlayer` | Turn toward a nearby player | Priority, range in blocks (`1..=64`); target class is fixed to `Player` |
+| `AvoidPlayer` | Flee from nearby players using vanilla avoidance pathfinding | Priority, range (`1..=32`), walk and sprint speeds (`0.01..=8.0`), sprint speed must be at least walk speed; target class is fixed to `Player` |
 | `MeleeAttack` | Attack a visible target | Priority, speed, long-memory flag |
 | `RandomLookAround` | Look around while idle | Priority |
 | `TargetPlayer` | Select a nearby player target | Priority, must-see flag |
@@ -45,4 +55,6 @@ Every goal requires `content.register`. Priorities are `0..=31`; movement speeds
 
 Goals are immutable after registration. They apply only to SJML-declared entity types and are never installed on vanilla or another mod's entities. Guest callbacks, arbitrary goal classes, arbitrary goal priority controls, and custom entity subclasses are not exposed. Loaded vanilla Mobs have separate bounded AI enable/disable and navigation APIs; see [entity AI control](ENTITY_AI_CONTROL.md) and [entity navigation](ENTITY_NAVIGATION.md).
 
-`EntityAiGameTests.guestEntityInstallsItsDeclaredVanillaAiGoals` spawns the GameTest guest's entity and checks that its goal selector contains the three newly exposed vanilla goal classes.
+`AvoidPlayer` uses the additive `register_entity_ai_goal_v2` host import to carry its range and two speed modifiers; the existing v1 goal import is unchanged for tags 0–9. All static goal imports require `content.register` and are accepted only during `mod_register`. No guest AI callback runs from Minecraft's AI tick.
+
+`EntityAiGameTests.guestEntityInstallsItsDeclaredVanillaAiGoals` spawns the GameTest guest's entity and checks that its goal selector contains the `LookAtPlayer`, `RandomLookAround`, and newly added vanilla goal classes.

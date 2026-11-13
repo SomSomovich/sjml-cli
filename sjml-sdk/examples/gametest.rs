@@ -279,9 +279,25 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::register_entity_ai_goal(
         "gametest_ai",
+        EntityAiGoal::LookAtPlayer {
+            priority: 3,
+            range: 8.0,
+        },
+    )?;
+    registry::register_entity_ai_goal(
+        "gametest_ai",
         EntityAiGoal::TargetPlayer {
             priority: 1,
             must_see: true,
+        },
+    )?;
+    registry::register_entity_ai_goal(
+        "gametest_ai",
+        EntityAiGoal::AvoidPlayer {
+            priority: 4,
+            range: 12.0,
+            walk_speed: 0.8,
+            sprint_speed: 1.4,
         },
     )?;
     registry::register_entity_ai_goal(
