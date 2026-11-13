@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.85.0`, the Rust SDK/macros are `0.83.0`, and the ABI is
-`1.75.0`. ABI compatibility remains major-version based: host 0.85.0 accepts ABI
-`1.0.x` through `1.75.0`; it rejects later contracts it does not know. Packages
-using newer APIs declare ABI `^1.75.0` and host range `^0.85.0`.
+The current host is `0.86.0`, the Rust SDK/macros are `0.84.0`, and the ABI is
+`1.76.0`. ABI compatibility remains major-version based: host 0.86.0 accepts ABI
+`1.0.x` through `1.76.0`; it rejects later contracts it does not know. Packages
+using newer APIs declare ABI `^1.76.0` and host range `^0.86.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -318,4 +318,7 @@ Host 0.83.0 / ABI 1.73.0 / SDK/macros 0.81.0 adds bounded Boolean and integer st
 
 Host 0.84.0 / ABI 1.74.0 / SDK/macros 0.82.0 adds exact-state geometry overrides for registered blocks with declared properties. Each override is a fixed full cube, empty shape, or one normalized cuboid and is selected from the immutable Minecraft block state without calling guest code at runtime. Codec, staging, rollback, and live GameTest coverage verify collision behavior. The private CLI crate is 0.1.14 locally; nothing was published to crates.io or synchronized to the public CLI repository.
 
-Host 0.85.0 / ABI 1.75.0 / SDK/macros 0.83.0 adds module-owned vanilla boss bars for live players, detached non-player living-entity health snapshots with bounded healing, and exact block-state emitted-light overrides. Each API has an explicit ABI boundary, capability checks, Rust wrapper, focused tests, and dedicated-server GameTest coverage. The `/sjml profiler` command also reports bounded inter-module service call, failure, elapsed-time, and queue metrics. The private CLI crate is 0.1.15 locally; nothing was published to crates.io or synchronized to the public CLI repository.
+Host 0.85.0 / ABI 1.75.0 / SDK/macros 0.83.0 adds module-owned vanilla boss bars for live players, detached non-player living-entity health snapshots with bounded healing, exact block-state emitted-light overrides, and cancellable `entity.knockback_attempt` vetoes. Each API has an explicit ABI boundary, capability checks, Rust wrapper, focused tests, and dedicated-server GameTest coverage. The `/sjml profiler` command also reports bounded inter-module service call, failure, elapsed-time, and queue metrics. The private CLI crate is 0.1.15 locally; nothing was published to crates.io or synchronized to the public CLI repository.
+
+
+Host 0.86.0 / ABI 1.76.0 / SDK/macros 0.84.0 adds module-owned player tab-list contributions and dummy scoreboard objectives, completed-trade notifications, ordinary item spawning into loaded chunks, exact-state block behavior predicates and sound. It also splits the compatibility test guest to keep each export below the instruction-fuel limit. The integrated Gradle `test build runGameTestServer` run passed 1,152 host tests, 434 core tests (one skipped), and all 125 required GameTests. The Cargo workspace passed 26 CLI, 43 macro, and 347 SDK tests plus doc tests and strict Clippy. The SDK and root, multi-module, world-render, and OpenGL-geometry example workspaces passed `wasm32-unknown-unknown` checks; those example workspaces also passed offline tests. The private CLI crate is 0.1.16 locally; this did not publish to crates.io or synchronize the public CLI repository.
