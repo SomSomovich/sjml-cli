@@ -35,6 +35,10 @@ have a separate per-mod `client_profile` scope. Opaque non-player entity bytes
 use separate `entity.data.read` and `entity.data.write` grants and are stored in
 the entity's persistent NBT. World reads do not load dimensions or chunks;
 block-state batches are limited to 1,024 positions and 1 MiB of encoded output.
+Physical-client commands use the local command dispatcher; dynamic argument
+suggestions require `client.command.suggest`, run on the physical-client main
+thread, and receive only bounded local text and prior arguments without server
+source or world access. They do not change server command trees or state.
 Physical-client modules can also open owner-scoped literal screens and bounded
 text-entry forms with `client.ui.screen`; form values return only through the
 owning module's direct callback. Long body text has local, clamped mouse-wheel
@@ -178,10 +182,8 @@ client commands. Durability uses `entity.read` plus `inventory.write`; chunk
 queries use `world.read`; entity raycasts use `entity.read` plus `world.read`;
 death cancellation requires `events.subscribe` and `events.cancel`; local
 commands require a requested and locally granted `client.command`. The host
-also supports bounded dynamic client-command suggestions with the separate
-`client.command.suggest` grant and a detached callback input. The host GameTests
-exercise the server-backed APIs; client command display and execution still
-need a display-backed Minecraft client check.
+GameTests exercise the server-backed APIs; client command display and execution
+still need a display-backed Minecraft client check.
 
 Host 0.54.0 / ABI 1.44.0 / SDK 0.52.0 adds bounded static villager offers,
 pre-mitigation cancellable `entity.damage_attempt`, cross-dimension server-player
