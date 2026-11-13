@@ -309,6 +309,161 @@ impl BlockShape {
     }
 }
 
+/// Bounded movement, light, ignition, piston, and sound properties for a registered block.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockBehavior {
+    friction: f32,
+    speed_factor: f32,
+    jump_factor: f32,
+    light_level: u32,
+    ignited_by_lava: bool,
+    push_reaction: BlockPushReaction,
+    sound: BlockSound,
+}
+
+impl BlockBehavior {
+    /// Creates vanilla-like movement and sound properties with no emitted light.
+    pub const fn new() -> Self {
+        Self {
+            friction: 0.6,
+            speed_factor: 1.0,
+            jump_factor: 1.0,
+            light_level: 0,
+            ignited_by_lava: false,
+            push_reaction: BlockPushReaction::Normal,
+            sound: BlockSound::Stone,
+        }
+    }
+
+    /// Sets friction from 0.0 through 2.0; vanilla blocks commonly use 0.4 through 0.98.
+    pub fn friction(mut self, value: f32) -> SjmlResult<Self> {
+        if !value.is_finite() || !(0.0..=2.0).contains(&value) {
+            return Err(invalid_argument(
+                "block friction must be finite and between 0 and 2",
+            ));
+        }
+        self.friction = value;
+        Ok(self)
+    }
+
+    /// Sets the walking-speed multiplier from 0.0 through 4.0.
+    pub fn speed_factor(mut self, value: f32) -> SjmlResult<Self> {
+        if !value.is_finite() || !(0.0..=4.0).contains(&value) {
+            return Err(invalid_argument(
+                "block speed factor must be finite and between 0 and 4",
+            ));
+        }
+        self.speed_factor = value;
+        Ok(self)
+    }
+
+    /// Sets the jump-height multiplier from 0.0 through 4.0.
+    pub fn jump_factor(mut self, value: f32) -> SjmlResult<Self> {
+        if !value.is_finite() || !(0.0..=4.0).contains(&value) {
+            return Err(invalid_argument(
+                "block jump factor must be finite and between 0 and 4",
+            ));
+        }
+        self.jump_factor = value;
+        Ok(self)
+    }
+
+    /// Sets emitted block light from 0 through 15.
+    pub fn light_level(mut self, value: u32) -> SjmlResult<Self> {
+        if value > 15 {
+            return Err(invalid_argument(
+                "block light level must be between 0 and 15",
+            ));
+        }
+        self.light_level = value;
+        Ok(self)
+    }
+
+    /// Makes the block catch fire when lava ignites it.
+    pub const fn ignited_by_lava(mut self) -> Self {
+        self.ignited_by_lava = true;
+        self
+    }
+
+    /// Selects the vanilla piston reaction.
+    pub const fn push_reaction(mut self, reaction: BlockPushReaction) -> Self {
+        self.push_reaction = reaction;
+        self
+    }
+
+    /// Selects a bounded vanilla block sound group.
+    pub const fn sound(mut self, sound: BlockSound) -> Self {
+        self.sound = sound;
+        self
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if !self.friction.is_finite()
+            || !(0.0..=2.0).contains(&self.friction)
+            || !self.speed_factor.is_finite()
+            || !(0.0..=4.0).contains(&self.speed_factor)
+            || !self.jump_factor.is_finite()
+            || !(0.0..=4.0).contains(&self.jump_factor)
+            || self.light_level > 15
+        {
+            return Err(invalid_argument(
+                "block behavior values are outside their supported bounds",
+            ));
+        }
+        Ok(())
+    }
+
+    fn abi_values(self) -> [i32; 7] {
+        [
+            self.friction.to_bits() as i32,
+            self.speed_factor.to_bits() as i32,
+            self.jump_factor.to_bits() as i32,
+            self.light_level as i32,
+            if self.ignited_by_lava { 1 } else { 0 },
+            self.push_reaction as i32,
+            self.sound as i32,
+        ]
+    }
+}
+
+impl Default for BlockBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Stable piston-reaction codes used by registered block behaviors.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum BlockPushReaction {
+    #[default]
+    Normal = 0,
+    Destroy = 1,
+    Block = 2,
+    Ignore = 3,
+    PushOnly = 4,
+}
+
+/// Stable, allowlisted vanilla sound groups for registered blocks.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum BlockSound {
+    #[default]
+    Stone = 0,
+    Wood = 1,
+    Gravel = 2,
+    Grass = 3,
+    Metal = 4,
+    Glass = 5,
+    Sand = 6,
+    Wool = 7,
+    Snow = 8,
+    Slime = 9,
+    Honey = 10,
+    Netherite = 11,
+    Amethyst = 12,
+}
+
 /// One bounded vanilla AI goal installed on a registered living entity.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EntityAiGoal {
@@ -1137,6 +1292,18 @@ extern "C" {
         max_y_bits: i32,
         max_z_bits: i32,
     ) -> i32;
+    #[link_name = "set_block_behavior"]
+    fn imported_set_block_behavior(
+        path_pointer: i32,
+        path_length: i32,
+        friction_bits: i32,
+        speed_factor_bits: i32,
+        jump_factor_bits: i32,
+        light_level: i32,
+        flags: i32,
+        push_reaction: i32,
+        sound: i32,
+    ) -> i32;
     #[link_name = "register_block_entity"]
     fn imported_register_block_entity(
         path_pointer: i32,
@@ -1703,6 +1870,52 @@ pub fn register_block_with_shape(
     shape.validate()?;
     register_block(path, definition)?;
     set_block_shape(path, shape)
+}
+
+/// Applies bounded vanilla movement and physical properties to a block already staged by this module.
+///
+/// Call this during `#[mod_register]`, after [`register_block`]. The host uses the selected values
+/// for movement speed, friction, jump response, emitted light, lava ignition, piston behavior, and
+/// one allowlisted vanilla sound group.
+pub fn set_block_behavior(path: &str, behavior: BlockBehavior) -> SjmlResult<()> {
+    validate_path(path)?;
+    behavior.validate()?;
+    let values = behavior.abi_values();
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded path and validates the fixed-size behavior values.
+        let status = unsafe {
+            imported_set_block_behavior(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                values[0],
+                values[1],
+                values[2],
+                values[3],
+                values[4],
+                values[5],
+                values[6],
+            )
+        };
+        return status_result(status, "host rejected the block behavior");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = values;
+        Err(unsupported_target())
+    }
+}
+
+/// Stages a block and assigns its bounded physical behavior in one registration call.
+pub fn register_block_with_behavior(
+    path: &str,
+    definition: BlockDefinition,
+    behavior: BlockBehavior,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    behavior.validate()?;
+    register_block(path, definition)?;
+    set_block_behavior(path, behavior)
 }
 
 /// Stages a block entity backed by another block declared by this same module.
@@ -3574,6 +3787,47 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_block_behavior("block", BlockBehavior::default())
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn block_behavior_builders_reject_unbounded_values_and_keep_stable_codes() {
+        assert!(BlockBehavior::new().friction(f32::NAN).is_err());
+        assert!(BlockBehavior::new().friction(2.01).is_err());
+        assert!(BlockBehavior::new().speed_factor(f32::INFINITY).is_err());
+        assert!(BlockBehavior::new().speed_factor(4.01).is_err());
+        assert!(BlockBehavior::new().jump_factor(-0.01).is_err());
+        assert!(BlockBehavior::new().light_level(16).is_err());
+
+        let behavior = BlockBehavior::new()
+            .friction(0.91)
+            .unwrap()
+            .speed_factor(0.4)
+            .unwrap()
+            .jump_factor(1.5)
+            .unwrap()
+            .light_level(13)
+            .unwrap()
+            .ignited_by_lava()
+            .push_reaction(BlockPushReaction::PushOnly)
+            .sound(BlockSound::Amethyst);
+        assert_eq!(
+            behavior.abi_values(),
+            [
+                0.91_f32.to_bits() as i32,
+                0.4_f32.to_bits() as i32,
+                1.5_f32.to_bits() as i32,
+                13,
+                1,
+                4,
+                12
+            ]
         );
     }
 

@@ -16,10 +16,10 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.77.0`, the Rust SDK/macros are `0.75.0`, and the ABI is
-`1.67.0`. ABI compatibility remains major-version based: host 0.77.0 accepts ABI
-`1.0.x` through `1.67.0`; it rejects later contracts it does not know. Packages
-using newer APIs declare ABI `^1.67.0` and host range `^0.77.0`.
+The current host is `0.78.0`, the Rust SDK/macros are `0.76.0`, and the ABI is
+`1.68.0`. ABI compatibility remains major-version based: host 0.78.0 accepts ABI
+`1.0.x` through `1.68.0`; it rejects later contracts it does not know. Packages
+using newer APIs declare ABI `^1.68.0` and host range `^0.78.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
@@ -273,3 +273,5 @@ Host 0.75.0 / ABI 1.65.0 / SDK/macros 0.73.0 adds loaded-only `world::block_has_
 Host 0.76.0 / ABI 1.66.0 / SDK/macros 0.74.0 adds sorted bounded enumeration of current block, item, fluid, and entity-type tag members through `world::tag_members` and typed convenience functions. Results distinguish absent tags from registered empty tags and cap at 1,024 entries; all calls require `world.read` and never access chunks. The private CLI crate is 0.1.6 locally; no crates.io publication or public-repository sync was made.
 
 Host 0.77.0 / ABI 1.67.0 / SDK/macros 0.75.0 adds fixed full-cube, empty, and single-cuboid selection, collision, occlusion, and support shapes for registered blocks through `registry::register_block_with_shape` and `registry::set_block_shape`. Shapes are bounded, validated, and immutable after registration; GameTests exercise the selected and collision bounds. The private CLI crate is 0.1.7 locally; no crates.io publication or public-repository sync was made.
+
+Host 0.78.0 / ABI 1.68.0 / SDK/macros 0.76.0 adds bounded static movement and physical behavior for registered blocks: friction, speed/jump factors, light emission, lava ignition, piston reaction, and allowlisted vanilla sound groups. `registry::register_block_with_behavior` and `registry::set_block_behavior` stage the settings during the block registration phase. Java boundary tests and a dedicated-server GameTest exercise the values. The private CLI crate is 0.1.8 locally; no crates.io publication or public-repository sync was made.

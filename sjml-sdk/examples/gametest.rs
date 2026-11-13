@@ -97,6 +97,18 @@ fn register_test_content() -> SjmlResult<()> {
         BlockDefinition::default(),
         BlockShape::cuboid([0.25, 0.0, 0.25], [0.75, 0.5, 0.75])?,
     )?;
+    registry::register_block_with_behavior(
+        "gametest_behavior_block",
+        BlockDefinition::default(),
+        BlockBehavior::new()
+            .friction(0.91)?
+            .speed_factor(0.4)?
+            .jump_factor(1.5)?
+            .light_level(13)?
+            .ignited_by_lava()
+            .push_reaction(BlockPushReaction::PushOnly)
+            .sound(BlockSound::Amethyst),
+    )?;
     let mut block_model = BlockEntityModelDefinition::new();
     block_model.add_cuboid([0.125, 0.0, 0.125], [0.875, 0.75, 0.875], 0xFF20_C0FF)?;
     block_model.set_texture("sjml_game_test:textures/block/gametest_model.png")?;

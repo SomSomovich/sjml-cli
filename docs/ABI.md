@@ -6,11 +6,12 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.67.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.68.0**. Versions use SemVer. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
-incompatible. Build metadata does not affect version ordering. ABI 1.67.0 adds
-fixed full-cube, empty, and single-cuboid shapes for registered blocks. ABI
+incompatible. Build metadata does not affect version ordering. ABI 1.68.0 adds
+bounded physical behavior settings for registered blocks. ABI 1.67.0 adds fixed
+full-cube, empty, and single-cuboid shapes for registered blocks. ABI
 1.66.0 adds bounded member enumeration for block, item, fluid, and entity-type
 registry tags. ABI 1.65.0 adds loaded-only block and item tag membership queries. ABI
 1.64.0 adds bounded physical-client
@@ -728,6 +729,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.set_item_max_damage` | `(item_path_ptr: i32, item_path_len: i32, max_damage: i32) -> i32` | Set vanilla maximum durability from 1 through 1,000,000 on a same-module standalone item declared with stack size 1. |
 | `sjml_registry_v1.register_block` | `(path_ptr: i32, path_len: i32, strength_bits: i32, resistance_bits: i32, requires_tool: i32, has_item: i32) -> i32` | Stage a basic block and optionally its `BlockItem`. |
 | `sjml_registry_v1.set_block_shape` | `(path_ptr: i32, path_len: i32, kind: i32, min_x_bits: i32, min_y_bits: i32, min_z_bits: i32, max_x_bits: i32, max_y_bits: i32, max_z_bits: i32) -> i32` | Set a fixed full-cube (`kind=0`), empty (`kind=1`), or normalized cuboid (`kind=2`) selection, collision, occlusion, and support shape on a block already staged by this module. Non-cuboid coordinates must be zero; cuboid floats must be finite and ordered within 0..=1. |
+| `sjml_registry_v1.set_block_behavior` | `(path_ptr: i32, path_len: i32, friction_bits: i32, speed_factor_bits: i32, jump_factor_bits: i32, light_level: i32, flags: i32, push_reaction: i32, sound: i32) -> i32` | Set bounded friction (`0..=2`), speed/jump multipliers (`0..=4`), emitted light (`0..=15`), optional lava ignition (flag bit 0), piston reaction (`0 normal`, `1 destroy`, `2 block`, `3 ignore`, `4 push_only`), and an allowlisted sound group (`0 stone`, `1 wood`, `2 gravel`, `3 grass`, `4 metal`, `5 glass`, `6 sand`, `7 wool`, `8 snow`, `9 slime`, `10 honey`, `11 netherite`, `12 amethyst`) on a block already staged by this module. Float fields are IEEE-754 bits and must be finite. Reserved flag bits are rejected. |
 | `sjml_registry_v1.register_block_entity` | `(path_ptr: i32, path_len: i32, block_path_ptr: i32, block_path_len: i32) -> i32` | Stage a generic block entity type for a block declared by the same module. |
 | `sjml_registry_v1.register_entity_model` | `(path_ptr: i32, path_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded colored model for an entity declared by the same module, with optional model-wide and per-cuboid sine rotations. |
 | `sjml_registry_v1.register_block_entity_model` | `(path_ptr: i32, path_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded colored model for a block entity declared by the same module, with optional model-wide and per-cuboid sine rotations. |

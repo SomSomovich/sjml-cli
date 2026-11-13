@@ -492,7 +492,7 @@ pub fn init(path: &Path, id: Option<&str>, sdk: Option<&Path>) -> Result<()> {
             toml::Value::String(sdk.to_string_lossy().into_owned())
         )
     } else {
-        "sjml-sdk = \"0.75.0\"".into()
+        "sjml-sdk = \"0.76.0\"".into()
     };
     let parent = path
         .parent()
@@ -502,7 +502,7 @@ pub fn init(path: &Path, id: Option<&str>, sdk: Option<&Path>) -> Result<()> {
     let temp = tempfile::tempdir_in(parent).map_err(|e| io("create temporary project", e))?;
     let files = [
         ("Cargo.toml",format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\ncrate-type = [\"cdylib\", \"rlib\"]\n\n[dependencies]\n{dependency}\n\n[workspace]\n")),
-        ("sjml.toml",format!("[mod]\nid = \"{name}\"\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[runtime]\nabi = \"^1.67.0\"\nminecraft = \"~1.21.1\"\nsjml = \"^0.77.0\"\n\n[[modules]]\nid = \"main\"\npath = \"modules/main.wasm\"\nside = \"server\"\npermissions = []\n")),
+        ("sjml.toml",format!("[mod]\nid = \"{name}\"\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[runtime]\nabi = \"^1.68.0\"\nminecraft = \"~1.21.1\"\nsjml = \"^0.78.0\"\n\n[[modules]]\nid = \"main\"\npath = \"modules/main.wasm\"\nside = \"server\"\npermissions = []\n")),
         ("sjml-project.toml",format!("[[crates]]\nmodule = \"main\"\npackage = \"{name}\"\n")),
         ("src/lib.rs","use sjml::prelude::*;\n\n#[mod_init]\nfn initialize() -> SjmlResult<()> {\n    Ok(())\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn initialization_succeeds() {\n        assert!(super::initialize().is_ok());\n    }\n}\n".into()),
         (".gitignore","/target/\n/modules/\n/dist/\n".into()),
