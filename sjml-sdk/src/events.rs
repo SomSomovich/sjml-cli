@@ -1471,14 +1471,13 @@ mod tests {
         ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
         EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
         EntityEffectApplicationAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntityKnockbackAttempt, EntitySpawned,
-        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
-        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerDropAttempt,
-        PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
-        PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
-        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        MAX_SERVER_TICK_INTERVAL,
+        EntityKnockbackAttempt, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
+        ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
+        ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
+        PlayerAdvancementEarned, PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved,
+        PlayerRespawned, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -2019,8 +2018,14 @@ mod tests {
         expected.extend_from_slice(&(-2.0_f64).to_le_bytes());
         expected.extend_from_slice(&(0.75_f64).to_le_bytes());
         expected.extend_from_slice(&(-1.5_f64).to_le_bytes());
-        assert_eq!(encoded, expected, "Rust encoding must match host schema-v1 bytes");
-        assert_eq!(from_bytes::<EntityKnockbackAttempt>(&encoded).unwrap(), event);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<EntityKnockbackAttempt>(&encoded).unwrap(),
+            event
+        );
     }
 
     #[test]
