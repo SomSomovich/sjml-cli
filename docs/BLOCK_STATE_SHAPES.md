@@ -38,8 +38,10 @@ updates and synchronization carry these values; the host evaluates a static
 lookup and never calls guest code during rendering or collision checks.
 
 The declarations are immutable after registry freeze. They do not provide
-multi-box or rotated geometry, state-dependent movement/light/sound behavior,
-custom placement rules, or arbitrary collision callbacks. See
+multi-box or rotated geometry, state-dependent movement or sound behavior,
+custom placement rules, or arbitrary collision callbacks. Per-state emitted
+light is available separately through [`BLOCK_STATE_LIGHT.md`](BLOCK_STATE_LIGHT.md).
+See
 [state-property declarations](BLOCK_STATE_PROPERTIES.md),
 [fixed block shapes](WORLD_BLOCK_SHAPES.md), and
 [block behavior](WORLD_BLOCK_BEHAVIOR.md). The GameTest in

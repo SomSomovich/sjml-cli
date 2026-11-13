@@ -18,6 +18,8 @@ mod block_inventory_custom_name;
 mod block_inventory_move;
 #[path = "gametest/block_random_tick.rs"]
 mod block_random_tick;
+#[path = "gametest/block_state_light.rs"]
+mod block_state_light;
 #[path = "gametest/block_tick.rs"]
 mod block_tick;
 #[path = "gametest/block_use.rs"]
@@ -148,6 +150,21 @@ fn register_test_content() -> SjmlResult<()> {
         "gametest_stateful_block",
         &[("powered", "true"), ("charge", "3")],
         BlockShape::Empty,
+    )?;
+    registry::register_block("gametest_stateful_light_block", BlockDefinition::default())?;
+    registry::add_block_state_property(
+        "gametest_stateful_light_block",
+        &BlockStateProperty::boolean("powered", false)?,
+    )?;
+    registry::set_block_state_light_level(
+        "gametest_stateful_light_block",
+        &[("powered", "false")],
+        3,
+    )?;
+    registry::set_block_state_light_level(
+        "gametest_stateful_light_block",
+        &[("powered", "true")],
+        12,
     )?;
     registry::register_block("gametest_interactive_block", BlockDefinition::default())?;
     registry::register_block("gametest_scheduled_block", BlockDefinition::default())?;

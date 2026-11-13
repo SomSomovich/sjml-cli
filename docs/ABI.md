@@ -871,6 +871,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.set_item_max_damage` | `(item_path_ptr: i32, item_path_len: i32, max_damage: i32) -> i32` | Set vanilla maximum durability from 1 through 1,000,000 on a same-module standalone item declared with stack size 1. |
 | `sjml_registry_v1.register_block` | `(path_ptr: i32, path_len: i32, strength_bits: i32, resistance_bits: i32, requires_tool: i32, has_item: i32) -> i32` | Stage a basic block and optionally its `BlockItem`. |
 | `sjml_registry_v1.set_block_shape` | `(path_ptr: i32, path_len: i32, kind: i32, min_x_bits: i32, min_y_bits: i32, min_z_bits: i32, max_x_bits: i32, max_y_bits: i32, max_z_bits: i32) -> i32` | Set a fixed full-cube (`kind=0`), empty (`kind=1`), or normalized cuboid (`kind=2`) selection, collision, occlusion, and support shape on a block already staged by this module. Non-cuboid coordinates must be zero; cuboid floats must be finite and ordered within 0..=1. |
+| `sjml_registry_v1.set_block_state_light_level` | `(path_ptr: i32, path_len: i32, payload_ptr: i32, payload_len: i32) -> i32` | Set emitted light (`0..=15`) for one complete exact state of a same-module block with declared state properties. The schema-v1 payload contains a property count, each property name/value pair, and the light level; duplicate, undeclared, missing, or invalid property values are rejected. Call only during `mod_register`, after declaring the block and all its properties. |
 | `sjml_registry_v1.set_block_behavior` | `(path_ptr: i32, path_len: i32, friction_bits: i32, speed_factor_bits: i32, jump_factor_bits: i32, light_level: i32, flags: i32, push_reaction: i32, sound: i32) -> i32` | Set bounded friction (`0..=2`), speed/jump multipliers (`0..=4`), emitted light (`0..=15`), optional lava ignition (flag bit 0), piston reaction (`0 normal`, `1 destroy`, `2 block`, `3 ignore`, `4 push_only`), and an allowlisted sound group (`0 stone`, `1 wood`, `2 gravel`, `3 grass`, `4 metal`, `5 glass`, `6 sand`, `7 wool`, `8 snow`, `9 slime`, `10 honey`, `11 netherite`, `12 amethyst`) on a block already staged by this module. Float fields are IEEE-754 bits and must be finite. Reserved flag bits are rejected. |
 | `sjml_registry_v1.register_block_entity` | `(path_ptr: i32, path_len: i32, block_path_ptr: i32, block_path_len: i32) -> i32` | Stage a generic block entity type for a block declared by the same module. |
 | `sjml_registry_v1.register_entity_model` | `(path_ptr: i32, path_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded colored model for an entity declared by the same module, with optional model-wide and per-cuboid sine rotations. |
@@ -909,7 +910,12 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_boolean_component` | `(path_ptr: i32, path_len: i32) -> i32` | Register a module-owned persistent/network-synchronized boolean component type. |
 | `sjml_registry_v1.set_item_boolean_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value: i32) -> i32` | Set a boolean component default on a previously declared item or block item; value must be 0 or 1. |
 
-Paths are 1–256 lowercase ASCII letters, digits, `.`, `_`, or `-`. Boolean
+The `set_block_state_light_level` schema-v1 payload is at most 512 bytes and
+uses little-endian `u32` fields: schema version `1`, property count (`1..=7`),
+then one name length and value length followed by the UTF-8 name and value for
+each property, then the light level (`0..=15`). Names and values must be
+canonical; the host validates them against the declared property types and
+ranges. Boolean
 fields accept exactly zero or one. Item stack sizes are 1–99; block strengths
 and resistances must be finite and non-negative. Declarations have bounded
 per-module and total counts, duplicate IDs are rejected, and the block

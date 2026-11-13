@@ -469,7 +469,7 @@ function signatures and public types there are the reference for Rust callers.
 | [`player_advancement`](https://docs.rs/sjml-sdk/0.82.0/sjml/player_advancement/) | Bounded snapshots of registered advancement criteria and owner-checked grant/revoke of one exact criterion. |
 | [`player_statistics`](https://docs.rs/sjml-sdk/0.82.0/sjml/player_statistics/) | Typed reads and bounded increments for vanilla block, item, and entity statistic families; `player` also exposes vanilla custom counters. |
 | [`recipe`](https://docs.rs/sjml-sdk/0.82.0/sjml/recipe/) | Typed recipe callback inputs and evaluation results. |
-| [`registry`](https://docs.rs/sjml-sdk/0.82.0/sjml/registry/) | Static item food, rarity, enchantment, attribute-modifier, and maximum-durability properties; registered block state properties, shape, and bounded physical behavior; plus item, block, entity, fluid, recipe, brewing, potion, villager-trade, and related declarations. Registered food can apply bounded status effects when consumed. |
+| [`registry`](https://docs.rs/sjml-sdk/0.82.0/sjml/registry/) | Static item food, rarity, enchantment, attribute-modifier, and maximum-durability properties; registered block state properties, shape, per-state emitted light, and bounded physical behavior; plus item, block, entity, fluid, recipe, brewing, potion, villager-trade, and related declarations. Registered food can apply bounded status effects when consumed. |
 | [`render`](https://docs.rs/sjml-sdk/0.82.0/sjml/render/) | HUD, screen, and camera-relative world callbacks, widgets, cropped package sprite regions, and model drawing. The module also supports independent X/Y/Z sine tracks and exact client GUI-layer suppression. |
 | [`model_animation`](https://docs.rs/sjml-sdk/0.82.0/sjml/model_animation/) | Bounded host-evaluated looping keyframe rotations for registered entity and block-entity models, with no render-time guest calls. |
 | [`screen_input`](https://docs.rs/sjml-sdk/0.82.0/sjml/screen_input/) | Bounded mouse, key, text, and opt-in scroll events delivered to the active screen, with synchronous active-screen key veto callbacks. |
@@ -1234,7 +1234,10 @@ integer properties for a block already declared by the same module. The host
 installs them before registry freeze, and the resulting states can be read and
 changed at loaded positions through `world::block_properties` and
 `world::set_block_properties`. `registry::set_block_state_shape` can assign a
-fixed shape to an exact state combination. See
+fixed shape, and `registry::set_block_state_light_level` can assign emitted
+light, to exact state combinations. Light overrides are static and resolved
+when Minecraft constructs immutable block states; guest code is not called by
+lighting queries. See [`BLOCK_STATE_LIGHT.md`](BLOCK_STATE_LIGHT.md),
 [`BLOCK_STATE_PROPERTIES.md`](BLOCK_STATE_PROPERTIES.md) and
 [`BLOCK_STATE_SHAPES.md`](BLOCK_STATE_SHAPES.md) for bounds, permissions, and
 examples.

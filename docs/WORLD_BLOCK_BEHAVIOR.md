@@ -34,7 +34,9 @@ vanilla lava-ignition property.
 
 `register_block` retains its existing import and defaults. Call
 `registry::set_block_behavior` after it during the same registration callback
-to change the behavior. The settings apply uniformly to every block state;
-state-dependent callbacks and arbitrary sound types are not exposed. See the
+to change the behavior. These settings apply uniformly to every block state;
+`registry::set_block_state_light_level` separately supports static emitted
+light for exact declared states. State-dependent callbacks and arbitrary sound
+types are not exposed. See [the per-state light guide](BLOCK_STATE_LIGHT.md),
 [SDK guide](SDK_GUIDE.md#static-content-and-creative-tab-declarations) and
 [ABI reference](ABI.md#static-registry-declarations).

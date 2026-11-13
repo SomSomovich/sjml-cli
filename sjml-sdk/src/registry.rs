@@ -13,6 +13,8 @@ const MAX_BLOCK_STATE_PROPERTY_NAME_BYTES: usize = 32;
 const MAX_BLOCK_STATE_VALUE_BYTES: usize = 5;
 const BLOCK_STATE_SHAPE_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_SHAPE_PAYLOAD_BYTES: usize = 512;
+const BLOCK_STATE_LIGHT_LEVEL_SCHEMA_VERSION: u32 = 1;
+const MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES: usize = 512;
 /// Maximum number of vanilla status effects on one registered food item.
 pub const MAX_ITEM_FOOD_EFFECTS: usize = 8;
 /// Maximum UTF-8 size of one fully qualified vanilla or modded effect ID.
@@ -1514,6 +1516,13 @@ extern "C" {
         payload_pointer: i32,
         payload_length: i32,
     ) -> i32;
+    #[link_name = "set_block_state_light_level"]
+    fn imported_set_block_state_light_level(
+        path_pointer: i32,
+        path_length: i32,
+        payload_pointer: i32,
+        payload_length: i32,
+    ) -> i32;
     #[link_name = "register_block_entity"]
     fn imported_register_block_entity(
         path_pointer: i32,
@@ -2182,6 +2191,88 @@ pub fn set_block_state_shape(
         let _ = payload;
         Err(unsupported_target())
     }
+}
+
+/// Sets emitted light for one exact state of a module-registered block.
+///
+/// Call this from `#[mod_register]` after the block and all of its state properties have been
+/// declared. The state slice must name every declared property exactly once with a canonical
+/// value accepted by that property; duplicate, missing, unknown, or out-of-range values are
+/// rejected by the host. The level is limited to `0..=15`. Minecraft stores the resolved light
+/// value in each immutable `BlockState`, so the host resolves this table during static registration;
+/// it never calls guest code while the game queries block states.
+pub fn set_block_state_light_level(
+    path: &str,
+    state: &[(&str, &str)],
+    level: u32,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    if level > 15 {
+        return Err(invalid_argument(
+            "block state light level must be between 0 and 15",
+        ));
+    }
+    let payload = encode_block_state_light_level(state, level)?;
+    if payload.len() > MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES {
+        return Err(invalid_argument(
+            "block state light-level payload exceeds its supported byte limit",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded path and exact-state payload before returning.
+        let status = unsafe {
+            imported_set_block_state_light_level(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                payload.as_ptr() as usize as u32 as i32,
+                payload.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the block-state light level");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = payload;
+        Err(unsupported_target())
+    }
+}
+
+fn encode_block_state_light_level(state: &[(&str, &str)], level: u32) -> SjmlResult<Vec<u8>> {
+    if state.is_empty() || state.len() > MAX_BLOCK_STATE_PROPERTIES {
+        return Err(invalid_argument(
+            "block-state light override must name between 1 and 7 properties",
+        ));
+    }
+    let mut payload = Vec::with_capacity(MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES);
+    payload.extend_from_slice(&BLOCK_STATE_LIGHT_LEVEL_SCHEMA_VERSION.to_le_bytes());
+    payload.extend_from_slice(&(state.len() as u32).to_le_bytes());
+    let mut names = Vec::with_capacity(state.len());
+    for (name, value) in state {
+        validate_block_state_property_name(name)?;
+        if value.is_empty()
+            || value.len() > MAX_BLOCK_STATE_VALUE_BYTES
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
+            })
+        {
+            return Err(invalid_argument(
+                "block-state values must be 1..=5 lowercase ASCII letters, digits, '_' or '-'; the host validates the declared property type and range",
+            ));
+        }
+        if names.iter().any(|existing| existing == name) {
+            return Err(invalid_argument(
+                "block-state light override repeats a property name",
+            ));
+        }
+        names.push(*name);
+        payload.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        payload.extend_from_slice(name.as_bytes());
+        payload.extend_from_slice(value.as_bytes());
+    }
+    payload.extend_from_slice(&level.to_le_bytes());
+    Ok(payload)
 }
 
 fn encode_block_state_shape(state: &[(&str, &str)], shape: BlockShape) -> SjmlResult<Vec<u8>> {
@@ -4385,6 +4476,41 @@ mod tests {
         );
         assert_eq!(
             set_block_state_shape("block", &[("powered", "true")], BlockShape::Empty)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn block_state_light_payloads_are_stable_exact_and_bounded() {
+        let encoded =
+            encode_block_state_light_level(&[("powered", "true"), ("charge", "3")], 12).unwrap();
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 2);
+        assert!(encoded.len() <= MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES);
+        assert_eq!(&encoded[encoded.len() - 4..], &12_u32.to_le_bytes());
+
+        assert_eq!(
+            set_block_state_light_level("block", &[("powered", "true")], 16)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        for state in [
+            &[][..],
+            &[("powered", "true"), ("powered", "false")][..],
+            &[("Upper", "true")][..],
+            &[("powered", "perhaps")][..],
+            &[("powered", "True")][..],
+        ] {
+            assert_eq!(
+                encode_block_state_light_level(state, 1).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_block_state_light_level("block", &[("powered", "true")], 1)
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode
