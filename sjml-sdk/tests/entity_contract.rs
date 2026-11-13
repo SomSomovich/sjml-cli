@@ -132,6 +132,16 @@ fn native_entity_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        entity::is_custom_name_visible(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_custom_name_visible(handle, true)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
         entity::set_custom_name(handle, "").unwrap_err().code(),
         ErrorCode::InvalidArgument
     );

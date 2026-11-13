@@ -6,6 +6,8 @@
 use sjml::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "gametest/block_drops_attempt.rs"]
+mod block_drops_attempt;
 #[path = "gametest/block_fertilize_attempt.rs"]
 mod block_fertilize_attempt;
 #[path = "gametest/block_fluid_place_attempt.rs"]
@@ -54,6 +56,8 @@ mod entity_riding;
 mod entity_rotation;
 #[path = "gametest/entity_target.rs"]
 mod entity_target;
+#[path = "gametest/entity_teleport.rs"]
+mod entity_teleport;
 #[path = "gametest/entity_tick.rs"]
 mod entity_tick;
 #[path = "gametest/gameplay_events.rs"]
@@ -66,6 +70,8 @@ mod player_attack_attempt;
 mod player_bossbar;
 #[path = "gametest/player_equipment_changed.rs"]
 mod player_equipment_changed;
+#[path = "gametest/player_experience_change.rs"]
+mod player_experience_change;
 #[path = "gametest/player_fished_attempt.rs"]
 mod player_fished_attempt;
 #[path = "gametest/player_inventory_custom_name.rs"]
@@ -317,6 +323,12 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::register_boolean_component("player_enabled")?;
     registry::register_entity("gametest_ai", EntityDefinition::default())?;
+    registry::register_entity_spawn_egg(
+        "gametest_ai",
+        "gametest_ai_spawn_egg",
+        0x336699,
+        0xC0D0E0,
+    )?;
     let mut entity_model = EntityModelDefinition::new();
     entity_model.add_cuboid([-0.25, 0.0, -0.25], [0.25, 0.5, 0.25], 0xFFFF_2080)?;
     entity_model.add_cuboid([-0.125, 0.5, -0.125], [0.125, 0.75, 0.125], 0xFF80_FF80)?;
@@ -561,6 +573,8 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     let _ = player::online()?;
     events::subscribe("block.break", EventPriority::High)?;
     events::subscribe("block.break_attempt", EventPriority::High)?;
+    block_drops_attempt::initialize()?;
+    player_experience_change::initialize()?;
     events::subscribe("entity.death", EventPriority::Normal)?;
     events::subscribe("entity.death_attempt", EventPriority::Normal)?;
     events::subscribe("entity.target_attempt", EventPriority::Normal)?;
@@ -1978,6 +1992,16 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
     let cooldown_active = cooldown_set_and_read?;
     cooldown_cleanup?;
     let cooldown_cleared = player::has_item_cooldown(target_player, cooldown_item_id)?;
+    player::send_system_message(target_player, "SJML GameTest system chat message")?;
+    let hover = RichText::plain("Safe literal hover text")?;
+    let styled = RichTextNode::new("styled component")?
+        .color(RichTextColor::rgb(0x33_6699)?)?
+        .bold(true)
+        .click(RichTextClickAction::suggest_command("/say SJML rich text")?)
+        .hover_text(hover)?;
+    let mut rich_message = RichText::plain("SJML rich message: ")?;
+    rich_message.push(styled)?;
+    player::send_rich_system_message(target_player, &rich_message)?;
     player::send_action_bar(target_player, "SJML GameTest action-bar request")?;
 
     let original_vitals = player::vitals(target_player)?;
@@ -2217,6 +2241,7 @@ fn inspect_player_controls(arguments: PlayerArguments) -> SjmlResult<String> {
 
 #[command(name = "player.inspect.vitals")]
 fn inspect_player_vitals(arguments: PlayerArguments) -> SjmlResult<String> {
+    player_experience_change::verify()?;
     let target_player = find_test_player(&arguments.player_id)?;
     let original_vitals = player::vitals(target_player)?;
     let temporary_health = if original_vitals.health < original_vitals.max_health {
@@ -2592,12 +2617,27 @@ fn check_entity_custom_name(arguments: EntityRaycastArguments) -> SjmlResult<Str
             )
         })?;
     let original_name = entity::custom_name(handle)?;
+    let original_name_visible = entity::is_custom_name_visible(handle)?;
     let check = (|| {
         entity::set_custom_name(handle, "SJML literal entity name")?;
         if entity::custom_name(handle)?.as_deref() != Some("SJML literal entity name") {
             return Err(SjmlError::new(
                 ErrorCode::InvalidArgument,
                 "entity custom name did not round-trip as literal text",
+            ));
+        }
+        entity::set_custom_name_visible(handle, true)?;
+        if !entity::is_custom_name_visible(handle)? {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity custom-name visibility did not turn on",
+            ));
+        }
+        entity::set_custom_name_visible(handle, false)?;
+        if entity::is_custom_name_visible(handle)? {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity custom-name visibility did not turn off",
             ));
         }
         entity::clear_custom_name(handle)?;
@@ -2613,9 +2653,17 @@ fn check_entity_custom_name(arguments: EntityRaycastArguments) -> SjmlResult<Str
         Some(name) => entity::set_custom_name(handle, name),
         None => entity::clear_custom_name(handle),
     };
+    let restore_visibility = entity::set_custom_name_visible(handle, original_name_visible);
     check?;
     restore?;
-    Ok("entity custom name was read, set, cleared, and restored".to_owned())
+    restore_visibility?;
+    if entity::is_custom_name_visible(handle)? != original_name_visible {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity custom-name visibility did not restore",
+        ));
+    }
+    Ok("entity custom name and visibility were read, changed, cleared, and restored".to_owned())
 }
 
 #[command(name = "entity.inspect")]

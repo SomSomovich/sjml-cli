@@ -372,6 +372,12 @@ durability on an existing damageable item, preserves its other components, and
 rejects values that would break the item. Guest code cannot set arbitrary item
 components or NBT.
 
+`player_inventory::move_stack` uses the same live-session and server-thread boundary and requires
+`entity.read` plus `inventory.write`. It moves an exact count only when the source has enough items
+and the destination is empty or has the same item and complete component set. Item and slot limits
+are preflighted; the host changes counts only, verifies both slots, and restores both originals on
+a failed commit.
+
 `player_inventory::set_item_custom_name` and `clear_item_custom_name` require
 `entity.read` plus `inventory.write`. They copy an existing player stack and
 change only its literal custom-name component, preserving its item, count,
@@ -421,6 +427,13 @@ Setting or clearing a target also requires `entity.target.write`; both Mob and
 target handles must be live in the same loaded server dimension, and the target
 must be a non-player living entity. The API does not load chunks or expose the
 Mob's goal selector.
+
+`entity::teleport` requires `entity.read` plus `entity.teleport` and accepts
+only a live, unmounted non-player entity. It validates finite bounded
+coordinates, the full destination bounding box, world border, build height,
+and every chunk touched by that box before calling Minecraft's same-dimension
+teleport path. Unloaded destinations fail without chunk loads or tickets. The
+host rechecks the final position and loaded-level membership after the call.
 
 `entity::equipment` reads the six fixed vanilla equipment slots of a live loaded non-player `LivingEntity` under `entity.read`. It returns detached canonical item ID/count/damage/max-damage values only; no NBT, data components, or mutable item handles cross the ABI. The call checks the live module-owned handle and owning server thread without loading chunks. See [loaded entity equipment](ENTITY_EQUIPMENT.md).
 

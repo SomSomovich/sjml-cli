@@ -41,6 +41,54 @@ fn give_player_inventory_item(arguments: PlayerInventoryGiveArguments) -> SjmlRe
 
     player_inventory::set_slot(target, 34, PlayerInventorySlotUpdate::Clear)?;
     let placed = player_inventory::give_item(target, "minecraft:emerald", 3)?;
+    player_inventory::set_item_custom_name(target, 34, "move-preserved emerald")?;
+    player_inventory::set_lore(target, 34, &["move-preserved lore".to_owned()])?;
+    player_inventory::set_item_custom_name(target, 35, "count-preserved name")?;
+    player_inventory::set_lore(target, 35, &["count-preserved lore".to_owned()])?;
+    player_inventory::set_count(target, 35, 60)?;
+    let reduced = player_inventory::read(target)?;
+    if reduced.slots[35]
+        .as_ref()
+        .is_none_or(|stack| stack.count != 60)
+        || player_inventory::read_lore(target, 35)? != ["count-preserved lore"]
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player stack count did not update while preserving lore",
+        ));
+    }
+    let too_many = player_inventory::set_count(target, 35, 65).unwrap_err();
+    if too_many.code() != ErrorCode::InvalidArgument {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player stack count must obey item and slot limits",
+        ));
+    }
+    let empty_slot = player_inventory::set_count(target, 40, 1).unwrap_err();
+    if empty_slot.code() != ErrorCode::InvalidArgument {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player stack count must reject empty slots",
+        ));
+    }
+    player_inventory::set_count(target, 35, 64)?;
+    player_inventory::set_slot(target, 33, PlayerInventorySlotUpdate::Clear)?;
+    player_inventory::move_stack(target, 34, 33, 2)?;
+    if player_inventory::read_lore(target, 33)? != ["move-preserved lore"]
+        || player_inventory::read_lore(target, 34)? != ["move-preserved lore"]
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory move must preserve stack components on both slots",
+        ));
+    }
+    let insufficient_source = player_inventory::move_stack(target, 34, 33, 2).unwrap_err();
+    if insufficient_source.code() != ErrorCode::InvalidArgument {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory move must reject a request larger than its source stack",
+        ));
+    }
     let snapshot = player_inventory::read(target)?;
     if placed != 3
         || snapshot
@@ -52,11 +100,16 @@ fn give_player_inventory_item(arguments: PlayerInventoryGiveArguments) -> SjmlRe
             .slots
             .get(34)
             .and_then(Option::as_ref)
-            .is_none_or(|stack| stack.item_id != "minecraft:emerald" || stack.count != 3)
+            .is_none_or(|stack| stack.item_id != "minecraft:emerald" || stack.count != 1)
+        || snapshot
+            .slots
+            .get(33)
+            .and_then(Option::as_ref)
+            .is_none_or(|stack| stack.item_id != "minecraft:emerald" || stack.count != 2)
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "player item grant did not merge, report capacity, or fill the new empty slot correctly",
+            "player inventory grant, count change, or slot-to-slot move produced the wrong stacks",
         ));
     }
     Ok("player inventory item grant inserted counts and preserved the remainder".to_owned())

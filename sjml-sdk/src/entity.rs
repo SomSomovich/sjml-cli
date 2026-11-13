@@ -86,6 +86,10 @@ pub const MAX_ENTITY_RIDING_SNAPSHOT_RESPONSE_BYTES: usize = 4
 pub const MOUNT_WRITE_CAPABILITY: &str = "entity.mount.write";
 /// Capability required with `entity.read` to set or clear a loaded Mob's target.
 pub const TARGET_WRITE_CAPABILITY: &str = "entity.target.write";
+/// Capability required with `entity.read` to teleport a loaded, unmounted non-player entity.
+pub const TELEPORT_CAPABILITY: &str = "entity.teleport";
+/// Maximum absolute coordinate accepted for an entity teleport request.
+pub const MAX_ENTITY_TELEPORT_COORDINATE: f64 = 30_000_000.0;
 /// Maximum response bytes for the versioned optional loaded-Mob target handle.
 pub const MAX_ENTITY_TARGET_RESPONSE_BYTES: usize = 4 + 1 + 24;
 
@@ -589,6 +593,15 @@ extern "C" {
     ) -> i32;
     #[link_name = "clear_custom_name"]
     fn imported_clear_custom_name(handle: i32, handle_length: i32) -> i32;
+    #[link_name = "is_custom_name_visible"]
+    fn imported_is_custom_name_visible(
+        handle: i32,
+        handle_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "set_custom_name_visible"]
+    fn imported_set_custom_name_visible(handle: i32, handle_length: i32, visible: i32) -> i32;
     #[link_name = "set_velocity"]
     fn imported_set_velocity(
         handle: i32,
@@ -607,6 +620,8 @@ extern "C" {
         rotation: i32,
         rotation_length: i32,
     ) -> i32;
+    #[link_name = "teleport"]
+    fn imported_teleport(request: i32, request_length: i32) -> i32;
     #[link_name = "heal"]
     fn imported_heal(handle: i32, handle_length: i32, amount_bits: i32) -> i32;
     #[link_name = "damage"]
@@ -653,6 +668,16 @@ struct EntityRaycastResult {
 #[sjml(version = 1)]
 struct EntityTargetResult {
     target: Option<EntityHandle>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct EntityTeleportRequest {
+    entity: EntityHandle,
+    x: f64,
+    y: f64,
+    z: f64,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -1449,6 +1474,57 @@ pub fn set_rotation(handle: EntityHandle, rotation: EntityRotation) -> SjmlResul
     }
 }
 
+/// Teleports one loaded, unmounted non-player entity within its current dimension.
+///
+/// The module must request and receive both `entity.read` and
+/// [`TELEPORT_CAPABILITY`]. Coordinates must be finite and within ±30,000,000
+/// blocks. The host also checks the entity's full destination bounding box
+/// against build height and the world border, and requires every destination
+/// chunk touched by that box to already be loaded. Calls run synchronously on
+/// the owning logical-server thread, never load chunks, and do not transfer
+/// dimensions. Entities that are riding or have passengers are rejected.
+pub fn teleport(handle: EntityHandle, x: f64, y: f64, z: f64) -> SjmlResult<()> {
+    validate_teleport_target(x, y, z)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let request = to_bytes(&EntityTeleportRequest {
+            entity: handle,
+            x,
+            y,
+            z,
+        })?;
+        // SAFETY: the fixed-schema request remains live during the synchronous host call.
+        let status = unsafe {
+            imported_teleport(
+                request.as_ptr() as usize as u32 as i32,
+                request.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the entity teleport request")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_teleport_target(x: f64, y: f64, z: f64) -> SjmlResult<()> {
+    if !x.is_finite()
+        || !y.is_finite()
+        || !z.is_finite()
+        || x.abs() > MAX_ENTITY_TELEPORT_COORDINATE
+        || y.abs() > MAX_ENTITY_TELEPORT_COORDINATE
+        || z.abs() > MAX_ENTITY_TELEPORT_COORDINATE
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity teleport coordinates must be finite and within ±30,000,000 blocks",
+        ));
+    }
+    Ok(())
+}
+
 /// Sets all velocity components for one loaded living non-player entity.
 ///
 /// The module must request and receive both `entity.read` and
@@ -1901,6 +1977,71 @@ pub fn clear_custom_name(handle: EntityHandle) -> SjmlResult<()> {
     }
 }
 
+/// Reads the vanilla custom-name visibility flag on a loaded non-player entity.
+///
+/// Requires `entity.read` and runs on the owning logical-server thread. This
+/// reads only whether Minecraft displays the custom name; it does not read or
+/// modify the name itself.
+pub fn is_custom_name_visible(handle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let value = read_output::<u32>(4, |output, capacity| {
+            // SAFETY: the handle and output allocation remain valid for the synchronous host call.
+            unsafe {
+                imported_is_custom_name_visible(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid custom-name visibility flag",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets whether Minecraft displays a loaded non-player entity's custom name.
+///
+/// This changes only the vanilla visibility flag; the custom name and other
+/// entity state are unchanged. Requires both `entity.read` and
+/// `entity.custom_name.write`, and runs on the owning logical-server thread.
+pub fn set_custom_name_visible(handle: EntityHandle, visible: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and boolean value remain live during the synchronous host call.
+        let status = unsafe {
+            imported_set_custom_name_visible(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                i32::from(visible),
+            )
+        };
+        status_result(
+            status,
+            "host rejected the entity custom-name visibility update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, visible);
+        Err(unsupported_target())
+    }
+}
+
 fn validate_custom_name(name: &str, allow_empty: bool) -> SjmlResult<()> {
     if !allow_empty && name.is_empty() {
         return Err(SjmlError::new(
@@ -2104,17 +2245,18 @@ mod tests {
     use super::{
         active_effects, apply_effect, clear_custom_name, clear_target, custom_name, damage,
         fire_ticks, navigate_to, raycast, remove_effect, set_custom_name, set_fire_ticks,
-        set_target, set_velocity, target, validate_active_effects, validate_custom_name,
-        validate_entity_raycast, validate_navigation_target, validate_spatial_query, within,
-        ActiveEffect, ActiveEffectsResponse, EntityCustomNameResponse, EntityNavigationRequest,
-        EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityTargetResult,
+        set_target, set_velocity, target, teleport, validate_active_effects, validate_custom_name,
+        validate_entity_raycast, validate_navigation_target, validate_spatial_query,
+        validate_teleport_target, within, ActiveEffect, ActiveEffectsResponse,
+        EntityCustomNameResponse, EntityNavigationRequest, EntityNavigationResult,
+        EntityRaycastQuery, EntityRaycastResult, EntityTargetResult, EntityTeleportRequest,
         EntityVelocity, SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
         MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
         MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
         MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
         MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
-        MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
-        NAVIGATION_WRITE_CAPABILITY,
+        MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
+        MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
     };
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
@@ -2369,6 +2511,60 @@ mod tests {
         assert_eq!(
             crate::from_bytes::<EntityTargetResult>(&encoded_absent).unwrap(),
             absent
+        );
+    }
+
+    #[test]
+    fn entity_teleport_request_matches_the_fixed_host_schema_and_bounds_coordinates() {
+        assert_eq!(MAX_ENTITY_TELEPORT_COORDINATE, 30_000_000.0);
+        assert!(validate_teleport_target(0.0, -64.0, MAX_ENTITY_TELEPORT_COORDINATE).is_ok());
+        for (x, y, z) in [
+            (f64::NAN, 0.0, 0.0),
+            (0.0, f64::INFINITY, 0.0),
+            (0.0, 0.0, f64::NEG_INFINITY),
+            (MAX_ENTITY_TELEPORT_COORDINATE + 1.0, 0.0, 0.0),
+            (0.0, -MAX_ENTITY_TELEPORT_COORDINATE - 1.0, 0.0),
+        ] {
+            assert_eq!(
+                validate_teleport_target(x, y, z).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        let request = EntityTeleportRequest {
+            entity: handle,
+            x: 1.25,
+            y: 64.0,
+            z: -32.5,
+        };
+        let encoded = to_bytes(&request).unwrap();
+        assert_eq!(encoded.len(), 4 + 24 + 3 * 8);
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(&encoded[4..28], &to_bytes(&handle).unwrap());
+        assert_eq!(
+            f64::from_le_bytes(encoded[28..36].try_into().unwrap()),
+            request.x
+        );
+        assert_eq!(
+            f64::from_le_bytes(encoded[36..44].try_into().unwrap()),
+            request.y
+        );
+        assert_eq!(
+            f64::from_le_bytes(encoded[44..52].try_into().unwrap()),
+            request.z
+        );
+        assert_eq!(
+            crate::from_bytes::<EntityTeleportRequest>(&encoded)
+                .unwrap()
+                .x,
+            request.x
+        );
+
+        assert_eq!(
+            teleport(handle, f64::NAN, 0.0, 0.0).unwrap_err().code(),
+            ErrorCode::InvalidArgument,
+            "invalid target coordinates must fail before the host import"
         );
     }
 

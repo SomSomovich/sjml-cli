@@ -25,6 +25,8 @@ pub const MAX_PLAYER_INVENTORY_SLOT_INDEX: u32 = 40;
 pub const MAX_PLAYER_INVENTORY_SLOT_COUNT: u32 = 4096;
 /// Maximum item count accepted by one player inventory grant request.
 pub const MAX_PLAYER_INVENTORY_GIVE_COUNT: u32 = 4096;
+/// Maximum exact item count accepted by one player-inventory slot move.
+pub const MAX_PLAYER_INVENTORY_MOVE_COUNT: u32 = 64;
 /// Maximum UTF-8 item registry ID length accepted by the player inventory writer.
 pub const MAX_PLAYER_INVENTORY_ITEM_ID_BYTES: usize = 256;
 /// Maximum durability value accepted for a live player inventory item.
@@ -101,6 +103,18 @@ extern "C" {
         slot: i32,
         item_id: i32,
         item_id_length: i32,
+        count: i32,
+    ) -> i32;
+
+    #[link_name = "set_player_count"]
+    fn imported_set_player_count(player: i32, player_length: i32, slot: i32, count: i32) -> i32;
+
+    #[link_name = "move_player_stack"]
+    fn imported_move_player_stack(
+        player: i32,
+        player_length: i32,
+        source_slot: i32,
+        destination_slot: i32,
         count: i32,
     ) -> i32;
 
@@ -440,6 +454,57 @@ fn validate_integer_component_access(slot: u32, component_path: &str) -> SjmlRes
     Ok(())
 }
 
+fn validate_move_stack(source_slot: u32, destination_slot: u32, count: u32) -> SjmlResult<()> {
+    if source_slot > MAX_PLAYER_INVENTORY_SLOT_INDEX
+        || destination_slot > MAX_PLAYER_INVENTORY_SLOT_INDEX
+        || source_slot == destination_slot
+        || !(1..=MAX_PLAYER_INVENTORY_MOVE_COUNT).contains(&count)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory moves require different slots in 0..=40 and a count in 1..=64",
+        ));
+    }
+    Ok(())
+}
+
+/// Moves exactly `count` items from one live player inventory slot to another.
+///
+/// The source must hold the full count. The destination must be empty or hold
+/// the same item with identical components, and the resulting stack must fit
+/// the item and destination-slot limits. The host changes only the two counts,
+/// preserves every item component, and restores both original slots if a
+/// commit violates its postconditions. Requires `entity.read` and
+/// `inventory.write`; runs on the owning logical-server thread.
+pub fn move_stack(
+    player: PlayerHandle,
+    source_slot: u32,
+    destination_slot: u32,
+    count: u32,
+) -> SjmlResult<()> {
+    validate_move_stack(source_slot, destination_slot, count)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: the encoded handle remains live through this synchronous server-side import.
+        let status = unsafe {
+            imported_move_player_stack(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                source_slot as i32,
+                destination_slot as i32,
+                count as i32,
+            )
+        };
+        status_result(status, "host rejected the player inventory stack move")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = player;
+        Err(unsupported_target())
+    }
+}
+
 /// Replaces or clears one slot in a live player's inventory.
 ///
 /// Slot indices are `0..=8` hotbar, `9..=35` main storage, `36..=39` armor (feet through head),
@@ -480,6 +545,42 @@ pub fn set_slot(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (player, item_id, count);
+        Err(unsupported_target())
+    }
+}
+
+/// Changes the count on an existing nonempty player-inventory stack without replacing its item.
+///
+/// `count` must be at least one. The host limits it to the smaller of the existing item's maximum
+/// stack size and the selected slot's limit, copies the existing stack, and changes only its count;
+/// all item components remain intact. This cannot create a stack or move items between slots.
+/// Slot indices use the same layout as [`read`].
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`. It runs only
+/// in a logical-server context on the owning server thread and fails for empty slots and stale or
+/// foreign handles.
+pub fn set_count(player: PlayerHandle, slot: u32, count: u32) -> SjmlResult<()> {
+    validate_count(slot, count)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle bytes remain live through the synchronous host import.
+        let status = unsafe {
+            imported_set_player_count(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                count as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory stack-count update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, count);
         Err(unsupported_target())
     }
 }
@@ -1009,6 +1110,18 @@ fn validate_damage(slot: u32, damage: u32) -> SjmlResult<()> {
     Ok(())
 }
 
+fn validate_count(slot: u32, count: u32) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX
+        || !(1..=MAX_PLAYER_INVENTORY_SLOT_COUNT).contains(&count)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory count requires a slot in 0..=40 and a value in 1..=4096",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_slot_update(slot: u32, update: PlayerInventorySlotUpdate<'_>) -> SjmlResult<()> {
     if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX {
         return Err(SjmlError::new(
@@ -1124,19 +1237,20 @@ mod tests {
     use super::{
         clear_item_custom_name, clear_lore, give_item, read_enchantment_level, read_lore,
         remove_enchantment, set_damage, set_enchantment_level, set_item_custom_name, set_lore,
-        set_slot, validate_custom_name, validate_damage, validate_enchantment_access,
-        validate_give_item, validate_inventory, validate_lore_line, validate_lore_lines,
-        PlayerInventoryLorePayload, PlayerInventorySlotUpdate,
-        MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES,
-        MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS, MAX_PLAYER_INVENTORY_DAMAGE,
-        MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES, MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL,
-        MAX_PLAYER_INVENTORY_GIVE_COUNT, MAX_PLAYER_INVENTORY_LORE_LINE_BYTES,
-        MAX_PLAYER_INVENTORY_LORE_LINE_CODE_POINTS, MAX_PLAYER_INVENTORY_SLOTS,
+        set_slot, validate_count, validate_custom_name, validate_damage,
+        validate_enchantment_access, validate_give_item, validate_inventory, validate_lore_line,
+        validate_lore_lines, validate_move_stack, PlayerInventoryLorePayload,
+        PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES,
+        MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS,
+        MAX_PLAYER_INVENTORY_DAMAGE, MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES,
+        MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL, MAX_PLAYER_INVENTORY_GIVE_COUNT,
+        MAX_PLAYER_INVENTORY_LORE_LINE_BYTES, MAX_PLAYER_INVENTORY_LORE_LINE_CODE_POINTS,
+        MAX_PLAYER_INVENTORY_MOVE_COUNT, MAX_PLAYER_INVENTORY_SLOTS,
         MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use super::{
-        read, read_boolean_component, read_integer_component, write_boolean_component,
+        move_stack, read, read_boolean_component, read_integer_component, write_boolean_component,
         write_integer_component,
     };
     use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
@@ -1158,6 +1272,46 @@ mod tests {
             validate_inventory(&oversized).unwrap_err().code(),
             ErrorCode::PayloadTooLarge
         );
+    }
+
+    #[test]
+    fn player_inventory_set_count_bounds_slot_and_positive_count() {
+        for slot in [0, 8, 9, 35, 36, 39, MAX_PLAYER_INVENTORY_SLOT_INDEX] {
+            assert!(validate_count(slot, 1).is_ok());
+            assert!(validate_count(slot, MAX_PLAYER_INVENTORY_SLOT_COUNT).is_ok());
+        }
+        for (slot, count) in [
+            (MAX_PLAYER_INVENTORY_SLOT_INDEX + 1, 1),
+            (0, 0),
+            (0, MAX_PLAYER_INVENTORY_SLOT_COUNT + 1),
+        ] {
+            assert_eq!(
+                validate_count(slot, count).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn player_inventory_move_requires_different_valid_slots_and_available_bounded_count() {
+        assert_eq!(MAX_PLAYER_INVENTORY_MOVE_COUNT, 64);
+        for (source, destination, count) in [(0, 1, 1), (8, 9, 64), (35, 36, 1), (39, 40, 1)] {
+            assert!(validate_move_stack(source, destination, count).is_ok());
+        }
+        for (source, destination, count) in [
+            (41, 0, 1),
+            (0, 41, 1),
+            (7, 7, 1),
+            (0, 1, 0),
+            (0, 1, MAX_PLAYER_INVENTORY_MOVE_COUNT + 1),
+        ] {
+            assert_eq!(
+                validate_move_stack(source, destination, count)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
     }
 
     #[test]
@@ -1234,6 +1388,20 @@ mod tests {
         );
         assert_eq!(
             give_item(player, "minecraft:air", 1).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_player_stack_move_fails_closed_after_local_validation() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            move_stack(player, 0, 1, 1).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            move_stack(player, 0, 0, 1).unwrap_err().code(),
             ErrorCode::InvalidArgument
         );
     }

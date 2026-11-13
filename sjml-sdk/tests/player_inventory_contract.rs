@@ -107,6 +107,30 @@ fn public_player_inventory_slot_writes_validate_then_fail_closed_without_a_wasm_
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn public_player_inventory_set_count_validates_then_fails_closed_without_a_wasm_host() {
+    let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+    assert_eq!(
+        player_inventory::set_count(player, 40, 3)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        player_inventory::set_count(player, 41, 3)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        player_inventory::set_count(player, 0, 0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidArgument
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn public_player_inventory_durability_write_validates_then_fails_closed_without_a_wasm_host() {
     let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
     assert_eq!(

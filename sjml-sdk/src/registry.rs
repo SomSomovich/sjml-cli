@@ -40,6 +40,8 @@ pub const MAX_ITEM_CRAFTING_REMAINDER_ID_BYTES: usize = 256;
 pub const MAX_ITEM_ATTRIBUTE_MODIFIERS: usize = 16;
 /// Maximum absolute static modifier amount on one registered item.
 pub const MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT: f32 = 1024.0;
+/// Largest accepted RGB value for one vanilla spawn egg tint layer.
+pub const MAX_ENTITY_SPAWN_EGG_RGB_COLOR: u32 = 0x00ff_ffff;
 /// Maximum declared state properties on one registered block.
 pub const MAX_BLOCK_STATE_PROPERTIES: usize = 7;
 /// Maximum possible state combinations on one registered block.
@@ -1833,6 +1835,15 @@ extern "C" {
         update_interval: i32,
         fire_immune: i32,
     ) -> i32;
+    #[link_name = "register_entity_spawn_egg"]
+    fn imported_register_entity_spawn_egg(
+        entity_path_pointer: i32,
+        entity_path_length: i32,
+        item_path_pointer: i32,
+        item_path_length: i32,
+        primary_color: i32,
+        secondary_color: i32,
+    ) -> i32;
     #[link_name = "register_entity_ai_goal"]
     fn imported_register_entity_ai_goal(
         path_pointer: i32,
@@ -3417,6 +3428,60 @@ pub fn register_entity(path: &str, definition: EntityDefinition) -> SjmlResult<(
     {
         Err(unsupported_target())
     }
+}
+
+/// Registers a vanilla-usable spawn egg for a generic entity declared by this module.
+///
+/// `entity_path` must have been passed to [`register_entity`] earlier in the same
+/// `#[mod_register]` callback. `item_path` is the egg's separate item registry path.
+/// Colors are 24-bit RGB values (`0x000000..=0xFFFFFF`); primary is the base tint
+/// and secondary is the spot tint. The host registers a `SpawnEggItem` only after
+/// the entity type is registered and adds the item to Minecraft's Spawn Eggs tab.
+pub fn register_entity_spawn_egg(
+    entity_path: &str,
+    item_path: &str,
+    primary_color: u32,
+    secondary_color: u32,
+) -> SjmlResult<()> {
+    validate_entity_spawn_egg(entity_path, item_path, primary_color, secondary_color)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies both validated paths and bounded colors before returning.
+        let status = unsafe {
+            imported_register_entity_spawn_egg(
+                entity_path.as_ptr() as usize as u32 as i32,
+                entity_path.len() as u32 as i32,
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                primary_color as i32,
+                secondary_color as i32,
+            )
+        };
+        return status_result(status, "host rejected the entity spawn-egg declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (entity_path, item_path, primary_color, secondary_color);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_entity_spawn_egg(
+    entity_path: &str,
+    item_path: &str,
+    primary_color: u32,
+    secondary_color: u32,
+) -> SjmlResult<()> {
+    validate_path(entity_path)?;
+    validate_path(item_path)?;
+    if primary_color > MAX_ENTITY_SPAWN_EGG_RGB_COLOR
+        || secondary_color > MAX_ENTITY_SPAWN_EGG_RGB_COLOR
+    {
+        return Err(invalid_argument(
+            "spawn-egg colors must be 24-bit RGB values from 0x000000 to 0xFFFFFF",
+        ));
+    }
+    Ok(())
 }
 
 /// Adds one bounded vanilla AI goal to an entity previously declared by this module.
@@ -5499,6 +5564,12 @@ mod tests {
                 .code(),
             ErrorCode::UnknownErrorCode
         );
+        assert_eq!(
+            register_entity_spawn_egg("ruby_mite", "ruby_mite_egg", 0x00ff_ffff, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
         let trade = VillagerTradeOffer::new(
             "minecraft:farmer",
             1,
@@ -6396,6 +6467,24 @@ mod tests {
                 .code(),
             ErrorCode::InvalidArgument
         );
+    }
+
+    #[test]
+    fn entity_spawn_egg_paths_and_rgb_colors_are_bounded() {
+        assert!(validate_entity_spawn_egg("ruby_mite", "ruby_mite_egg", 0, 0x00ff_ffff).is_ok());
+        for (entity_path, item_path, primary_color, secondary_color) in [
+            ("../ruby_mite", "ruby_mite_egg", 0, 0),
+            ("ruby_mite", "../egg", 0, 0),
+            ("ruby_mite", "ruby_mite_egg", 0x0100_0000, 0),
+            ("ruby_mite", "ruby_mite_egg", 0, 0x0100_0000),
+        ] {
+            assert_eq!(
+                validate_entity_spawn_egg(entity_path, item_path, primary_color, secondary_color)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
     }
 
     #[test]

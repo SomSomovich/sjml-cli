@@ -22,6 +22,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
         name.as_str(),
         "block.break"
             | "block.break_attempt"
+            | "block.drops_attempt"
             | "block.place_attempt"
             | "player.interaction"
             | "player.drop_attempt"
@@ -44,6 +45,8 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "block.fertilize_attempt"
             | "block.fluid_place_attempt"
             | "player.attack_attempt"
+            | "player.experience_change_attempt"
+            | "player.experience_level_change_attempt"
             | "player.fished_attempt"
             | "world.explosion_attempt"
             | "client.screen.key_pressed"
@@ -346,6 +349,13 @@ mod tests {
         );
         diagnostic(
             expand_event_async(
+                quote!(name = "block.drops_attempt"),
+                quote! { async fn drops_attempt(_: BlockDropsAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.drops_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
                 quote!(name = "block.place_attempt"),
                 quote! { async fn place_attempt(_: BlockPlaceAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
@@ -455,6 +465,28 @@ mod tests {
                 quote! { async fn attack_attempt(_: PlayerAttackAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "player.attack_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.experience_change_attempt"),
+                quote! {
+                    async fn experience_change_attempt(
+                        _: PlayerExperienceChangeAttempt,
+                    ) -> SjmlResult<()> { Ok(()) }
+                },
+            ),
+            "player.experience_change_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.experience_level_change_attempt"),
+                quote! {
+                    async fn experience_level_change_attempt(
+                        _: PlayerExperienceLevelChangeAttempt,
+                    ) -> SjmlResult<()> { Ok(()) }
+                },
+            ),
+            "player.experience_level_change_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

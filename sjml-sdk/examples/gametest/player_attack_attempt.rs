@@ -36,7 +36,11 @@ fn veto_armed_player_attack(event: PlayerAttackAttempt) -> SjmlResult<bool> {
 
     MATCHING_CALLBACKS.fetch_add(1, Ordering::Relaxed);
     let item_test = ITEM_TEST.load(Ordering::Relaxed);
-    let expected_target_type = if item_test { "minecraft:cow" } else { "minecraft:pig" };
+    let expected_target_type = if item_test {
+        "minecraft:cow"
+    } else {
+        "minecraft:pig"
+    };
     let valid = event.player_id.len() == 36
         && event.target_id.len() == 36
         && event.player_id != event.target_id
@@ -121,9 +125,14 @@ fn check_player_attack_attempt(_: NoArguments) -> SjmlResult<String> {
             && !ITEM_ARMED.load(Ordering::Relaxed)
             && SAW_VALID_ITEM_SNAPSHOT.swap(false, Ordering::Relaxed)
         {
-            Ok("owner-scoped item attack callback received one snapshot and vetoed the attack".to_owned())
+            Ok(
+                "owner-scoped item attack callback received one snapshot and vetoed the attack"
+                    .to_owned(),
+            )
         } else {
-            Err(failure("item.attack_attempt did not deliver one valid owner-scoped veto"))
+            Err(failure(
+                "item.attack_attempt did not deliver one valid owner-scoped veto",
+            ))
         }
     } else if valid_general && !ARMED.load(Ordering::Relaxed) {
         Ok("guest received one detached player attack attempt and vetoed it".to_owned())

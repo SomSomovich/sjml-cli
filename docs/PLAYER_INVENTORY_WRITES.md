@@ -45,8 +45,12 @@ Modules must declare and receive both `entity.read` and `inventory.write`. The o
 available on the logical server, uses the owning server thread, and re-resolves the live login
 session for each call. Foreign or stale handles, client contexts, static registration, and calls
 off-thread are denied. The ABI imports are
-`sjml_inventory_v1.set_player_slot(player_ptr, player_len, slot, item_id_ptr, item_id_len, count) -> i32`
-and `sjml_inventory_v1.set_player_damage(player_ptr, player_len, slot, damage) -> i32`.
+`sjml_inventory_v1.set_player_slot(player_ptr, player_len, slot, item_id_ptr, item_id_len, count) -> i32`,
+`sjml_inventory_v1.set_player_damage(player_ptr, player_len, slot, damage) -> i32`, and
+`sjml_inventory_v1.move_player_stack(player_ptr, player_len, source_slot, destination_slot, count) -> i32`.
 For adding an ordinary default item stack without replacing a slot, see
 [giving items to a player](PLAYER_INVENTORY_GIVE.md); it reports how many
 items fit and never drops the remainder.
+
+To move an exact count between two existing player slots while preserving all stack components,
+use [`player_inventory::move_stack`](PLAYER_INVENTORY_MOVE.md).

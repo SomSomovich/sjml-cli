@@ -2,7 +2,7 @@
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
-//! `player.abilities.write`; item cooldown changes require `player.cooldown.write`; action-bar messages require `player.ui.actionbar`, and title packets
+//! `player.abilities.write`; item cooldown changes require `player.cooldown.write`; action-bar messages require `player.ui.actionbar`, system chat messages require `player.chat.system_message`, and title packets
 //! require `player.ui.title`; module-owned tab-list header/footer changes require
 //! `player.ui.tab_list`; advancement changes require `player.advancement.write`; vanilla custom-stat
 //! changes require `player.statistics.write`. Player handles
@@ -23,7 +23,8 @@ use crate::Decoder;
 #[cfg(target_arch = "wasm32")]
 use crate::MAX_STRING_BYTES;
 use crate::{
-    ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
+    Encoder, ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, StableEncode,
+    WorldHandle,
 };
 
 /// Maximum number of detached status effects returned for one live player session.
@@ -719,6 +720,197 @@ pub const MAX_PLAYER_VELOCITY_COMPONENT: f64 = 64.0;
 pub const MAX_ACTION_BAR_TEXT_BYTES: usize = 1024;
 /// Maximum Unicode scalar values accepted for one literal player action-bar message.
 pub const MAX_ACTION_BAR_TEXT_CODE_POINTS: usize = 256;
+/// Maximum UTF-8 size accepted for one literal player system chat message.
+pub const MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES: usize = 1024;
+/// Maximum Unicode scalar values accepted for one literal player system chat message.
+pub const MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS: usize = 256;
+/// Maximum encoded payload for one typed rich system-chat component tree.
+pub const MAX_PLAYER_RICH_SYSTEM_MESSAGE_PAYLOAD_BYTES: usize = 8_192;
+/// Maximum UTF-8 bytes in one literal, hover, or click-action string.
+pub const MAX_PLAYER_RICH_SYSTEM_MESSAGE_STRING_BYTES: usize = 1_024;
+/// Maximum aggregate UTF-8 bytes across all rich message strings.
+pub const MAX_PLAYER_RICH_SYSTEM_MESSAGE_TOTAL_UTF8_BYTES: usize = 4_096;
+/// Maximum number of nodes, including hover text nodes.
+pub const MAX_PLAYER_RICH_SYSTEM_MESSAGE_NODES: usize = 64;
+/// Maximum tree nesting depth, counting a root node as depth one.
+pub const MAX_PLAYER_RICH_SYSTEM_MESSAGE_DEPTH: usize = 8;
+
+/// Supported named Minecraft chat colors plus explicit 24-bit RGB.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RichTextColor {
+    Rgb(u32),
+    Black,
+    DarkBlue,
+    DarkGreen,
+    DarkAqua,
+    DarkRed,
+    DarkPurple,
+    Gold,
+    Gray,
+    DarkGray,
+    Blue,
+    Green,
+    Aqua,
+    Red,
+    LightPurple,
+    Yellow,
+    White,
+}
+
+impl RichTextColor {
+    pub fn rgb(value: u32) -> SjmlResult<Self> {
+        if value > 0xFF_FFFF {
+            return Err(rich_text_invalid("RGB color must fit in 24 bits"));
+        }
+        Ok(Self::Rgb(value))
+    }
+}
+
+/// Safe click behavior; executing a command is deliberately unavailable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RichTextClickAction {
+    OpenUrl(String),
+    SuggestCommand(String),
+    CopyToClipboard(String),
+}
+
+impl RichTextClickAction {
+    pub fn open_url(value: impl Into<String>) -> SjmlResult<Self> {
+        let value = value.into();
+        validate_rich_text_string(&value, "open_url value")?;
+        if !valid_rich_http_url(&value) {
+            return Err(rich_text_invalid(
+                "open_url requires a valid HTTP(S) URI without user info",
+            ));
+        }
+        Ok(Self::OpenUrl(value))
+    }
+    pub fn suggest_command(value: impl Into<String>) -> SjmlResult<Self> {
+        let value = value.into();
+        validate_rich_text_string(&value, "suggest_command value")?;
+        Ok(Self::SuggestCommand(value))
+    }
+    pub fn copy_to_clipboard(value: impl Into<String>) -> SjmlResult<Self> {
+        let value = value.into();
+        validate_rich_text_string(&value, "copy_to_clipboard value")?;
+        Ok(Self::CopyToClipboard(value))
+    }
+}
+
+/// One literal text component with bounded nested children and optional show-text hover content.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RichTextNode {
+    text: String,
+    color: Option<RichTextColor>,
+    flags: u8,
+    click: Option<RichTextClickAction>,
+    hover: Option<RichText>,
+    children: Vec<Self>,
+}
+
+impl RichTextNode {
+    pub fn new(text: impl Into<String>) -> SjmlResult<Self> {
+        let text = text.into();
+        validate_rich_text_string(&text, "rich message text")?;
+        Ok(Self {
+            text,
+            color: None,
+            flags: 0,
+            click: None,
+            hover: None,
+            children: Vec::new(),
+        })
+    }
+    pub fn color(mut self, color: RichTextColor) -> SjmlResult<Self> {
+        if let RichTextColor::Rgb(value) = color {
+            if value > 0xFF_FFFF {
+                return Err(rich_text_invalid("RGB color must fit in 24 bits"));
+            }
+        }
+        self.color = Some(color);
+        Ok(self)
+    }
+    pub fn bold(mut self, enabled: bool) -> Self {
+        self.set_flag(1, enabled);
+        self
+    }
+    pub fn italic(mut self, enabled: bool) -> Self {
+        self.set_flag(1 << 1, enabled);
+        self
+    }
+    pub fn underline(mut self, enabled: bool) -> Self {
+        self.set_flag(1 << 2, enabled);
+        self
+    }
+    pub fn strikethrough(mut self, enabled: bool) -> Self {
+        self.set_flag(1 << 3, enabled);
+        self
+    }
+    pub fn click(mut self, action: RichTextClickAction) -> Self {
+        self.click = Some(action);
+        self
+    }
+    pub fn hover_text(mut self, value: RichText) -> SjmlResult<Self> {
+        validate_rich_text(&value, false)?;
+        self.hover = Some(value);
+        Ok(self)
+    }
+    pub fn child(mut self, child: RichTextNode) -> SjmlResult<Self> {
+        self.children.push(child);
+        validate_rich_node(&self, 1, &mut RichTextBudget::default(), true)?;
+        Ok(self)
+    }
+    fn set_flag(&mut self, flag: u8, enabled: bool) {
+        if enabled {
+            self.flags |= flag;
+        } else {
+            self.flags &= !flag;
+        }
+    }
+}
+
+/// Bounded tree of literal Minecraft text components.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RichText {
+    nodes: Vec<RichTextNode>,
+}
+
+impl RichText {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn plain(text: impl Into<String>) -> SjmlResult<Self> {
+        let mut result = Self::new();
+        result.push(RichTextNode::new(text)?)?;
+        Ok(result)
+    }
+    pub fn push(&mut self, node: RichTextNode) -> SjmlResult<()> {
+        self.nodes.push(node);
+        if let Err(error) = validate_rich_text(self, true) {
+            self.nodes.pop();
+            return Err(error);
+        }
+        Ok(())
+    }
+    pub fn nodes(&self) -> &[RichTextNode] {
+        &self.nodes
+    }
+    fn write_nodes(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_length(self.nodes.len())?;
+        for node in &self.nodes {
+            write_rich_node(node, encoder)?;
+        }
+        Ok(())
+    }
+}
+
+impl StableEncode for RichText {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_rich_text(self, false)?;
+        encoder.write_u32(1)?;
+        self.write_nodes(encoder)
+    }
+}
 /// Maximum UTF-8 size accepted for a literal player title or subtitle.
 pub const MAX_PLAYER_TITLE_TEXT_BYTES: usize = 1024;
 /// Maximum Unicode scalar values accepted for a literal player title or subtitle.
@@ -929,6 +1121,16 @@ extern "C" {
     ) -> i32;
     #[link_name = "action_bar"]
     fn imported_action_bar(handle: i32, handle_length: i32, text: i32, text_length: i32) -> i32;
+    #[link_name = "system_message"]
+    fn imported_system_message(handle: i32, handle_length: i32, text: i32, text_length: i32)
+        -> i32;
+    #[link_name = "rich_system_message"]
+    fn imported_rich_system_message(
+        handle: i32,
+        handle_length: i32,
+        payload: i32,
+        payload_length: i32,
+    ) -> i32;
     #[link_name = "title"]
     fn imported_title(
         handle: i32,
@@ -1275,6 +1477,373 @@ pub fn send_action_bar(handle: PlayerHandle, text: &str) -> SjmlResult<()> {
         let _ = handle;
         Err(unsupported_target())
     }
+}
+
+/// Sends bounded literal text to one online player as an unsigned vanilla system-chat message.
+///
+/// Minecraft delivers this on the normal chat channel. The text is not interpreted as JSON, a
+/// translation key, a command, or a signed message from the player. It must be nonblank, contain
+/// no control characters, and fit within 1,024 UTF-8 bytes and 256 Unicode scalar values. Requires
+/// declared and administrator-granted `entity.read` and `player.chat.system_message`; the host
+/// revalidates the live player session and owning logical-server thread on every call. Client
+/// modules and static registration cannot send messages. Each module may send at most ten system
+/// messages in any rolling five-second window.
+pub fn send_system_message(handle: PlayerHandle, text: &str) -> SjmlResult<()> {
+    validate_system_message_text(text)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and borrowed UTF-8 text remain live during this import.
+        let status = unsafe {
+            imported_system_message(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                text.as_ptr() as usize as u32 as i32,
+                text.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the player system chat message")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sends a bounded typed text-component tree as an unsigned system-chat message.
+///
+/// Nodes contain literal text, optional RGB or named color, basic style flags, nested children,
+/// an optional `show_text` hover tree, and safe `open_url`, `suggest_command`, or
+/// `copy_to_clipboard` click actions. Values are never interpreted as raw JSON. `open_url` only
+/// accepts HTTP(S) URIs without user info; command execution is not exposed. The tree is limited
+/// to 8 levels, 64 total nodes, 1,024 UTF-8 bytes per string, 4,096 aggregate string bytes, and an
+/// 8,192-byte encoded payload. Requires `entity.read` and `player.chat.system_message`; server
+/// thread, live handle, rate limit, and permissions are checked by the host.
+pub fn send_rich_system_message(handle: PlayerHandle, message: &RichText) -> SjmlResult<()> {
+    validate_rich_text(message, false)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let payload = to_bytes(message)?;
+        if payload.len() > MAX_PLAYER_RICH_SYSTEM_MESSAGE_PAYLOAD_BYTES {
+            return Err(rich_text_too_large(
+                "rich system message payload exceeds 8192 bytes",
+            ));
+        }
+        // SAFETY: both encoded slices remain live for the complete host import call.
+        let status = unsafe {
+            imported_rich_system_message(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as i32,
+                payload.as_ptr() as usize as u32 as i32,
+                payload.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the rich player system chat message")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, message);
+        Err(unsupported_target())
+    }
+}
+
+fn write_rich_node(node: &RichTextNode, encoder: &mut Encoder) -> SjmlResult<()> {
+    write_rich_string(encoder, &node.text)?;
+    encoder.write_u8(node.flags)?;
+    match node.color {
+        None => encoder.write_u8(0)?,
+        Some(RichTextColor::Rgb(rgb)) => {
+            encoder.write_u8(1)?;
+            encoder.write_u32(rgb)?;
+        }
+        Some(color) => {
+            encoder.write_u8(2)?;
+            encoder.write_u8(named_rich_color_wire(color)?)?;
+        }
+    }
+    match &node.click {
+        None => encoder.write_u8(0)?,
+        Some(RichTextClickAction::OpenUrl(value)) => {
+            encoder.write_u8(1)?;
+            write_rich_string(encoder, value)?;
+        }
+        Some(RichTextClickAction::SuggestCommand(value)) => {
+            encoder.write_u8(2)?;
+            write_rich_string(encoder, value)?;
+        }
+        Some(RichTextClickAction::CopyToClipboard(value)) => {
+            encoder.write_u8(3)?;
+            write_rich_string(encoder, value)?;
+        }
+    }
+    match &node.hover {
+        None => encoder.write_u8(0)?,
+        Some(hover) => {
+            encoder.write_u8(1)?;
+            hover.write_nodes(encoder)?;
+        }
+    }
+    encoder.write_length(node.children.len())?;
+    for child in &node.children {
+        write_rich_node(child, encoder)?;
+    }
+    Ok(())
+}
+
+fn write_rich_string(encoder: &mut Encoder, value: &str) -> SjmlResult<()> {
+    encoder.write_length(value.len())?;
+    encoder.write_raw(value.as_bytes())
+}
+
+fn named_rich_color_wire(color: RichTextColor) -> SjmlResult<u8> {
+    let value = match color {
+        RichTextColor::Black => 0,
+        RichTextColor::DarkBlue => 1,
+        RichTextColor::DarkGreen => 2,
+        RichTextColor::DarkAqua => 3,
+        RichTextColor::DarkRed => 4,
+        RichTextColor::DarkPurple => 5,
+        RichTextColor::Gold => 6,
+        RichTextColor::Gray => 7,
+        RichTextColor::DarkGray => 8,
+        RichTextColor::Blue => 9,
+        RichTextColor::Green => 10,
+        RichTextColor::Aqua => 11,
+        RichTextColor::Red => 12,
+        RichTextColor::LightPurple => 13,
+        RichTextColor::Yellow => 14,
+        RichTextColor::White => 15,
+        RichTextColor::Rgb(_) => {
+            return Err(rich_text_invalid("RGB color has no named-color code"))
+        }
+    };
+    Ok(value)
+}
+
+#[derive(Default)]
+struct RichTextBudget {
+    nodes: usize,
+    bytes: usize,
+    visible: String,
+}
+
+fn validate_rich_text(value: &RichText, allow_empty: bool) -> SjmlResult<()> {
+    if value.nodes.is_empty() {
+        if allow_empty {
+            return Ok(());
+        }
+        return Err(rich_text_invalid(
+            "rich system message must contain at least one node",
+        ));
+    }
+    let mut budget = RichTextBudget::default();
+    for node in &value.nodes {
+        validate_rich_node(node, 1, &mut budget, true)?;
+    }
+    if budget.visible.trim().is_empty() {
+        return Err(rich_text_invalid(
+            "rich system message must contain visible non-whitespace text",
+        ));
+    }
+    if budget.bytes > MAX_PLAYER_RICH_SYSTEM_MESSAGE_TOTAL_UTF8_BYTES {
+        return Err(rich_text_too_large(
+            "rich system message strings exceed 4096 UTF-8 bytes total",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_rich_node(
+    node: &RichTextNode,
+    depth: usize,
+    budget: &mut RichTextBudget,
+    visible: bool,
+) -> SjmlResult<()> {
+    if depth > MAX_PLAYER_RICH_SYSTEM_MESSAGE_DEPTH {
+        return Err(rich_text_too_large(
+            "rich system message nesting exceeds depth 8",
+        ));
+    }
+    budget.nodes += 1;
+    if budget.nodes > MAX_PLAYER_RICH_SYSTEM_MESSAGE_NODES {
+        return Err(rich_text_too_large(
+            "rich system message contains more than 64 nodes",
+        ));
+    }
+    validate_rich_text_string(&node.text, "rich message text")?;
+    budget.bytes = budget
+        .bytes
+        .checked_add(node.text.len())
+        .ok_or_else(|| rich_text_too_large("rich message string size overflowed"))?;
+    if visible {
+        budget.visible.push_str(&node.text);
+    }
+    if let Some(action) = &node.click {
+        let value = match action {
+            RichTextClickAction::OpenUrl(value) => {
+                if !valid_rich_http_url(value) {
+                    return Err(rich_text_invalid(
+                        "open_url requires a valid HTTP(S) URI without user info",
+                    ));
+                }
+                value
+            }
+            RichTextClickAction::SuggestCommand(value)
+            | RichTextClickAction::CopyToClipboard(value) => value,
+        };
+        validate_rich_text_string(value, "click action value")?;
+        budget.bytes = budget
+            .bytes
+            .checked_add(value.len())
+            .ok_or_else(|| rich_text_too_large("rich message string size overflowed"))?;
+    }
+    if let Some(RichTextColor::Rgb(value)) = node.color {
+        if value > 0xFF_FFFF {
+            return Err(rich_text_invalid("RGB color must fit in 24 bits"));
+        }
+    }
+    if let Some(hover) = &node.hover {
+        if hover.nodes.is_empty() {
+            return Err(rich_text_invalid("show_text hover tree cannot be empty"));
+        }
+        for child in &hover.nodes {
+            validate_rich_node(child, depth + 1, budget, false)?;
+        }
+    }
+    for child in &node.children {
+        validate_rich_node(child, depth + 1, budget, visible)?;
+    }
+    if budget.bytes > MAX_PLAYER_RICH_SYSTEM_MESSAGE_TOTAL_UTF8_BYTES {
+        return Err(rich_text_too_large(
+            "rich system message strings exceed 4096 UTF-8 bytes total",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_rich_text_string(value: &str, label: &str) -> SjmlResult<()> {
+    if value.len() > MAX_PLAYER_RICH_SYSTEM_MESSAGE_STRING_BYTES {
+        return Err(rich_text_too_large(format!(
+            "{label} exceeds 1024 UTF-8 bytes"
+        )));
+    }
+    if value.trim().is_empty() {
+        return Err(rich_text_invalid(format!("{label} must not be blank")));
+    }
+    if value
+        .chars()
+        .any(|ch| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}'))
+    {
+        return Err(rich_text_invalid(format!(
+            "{label} contains a control character"
+        )));
+    }
+    Ok(())
+}
+
+fn valid_rich_http_url(value: &str) -> bool {
+    let uri_bytes = value.as_bytes();
+    let mut index = 0;
+    while index < uri_bytes.len() {
+        let byte = uri_bytes[index];
+        if byte == b'%' {
+            if index + 2 >= uri_bytes.len()
+                || !uri_bytes[index + 1].is_ascii_hexdigit()
+                || !uri_bytes[index + 2].is_ascii_hexdigit()
+            {
+                return false;
+            }
+            index += 3;
+            continue;
+        }
+        if !(byte.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&byte)) {
+            return false;
+        }
+        index += 1;
+    }
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return false;
+    };
+    if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")) {
+        return false;
+    }
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    if authority.is_empty() || authority.contains('@') {
+        return false;
+    }
+    let (host, port) = if let Some(bracketed) = authority.strip_prefix('[') {
+        let Some(close) = bracketed.find(']') else {
+            return false;
+        };
+        if bracketed[..close].parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        let suffix = &bracketed[close + 1..];
+        if suffix.is_empty() {
+            (&bracketed[..close], None)
+        } else if let Some(port) = suffix.strip_prefix(':') {
+            (&bracketed[..close], Some(port))
+        } else {
+            return false;
+        }
+    } else {
+        let mut parts = authority.split(':');
+        let host = parts.next().unwrap_or_default();
+        let port = parts.next();
+        if parts.next().is_some() {
+            return false;
+        }
+        (host, port)
+    };
+    let valid_host = !host.is_empty()
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && !host.starts_with('-')
+        && !host.ends_with('-')
+        && !host.contains("..")
+        && host
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | ':'));
+    let valid_port = port.is_none_or(|port| {
+        !port.is_empty()
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+            && port.parse::<u16>().is_ok_and(|number| number != 0)
+    });
+    valid_host && valid_port
+}
+
+fn rich_text_invalid(message: impl Into<String>) -> SjmlError {
+    SjmlError::new(ErrorCode::InvalidArgument, message)
+}
+fn rich_text_too_large(message: impl Into<String>) -> SjmlError {
+    SjmlError::new(ErrorCode::PayloadTooLarge, message)
+}
+
+fn validate_system_message_text(text: &str) -> SjmlResult<()> {
+    if text.trim().is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player system message must not be blank",
+        ));
+    }
+    if text.len() > MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES
+        || text.chars().count() > MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player system message exceeds 1024 UTF-8 bytes or 256 code points",
+        ));
+    }
+    if text.chars().any(char::is_control) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player system message must not contain control characters",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_action_bar_text(text: &str) -> SjmlResult<()> {
@@ -2442,12 +3011,14 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, apply_effect, clear_team, set_rotation, set_team, team, teleport,
-        teleport_to_world, validate_player_tab_list_pair, validate_player_tab_list_text,
-        validate_player_team_name, validate_player_title_text, vitals, PlayerMotion,
-        PlayerTeamResponse, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
-        MAX_PLAYER_ACTIVE_EFFECTS, MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES,
-        MAX_PLAYER_ROTATION_YAW, MAX_PLAYER_STATISTIC_VALUE, MAX_PLAYER_TAB_LIST_TEXT_BYTES,
+        active_effects, apply_effect, clear_team, send_system_message, set_rotation, set_team,
+        team, teleport, teleport_to_world, validate_player_tab_list_pair,
+        validate_player_tab_list_text, validate_player_team_name, validate_player_title_text,
+        validate_system_message_text, vitals, PlayerMotion, PlayerTeamResponse, PlayerTeleport,
+        PlayerTitleTimings, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
+        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_ROTATION_YAW,
+        MAX_PLAYER_STATISTIC_VALUE, MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES,
+        MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS, MAX_PLAYER_TAB_LIST_TEXT_BYTES,
         MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS, MAX_PLAYER_TEAM_NAME_BYTES,
         MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
     };
@@ -2680,6 +3251,173 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn system_chat_text_is_literal_control_free_and_unicode_bounded() {
+        assert_eq!(MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES, 1_024);
+        assert_eq!(MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS, 256);
+        assert!(validate_system_message_text("Привет ✨ {\"text\":\"literal\"}").is_ok());
+        assert!(validate_system_message_text(&"😀".repeat(256)).is_ok());
+        for invalid in ["", " \t", "line\nfeed", "zero\0width"] {
+            assert_eq!(
+                validate_system_message_text(invalid).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            validate_system_message_text(&"x".repeat(MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+        assert_eq!(
+            validate_system_message_text(
+                &"😀".repeat(MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS + 1)
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::PayloadTooLarge
+        );
+
+        let handle = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            send_system_message(handle, "line\nfeed")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument,
+            "invalid text is rejected before a host call"
+        );
+        assert_eq!(
+            send_system_message(handle, "valid").unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid text reaches the target-specific host import"
+        );
+    }
+
+    #[test]
+    fn rich_system_message_builder_encodes_typed_nodes_and_enforces_bounds() {
+        use super::{
+            RichText, RichTextClickAction, RichTextColor, RichTextNode,
+            MAX_PLAYER_RICH_SYSTEM_MESSAGE_DEPTH, MAX_PLAYER_RICH_SYSTEM_MESSAGE_NODES,
+            MAX_PLAYER_RICH_SYSTEM_MESSAGE_PAYLOAD_BYTES,
+            MAX_PLAYER_RICH_SYSTEM_MESSAGE_TOTAL_UTF8_BYTES,
+        };
+
+        let hover = RichText::plain("Tooltip").unwrap();
+        let child = RichTextNode::new(" child")
+            .unwrap()
+            .color(RichTextColor::rgb(0xC0D0E0).unwrap())
+            .unwrap();
+        let root = RichTextNode::new("Open")
+            .unwrap()
+            .color(RichTextColor::Gold)
+            .unwrap()
+            .bold(true)
+            .click(RichTextClickAction::open_url("https://example.com/path").unwrap())
+            .hover_text(hover)
+            .unwrap()
+            .child(child)
+            .unwrap();
+        let mut message = RichText::new();
+        message.push(root).unwrap();
+        let encoded = crate::to_bytes(&message).unwrap();
+        assert!(encoded.len() <= MAX_PLAYER_RICH_SYSTEM_MESSAGE_PAYLOAD_BYTES);
+        assert_eq!(
+            &encoded[..8],
+            &[1, 0, 0, 0, 1, 0, 0, 0],
+            "schema v1 is followed by one top-level node"
+        );
+        assert!(encoded
+            .windows(b"https://example.com/path".len())
+            .any(|window| window == b"https://example.com/path"));
+
+        for invalid in [
+            "javascript:alert(1)",
+            "https://user@example.com",
+            "https://example.com\n",
+        ] {
+            assert_eq!(
+                RichTextClickAction::open_url(invalid).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+            );
+        }
+        assert_eq!(
+            RichTextClickAction::suggest_command("\n")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            RichTextClickAction::copy_to_clipboard("")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let invalid_click =
+            RichTextNode::new("unsafe")
+                .unwrap()
+                .click(RichTextClickAction::OpenUrl(
+                    "javascript:alert(1)".to_owned(),
+                ));
+        let mut invalid_message = RichText::new();
+        assert_eq!(
+            invalid_message.push(invalid_click).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            RichTextNode::new("x".repeat(MAX_PLAYER_RICH_SYSTEM_MESSAGE_TOTAL_UTF8_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge,
+            "individual strings have an independent 1,024-byte cap",
+        );
+        let mut aggregate = RichText::new();
+        for _ in 0..4 {
+            aggregate
+                .push(RichTextNode::new("x".repeat(1_024)).unwrap())
+                .unwrap();
+        }
+        assert_eq!(
+            aggregate
+                .push(RichTextNode::new("overflow").unwrap())
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge,
+            "all literal, hover, and click strings share a 4,096-byte budget",
+        );
+
+        let handle = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            super::send_rich_system_message(handle, &RichText::new())
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument,
+        );
+        assert_eq!(
+            super::send_rich_system_message(handle, &message)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "a valid typed tree reaches the target-specific host import",
+        );
+
+        let mut deep = RichTextNode::new("leaf").unwrap();
+        for _ in 1..MAX_PLAYER_RICH_SYSTEM_MESSAGE_DEPTH {
+            deep = RichTextNode::new("n").unwrap().child(deep).unwrap();
+        }
+        assert!(RichTextNode::new("too deep").unwrap().child(deep).is_err());
+
+        let mut many = RichText::new();
+        for _ in 0..MAX_PLAYER_RICH_SYSTEM_MESSAGE_NODES {
+            many.push(RichTextNode::new("x").unwrap()).unwrap();
+        }
+        assert_eq!(
+            many.push(RichTextNode::new("overflow").unwrap())
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge,
         );
     }
 

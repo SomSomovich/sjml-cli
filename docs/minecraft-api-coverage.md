@@ -1,7 +1,7 @@
 # Minecraft API coverage
 
-This is a source-based coverage matrix for the checkout at host **0.92.0**,
-SDK/macros **0.90.0**, ABI **1.82.0**, Minecraft **1.21.1**, and NeoForge
+This is a source-based coverage matrix for the checkout at host **0.93.0**,
+SDK/macros **0.91.0**, ABI **1.83.0**, Minecraft **1.21.1**, and NeoForge
 **21.1.265**. It records the public surface that exists in this tree, its path
 from a Minecraft hook to Rust/WASM, and the limits that remain. It is not a
 roadmap or a claim of complete Minecraft mod compatibility. The matrix tracks the current working tree. The verification section records the latest integrated full-suite run and its limits.
@@ -15,6 +15,27 @@ bound and encode the byte boundary; domain-specific schemas/codecs are cited
 where present. Rust `extern` imports and public wrappers are in the cited SDK
 files. Registration callbacks and event-export callbacks use their own
 documented ABI paths rather than a host import for every operation.
+
+## Current ABI 1.83.0 additions
+
+The current slice adds bounded count and durability updates for existing block
+inventory stacks, player-stack count updates, and component-preserving player
+slot moves. It adds same-dimension teleports for loaded non-player entities,
+custom-name visibility controls, and static vanilla spawn eggs for registered
+mobs. Synchronous callbacks now expose bounded block-drop suppression and
+replaceable/cancellable XP point and level changes. Players can also receive
+bounded rich unsigned system messages with literal text, formatting, hover
+text, and safe click actions. See the corresponding guides for
+[block-stack count](BLOCK_INVENTORY_SET_COUNT.md),
+[block-stack durability](BLOCK_INVENTORY_DURABILITY.md),
+[player inventory writes](PLAYER_INVENTORY_WRITES.md),
+[player inventory moves](PLAYER_INVENTORY_MOVE.md),
+[entity teleport](ENTITY_TELEPORT.md),
+[name visibility](ENTITY_CUSTOM_NAME_VISIBILITY.md),
+[spawn eggs](ENTITY_SPAWN_EGGS.md), [block drops](BLOCK_DROPS_ATTEMPT.md),
+[XP point changes](PLAYER_EXPERIENCE_CHANGE_ATTEMPT.md),
+[XP level changes](PLAYER_EXPERIENCE_LEVEL_CHANGE_ATTEMPT.md), and
+[rich system messages](PLAYER_RICH_SYSTEM_MESSAGES.md).
 
 ## Status definitions
 
@@ -68,6 +89,7 @@ category counts, not percentages of Minecraft's total extension surface.
 
 ## What the evidence establishes
 
+- On 2026-11-13, host 0.93.0 / ABI 1.83.0 / SDK/macros 0.91.0 / private CLI 0.1.23 passed Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer`: 1,274 host tests, 474 core tests (one skipped), and all 146 required GameTests passed. The GameTests cover component-preserving stack count/durability changes, transactional player inventory moves, loaded-only entity teleportation, custom-name visibility, vanilla spawn-egg use for a registered mob, block-drop suppression without cancelling block breaks, and live player XP change callbacks. Cargo passed 26 CLI, 47 macro, 389 SDK unit, 172 SDK integration, and 12 documentation tests; strict workspace Clippy and SDK wasm32 passed. The root, multi-module, world-render, and OpenGL-geometry example workspaces passed offline tests, strict Clippy, and wasm32 builds. These headless checks do not verify visible client behavior or remote multiplayer.
 - On 2026-11-13, host 0.92.0 / ABI 1.82.0 / SDK/macros 0.90.0 / private CLI 0.1.22 passed Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer`: 1,220 host tests and 459 core tests passed (one core test skipped), with all 143 required GameTests passing. Live GameTests cover block-inventory enchantments, module-owned item attack veto, static villager initial demand, and entity-storage chunk safety. Cargo passed 26 CLI, 46 macro, 371 SDK unit, 168 SDK integration, and 12 doc tests; strict Clippy, SDK wasm32, and native/Clippy/wasm32 checks for all four example workspaces passed. These headless checks do not verify visible client behavior or remote multiplayer.
 - On 2026-11-13, host 0.91.0 / ABI 1.81.0 / SDK/macros 0.89.0 / private CLI 0.1.21 passed Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer`: 1,209 host tests and 456 core tests passed (one skipped), and all 140 required GameTests passed. New server GameTests exercise player equipment-change dispatch, block-inventory lore round-trip/preservation, and live registered-item stack size. The CLI workspace passed 26 CLI, 46 macro, 371 SDK unit, 168 SDK integration, and 12 doc tests; strict Clippy, SDK wasm32, and native/Clippy/wasm32 checks for all four example workspaces passed. Cursor sampling and reset behavior have host/core/SDK tests but still need a display-backed client check; remote multiplayer remains unverified.
 

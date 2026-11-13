@@ -22,6 +22,18 @@ pub const MAX_CRAFTED_ITEM_COUNT: i32 = 1_000_000;
 pub const MAX_FISHED_DROPS: usize = 16;
 /// Maximum count represented by one detached `player.fished_attempt` drop.
 pub const MAX_FISHED_ITEM_COUNT: u32 = 1_000_000;
+/// Maximum detached computed item drops included in one `block.drops_attempt` callback.
+pub const MAX_BLOCK_DROPS_ATTEMPT_DROPS: usize = 32;
+/// Maximum count represented by one detached `block.drops_attempt` item snapshot.
+pub const MAX_BLOCK_DROPS_ATTEMPT_ITEM_COUNT: u32 = 1_000_000;
+/// Maximum durability value represented by one detached `block.drops_attempt` item.
+pub const MAX_BLOCK_DROPS_ATTEMPT_DURABILITY: u32 = 1_000_000;
+/// Maximum experience amount represented by one `block.drops_attempt` event.
+pub const MAX_BLOCK_DROPS_ATTEMPT_EXPERIENCE: u32 = 1_000_000;
+/// Maximum serialized payload size for one `block.drops_attempt` callback.
+pub const MAX_BLOCK_DROPS_ATTEMPT_PAYLOAD_BYTES: usize = 16_384;
+/// Maximum callbacks invoked for one computed block-drop event.
+pub const MAX_BLOCK_DROPS_ATTEMPT_CALLBACKS: usize = 64;
 /// Separate grant required to veto `client.action_attempt` actions.
 pub const CLIENT_ACTION_CANCEL_CAPABILITY: &str = "client.input.action_cancel";
 /// Separate grant required to observe player advancement criterion progress.
@@ -32,6 +44,18 @@ pub const PLAYER_EQUIPMENT_OBSERVE_CAPABILITY: &str = "player.equipment.observe"
 pub const MAX_PLAYER_EQUIPMENT_ITEM_COUNT: u32 = 1_000_000;
 /// Maximum callbacks invoked for one physical-client action attempt.
 pub const MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS: usize = 64;
+/// Minimum XP delta accepted from `PlayerExperienceChangeAction::SetAmount`.
+pub const MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT: i32 = -1_000_000;
+/// Maximum XP delta accepted from `PlayerExperienceChangeAction::SetAmount`.
+pub const MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT: i32 = 1_000_000;
+/// Maximum level represented by a detached `player.experience_change_attempt` snapshot.
+pub const MAX_PLAYER_EXPERIENCE_LEVEL: i32 = 20_000;
+/// Minimum level delta accepted by `PlayerExperienceLevelChangeAction::SetLevels`.
+pub const MIN_PLAYER_EXPERIENCE_LEVEL_DELTA: i32 = -20_000;
+/// Maximum level delta accepted by `PlayerExperienceLevelChangeAction::SetLevels`.
+pub const MAX_PLAYER_EXPERIENCE_LEVEL_DELTA: i32 = 20_000;
+/// Maximum `level_before` value represented by the level-change event snapshot.
+pub const MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT: i32 = 1_000_000;
 
 /// Synchronous, non-cancellable snapshot emitted after meaningful logical-server player movement.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -1438,6 +1462,59 @@ pub struct BlockBreakAttempt {
     pub z: i32,
 }
 
+/// Detached registry ID, count and durability values for a block-drop tool or result.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockDropsItemSnapshot {
+    /// Canonical registry ID of the item, without components or NBT.
+    pub item_id: String,
+    /// Stack count, bounded by the host to `1..=1_000_000`.
+    pub count: u32,
+    /// Current item damage, present only when the item uses durability.
+    pub damage: Option<u32>,
+    /// Maximum durability, present together with `damage` for damageable items.
+    pub max_damage: Option<u32>,
+}
+
+/// Detached identity of the entity that broke a block, when NeoForge provides one.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockDropsBreakerSnapshot {
+    /// Canonical UUID string of the breaker.
+    pub entity_id: String,
+    /// Canonical registry ID of the breaker's entity type.
+    pub entity_type_id: String,
+}
+
+/// Synchronous cancellable snapshot of already-computed block drops on the logical server.
+///
+/// Return `Ok(true)` from a `#[event(name = "block.drops_attempt")]` handler to cancel the
+/// item and experience drops. NeoForge fires this after computing drops and before spawning
+/// them; the host leaves the NeoForge event and block's post-break hook active, so the block break
+/// itself is not rolled back. The payload contains only bounded IDs,
+/// counts, durability, position and experience, never live Minecraft objects, item components or
+/// NBT. A veto requires both `events.subscribe` and `events.cancel`.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockDropsAttempt {
+    /// Canonical resource location of the dimension containing the broken block.
+    pub dimension_id: String,
+    /// Position of the block whose computed drops are being considered.
+    pub position: BlockPos,
+    /// Registry ID of the block type; block-state properties are omitted.
+    pub block_id: String,
+    /// Identity of the breaker, if the event supplied one.
+    pub breaker: Option<BlockDropsBreakerSnapshot>,
+    /// Detached tool ID/count/durability, absent if no tool was used.
+    pub tool: Option<BlockDropsItemSnapshot>,
+    /// Up to 32 detached computed drops; item components and NBT are omitted.
+    pub drops: Vec<BlockDropsItemSnapshot>,
+    /// Computed experience amount, bounded by the host to `0..=1_000_000`.
+    pub experience: u32,
+    /// Whether the original drop list contained more entries than this bounded snapshot.
+    pub drops_truncated: bool,
+}
+
 /// Synchronous, non-cancellable callback for one scheduled tick of a module-owned registered block.
 ///
 /// The host dispatches only to the module that declared `block_id`, requires `events.subscribe`,
@@ -1607,6 +1684,256 @@ pub struct PlayerAttackAttempt {
     pub target_y: f64,
     /// Target's Z coordinate when the attack hook ran.
     pub target_z: f64,
+}
+
+/// Synchronous cancellable snapshot of a logical-server XP change request.
+///
+/// The callback receives only detached identity and XP values. Return a
+/// [`PlayerExperienceChangeAction`] to continue, cancel, or replace the requested delta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerExperienceChangeAttempt {
+    /// Canonical UUID string of the player whose XP is changing.
+    pub player_id: String,
+    /// Player level before this XP change is applied.
+    pub level_before: i32,
+    /// Progress toward the next level before this XP change is applied, in `0.0..=1.0`.
+    pub progress_before: f32,
+    /// XP delta requested by Minecraft before callbacks run.
+    pub requested_amount: i32,
+}
+
+impl StableEncode for PlayerExperienceChangeAttempt {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_experience_change_attempt(self)?;
+        encoder.write_i32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encoder.write_i32(self.level_before)?;
+        encoder.write_f32(self.progress_before)?;
+        encoder.write_i32(self.requested_amount)
+    }
+}
+
+impl StableDecode for PlayerExperienceChangeAttempt {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema_version = decoder.read_i32()?;
+        if schema_version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!(
+                    "PlayerExperienceChangeAttempt schema version {schema_version} is unsupported"
+                ),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            level_before: decoder.read_i32()?,
+            progress_before: decoder.read_f32()?,
+            requested_amount: decoder.read_i32()?,
+        };
+        validate_player_experience_change_attempt(&event)?;
+        Ok(event)
+    }
+}
+
+fn validate_player_experience_change_attempt(
+    event: &PlayerExperienceChangeAttempt,
+) -> SjmlResult<()> {
+    if !canonical_uuid(&event.player_id)
+        || event.level_before < 0
+        || event.level_before > MAX_PLAYER_EXPERIENCE_LEVEL
+        || !event.progress_before.is_finite()
+        || !(0.0..=1.0).contains(&event.progress_before)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player experience change attempt contains invalid detached player XP data",
+        ));
+    }
+    if event.player_id.len() > 256 {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player experience change attempt UUID exceeds the 256-byte limit",
+        ));
+    }
+    Ok(())
+}
+
+/// Synchronous server-thread decision returned by `player.experience_change_attempt`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum PlayerExperienceChangeAction {
+    /// Keep the originally requested XP delta and allow later handlers to decide.
+    Pass,
+    /// Cancel this XP change.
+    Cancel,
+    /// Replace the requested XP delta with a bounded amount.
+    SetAmount(i32),
+}
+
+impl StableEncode for PlayerExperienceChangeAction {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        match self {
+            Self::Pass => encoder.write_u8(0),
+            Self::Cancel => encoder.write_u8(1),
+            Self::SetAmount(amount) => {
+                validate_player_experience_change_amount(*amount)?;
+                encoder.write_u8(2)?;
+                encoder.write_i32(*amount)
+            }
+        }
+    }
+}
+
+impl StableDecode for PlayerExperienceChangeAction {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u8()? {
+            0 => Ok(Self::Pass),
+            1 => Ok(Self::Cancel),
+            2 => {
+                let amount = decoder.read_i32()?;
+                validate_player_experience_change_amount(amount)?;
+                Ok(Self::SetAmount(amount))
+            }
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("player experience change action code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+fn validate_player_experience_change_amount(amount: i32) -> SjmlResult<()> {
+    if !(MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT..=MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT)
+        .contains(&amount)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            format!(
+                "player experience change amount must be between {MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT} and {MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Synchronous cancellable snapshot of a logical-server XP level change request.
+///
+/// The callback receives only detached identity and level values. Return a
+/// [`PlayerExperienceLevelChangeAction`] to continue, cancel, or replace the requested delta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerExperienceLevelChangeAttempt {
+    /// Canonical UUID string of the player whose level is changing.
+    pub player_id: String,
+    /// Player level before this level delta is applied.
+    pub level_before: i32,
+    /// Level delta requested by Minecraft before callbacks run.
+    pub requested_levels: i32,
+}
+
+impl StableEncode for PlayerExperienceLevelChangeAttempt {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_experience_level_change_attempt(self)?;
+        encoder.write_i32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encoder.write_i32(self.level_before)?;
+        encoder.write_i32(self.requested_levels)
+    }
+}
+
+impl StableDecode for PlayerExperienceLevelChangeAttempt {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema_version = decoder.read_i32()?;
+        if schema_version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!(
+                    "PlayerExperienceLevelChangeAttempt schema version {schema_version} is unsupported"
+                ),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            level_before: decoder.read_i32()?,
+            requested_levels: decoder.read_i32()?,
+        };
+        validate_player_experience_level_change_attempt(&event)?;
+        Ok(event)
+    }
+}
+
+fn validate_player_experience_level_change_attempt(
+    event: &PlayerExperienceLevelChangeAttempt,
+) -> SjmlResult<()> {
+    if !canonical_uuid(&event.player_id)
+        || event.level_before < 0
+        || event.level_before > MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player experience level change attempt contains invalid detached player data",
+        ));
+    }
+    if event.player_id.len() > 256 {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player experience level change attempt UUID exceeds the 256-byte limit",
+        ));
+    }
+    Ok(())
+}
+
+/// Synchronous server-thread decision returned by `player.experience_level_change_attempt`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum PlayerExperienceLevelChangeAction {
+    /// Keep the originally requested level delta and allow later handlers to decide.
+    Pass,
+    /// Cancel this level change.
+    Cancel,
+    /// Replace the requested level delta with a bounded value.
+    SetLevels(i32),
+}
+
+impl StableEncode for PlayerExperienceLevelChangeAction {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        match self {
+            Self::Pass => encoder.write_u8(0),
+            Self::Cancel => encoder.write_u8(1),
+            Self::SetLevels(levels) => {
+                validate_player_experience_level_delta(*levels)?;
+                encoder.write_u8(2)?;
+                encoder.write_i32(*levels)
+            }
+        }
+    }
+}
+
+impl StableDecode for PlayerExperienceLevelChangeAction {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u8()? {
+            0 => Ok(Self::Pass),
+            1 => Ok(Self::Cancel),
+            2 => {
+                let levels = decoder.read_i32()?;
+                validate_player_experience_level_delta(levels)?;
+                Ok(Self::SetLevels(levels))
+            }
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("player experience level change action code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+fn validate_player_experience_level_delta(levels: i32) -> SjmlResult<()> {
+    if !(MIN_PLAYER_EXPERIENCE_LEVEL_DELTA..=MAX_PLAYER_EXPERIENCE_LEVEL_DELTA).contains(&levels) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            format!(
+                "player experience level delta must be between {MIN_PLAYER_EXPERIENCE_LEVEL_DELTA} and {MAX_PLAYER_EXPERIENCE_LEVEL_DELTA}"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Synchronous, non-cancellable `block.place` snapshot from the logical server.
@@ -1996,9 +2323,10 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         subscribe, subscribe_with_interval, unsubscribe, AdvancementProgressOperation, BlockBreak,
-        BlockBreakAttempt, BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockGrowAttempt,
-        BlockPlace, BlockPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty,
-        BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
+        BlockBreakAttempt, BlockDropsAttempt, BlockDropsBreakerSnapshot, BlockDropsItemSnapshot,
+        BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockGrowAttempt, BlockPlace,
+        BlockPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty, BlockUseAction,
+        ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
         ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt,
         EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
         EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned,
@@ -2007,11 +2335,15 @@ mod tests {
         ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
         PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
         PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
-        PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
-        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned,
-        PlayerSleepAttempt, PlayerTick, PlayerVillagerTraded, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
-        MAX_SERVER_TICK_INTERVAL,
+        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
+        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt,
+        PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
+        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
+        MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -2479,6 +2811,86 @@ mod tests {
     }
 
     #[test]
+    fn block_drops_attempt_matches_host_schema_and_keeps_only_bounded_item_snapshots() {
+        let attempt = BlockDropsAttempt {
+            dimension_id: "minecraft:overworld".to_owned(),
+            position: BlockPos { x: -3, y: 64, z: 8 },
+            block_id: "minecraft:stone".to_owned(),
+            breaker: Some(BlockDropsBreakerSnapshot {
+                entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+                entity_type_id: "minecraft:player".to_owned(),
+            }),
+            tool: Some(BlockDropsItemSnapshot {
+                item_id: "minecraft:diamond_pickaxe".to_owned(),
+                count: 1,
+                damage: Some(4),
+                max_damage: Some(1_561),
+            }),
+            drops: vec![
+                BlockDropsItemSnapshot {
+                    item_id: "minecraft:cobblestone".to_owned(),
+                    count: 2,
+                    damage: None,
+                    max_damage: None,
+                },
+                BlockDropsItemSnapshot {
+                    item_id: "minecraft:diamond".to_owned(),
+                    count: 1,
+                    damage: None,
+                    max_damage: None,
+                },
+            ],
+            experience: 5,
+            drops_truncated: false,
+        };
+
+        let encoded = to_bytes(&attempt).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &attempt.dimension_id);
+        expected.extend_from_slice(&1_i32.to_le_bytes()); // nested BlockPos schema
+        expected.extend_from_slice(&attempt.position.x.to_le_bytes());
+        expected.extend_from_slice(&attempt.position.y.to_le_bytes());
+        expected.extend_from_slice(&attempt.position.z.to_le_bytes());
+        append_test_string(&mut expected, &attempt.block_id);
+        expected.push(1);
+        expected.extend_from_slice(&1_i32.to_le_bytes()); // nested breaker schema
+        append_test_string(&mut expected, "00000000-0000-0000-0000-000000000001");
+        append_test_string(&mut expected, "minecraft:player");
+        expected.push(1);
+        append_test_item_snapshot(&mut expected, attempt.tool.as_ref().unwrap());
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        for drop in &attempt.drops {
+            append_test_item_snapshot(&mut expected, drop);
+        }
+        expected.extend_from_slice(&attempt.experience.to_le_bytes());
+        expected.push(0);
+
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<BlockDropsAttempt>(&encoded).unwrap(), attempt);
+    }
+
+    fn append_test_item_snapshot(output: &mut Vec<u8>, item: &BlockDropsItemSnapshot) {
+        output.extend_from_slice(&1_i32.to_le_bytes()); // nested item snapshot schema
+        append_test_string(output, &item.item_id);
+        output.extend_from_slice(&item.count.to_le_bytes());
+        append_test_optional_u32(output, item.damage);
+        append_test_optional_u32(output, item.max_damage);
+    }
+
+    fn append_test_optional_u32(output: &mut Vec<u8>, value: Option<u32>) {
+        match value {
+            Some(value) => {
+                output.push(1);
+                output.extend_from_slice(&value.to_le_bytes());
+            }
+            None => output.push(0),
+        }
+    }
+
+    #[test]
     fn block_tick_matches_host_schema_and_exposes_state_properties() {
         let event = BlockTick {
             block_id: "ruby_pack:content/machine".to_owned(),
@@ -2702,6 +3114,140 @@ mod tests {
             "Rust encoding must match host schema-v1 bytes"
         );
         assert_eq!(from_bytes::<PlayerAttackAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn player_experience_change_attempt_matches_host_schema_v1_bytes() {
+        let event = PlayerExperienceChangeAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            level_before: 27,
+            progress_before: 0.375,
+            requested_amount: 9,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.player_id);
+        expected.extend_from_slice(&event.level_before.to_le_bytes());
+        expected.extend_from_slice(&event.progress_before.to_le_bytes());
+        expected.extend_from_slice(&event.requested_amount.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<PlayerExperienceChangeAttempt>(&encoded).unwrap(),
+            event
+        );
+
+        let invalid = PlayerExperienceChangeAttempt {
+            progress_before: f32::NAN,
+            ..event
+        };
+        assert!(to_bytes(&invalid).is_err());
+    }
+
+    #[test]
+    fn player_experience_change_action_uses_bounded_unversioned_tags() {
+        for (action, expected) in [
+            (PlayerExperienceChangeAction::Pass, vec![0]),
+            (PlayerExperienceChangeAction::Cancel, vec![1]),
+            (
+                PlayerExperienceChangeAction::SetAmount(-17),
+                [vec![2], (-17_i32).to_le_bytes().to_vec()].concat(),
+            ),
+        ] {
+            let encoded = to_bytes(&action).unwrap();
+            assert_eq!(encoded, expected);
+            assert_eq!(
+                from_bytes::<PlayerExperienceChangeAction>(&encoded).unwrap(),
+                action
+            );
+        }
+
+        assert!(to_bytes(&PlayerExperienceChangeAction::SetAmount(
+            MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT + 1
+        ))
+        .is_err());
+        assert!(to_bytes(&PlayerExperienceChangeAction::SetAmount(
+            MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT - 1
+        ))
+        .is_err());
+
+        for amount in [
+            MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT + 1,
+            MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT - 1,
+        ] {
+            let mut invalid = vec![2];
+            invalid.extend_from_slice(&amount.to_le_bytes());
+            assert!(from_bytes::<PlayerExperienceChangeAction>(&invalid).is_err());
+        }
+        assert!(from_bytes::<PlayerExperienceChangeAction>(&[3]).is_err());
+    }
+
+    #[test]
+    fn player_experience_level_change_attempt_matches_host_schema_v1_bytes() {
+        let event = PlayerExperienceLevelChangeAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            level_before: 27,
+            requested_levels: 5,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.player_id);
+        expected.extend_from_slice(&event.level_before.to_le_bytes());
+        expected.extend_from_slice(&event.requested_levels.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(
+            from_bytes::<PlayerExperienceLevelChangeAttempt>(&encoded).unwrap(),
+            event
+        );
+
+        let invalid = PlayerExperienceLevelChangeAttempt {
+            level_before: MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT + 1,
+            ..event
+        };
+        assert!(to_bytes(&invalid).is_err());
+    }
+
+    #[test]
+    fn player_experience_level_change_action_uses_bounded_unversioned_tags() {
+        for (action, expected) in [
+            (PlayerExperienceLevelChangeAction::Pass, vec![0]),
+            (PlayerExperienceLevelChangeAction::Cancel, vec![1]),
+            (
+                PlayerExperienceLevelChangeAction::SetLevels(-17),
+                [vec![2], (-17_i32).to_le_bytes().to_vec()].concat(),
+            ),
+        ] {
+            let encoded = to_bytes(&action).unwrap();
+            assert_eq!(encoded, expected);
+            assert_eq!(
+                from_bytes::<PlayerExperienceLevelChangeAction>(&encoded).unwrap(),
+                action
+            );
+        }
+
+        for levels in [
+            MIN_PLAYER_EXPERIENCE_LEVEL_DELTA - 1,
+            MAX_PLAYER_EXPERIENCE_LEVEL_DELTA + 1,
+        ] {
+            assert!(to_bytes(&PlayerExperienceLevelChangeAction::SetLevels(levels)).is_err());
+            let mut invalid = vec![2];
+            invalid.extend_from_slice(&levels.to_le_bytes());
+            assert!(from_bytes::<PlayerExperienceLevelChangeAction>(&invalid).is_err());
+        }
+        assert!(to_bytes(&PlayerExperienceLevelChangeAction::SetLevels(
+            MIN_PLAYER_EXPERIENCE_LEVEL_DELTA
+        ))
+        .is_ok());
+        assert!(to_bytes(&PlayerExperienceLevelChangeAction::SetLevels(
+            MAX_PLAYER_EXPERIENCE_LEVEL_DELTA
+        ))
+        .is_ok());
+        assert!(from_bytes::<PlayerExperienceLevelChangeAction>(&[3]).is_err());
     }
 
     #[test]

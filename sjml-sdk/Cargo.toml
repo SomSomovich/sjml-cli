@@ -41,5 +41,25 @@ crate-type = ["cdylib"]
 name = "player_equipment_changed"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "player_system_message"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "player_rich_system_message"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "block_drops_attempt"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "player_experience_change_attempt"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "player_experience_level_change_attempt"
+crate-type = ["cdylib"]
+
 [dependencies]
 sjml-macros.workspace = true

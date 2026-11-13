@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.90.0"
+sjml-sdk = "0.91.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -118,6 +118,7 @@ dynamic suggestions. See
 [block property writes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/WORLD_BLOCK_PROPERTIES_WRITE.md),
 [item-stack snapshots](https://github.com/SomSomovich/sjml-cli/blob/master/docs/ITEM_STACK_SNAPSHOT.md),
 [player inventory writes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_INVENTORY_WRITES.md),
+[player inventory stack moves](https://github.com/SomSomovich/sjml-cli/blob/master/docs/PLAYER_INVENTORY_MOVE.md),
 and [block placement vetoes](https://github.com/SomSomovich/sjml-cli/blob/master/docs/BLOCK_PLACE_ATTEMPTS.md).
 
 SDK 0.52.0 adds bounded static villager trade offers, cancellable pre-mitigation

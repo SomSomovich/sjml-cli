@@ -9,7 +9,9 @@ pub(super) fn verify_block_inventory_enchantments(
     if inventory::read_enchantment_level(world, position, 0, sharpness)?.is_some()
         || inventory::read_enchantment_level(world, position, 0, unbreaking)? != Some(2)
     {
-        return Err(failure("the block-inventory sword must start with Unbreaking II only"));
+        return Err(failure(
+            "the block-inventory sword must start with Unbreaking II only",
+        ));
     }
     inventory::set_enchantment_level(world, position, 0, sharpness, 3)?;
     if inventory::read_enchantment_level(world, position, 0, sharpness)? != Some(3)
@@ -28,7 +30,9 @@ pub(super) fn verify_block_inventory_enchantments(
     if inventory::read_enchantment_level(world, position, 1, mending)?.is_some()
         || inventory::read_enchantment_level(world, position, 1, unbreaking)? != Some(1)
     {
-        return Err(failure("the block-inventory enchanted book must start with Unbreaking I"));
+        return Err(failure(
+            "the block-inventory enchanted book must start with Unbreaking I",
+        ));
     }
     inventory::set_enchantment_level(world, position, 1, mending, 1)?;
     if inventory::read_enchantment_level(world, position, 1, mending)? != Some(1)
@@ -40,7 +44,9 @@ pub(super) fn verify_block_inventory_enchantments(
     if inventory::read_enchantment_level(world, position, 1, mending)?.is_some()
         || inventory::read_enchantment_level(world, position, 1, unbreaking)? != Some(1)
     {
-        return Err(failure("removing stored Mending must preserve Unbreaking I"));
+        return Err(failure(
+            "removing stored Mending must preserve Unbreaking I",
+        ));
     }
     Ok(())
 }

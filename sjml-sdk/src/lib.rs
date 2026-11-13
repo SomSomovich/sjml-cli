@@ -197,9 +197,10 @@ pub use entity::{
     MAX_ENTITY_EFFECT_ID_BYTES, MAX_ENTITY_EQUIPMENT_DAMAGE, MAX_ENTITY_EQUIPMENT_ITEM_ID_BYTES,
     MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES, MAX_ENTITY_EQUIPMENT_STACK_COUNT, MAX_ENTITY_HEAL_AMOUNT,
     MAX_ENTITY_NAVIGATION_RANGE, MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_PITCH_DEGREES,
-    MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_VELOCITY_COMPONENT, MAX_ENTITY_VITALS_VALUE,
-    MAX_ENTITY_YAW_DEGREES, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
-    NAVIGATION_WRITE_CAPABILITY, ROTATION_WRITE_CAPABILITY, TARGET_WRITE_CAPABILITY,
+    MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_TELEPORT_COORDINATE,
+    MAX_ENTITY_VELOCITY_COMPONENT, MAX_ENTITY_VITALS_VALUE, MAX_ENTITY_YAW_DEGREES,
+    MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
+    ROTATION_WRITE_CAPABILITY, TARGET_WRITE_CAPABILITY, TELEPORT_CAPABILITY,
 };
 pub use entity_attributes::{
     AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
@@ -211,6 +212,7 @@ pub use events::EntityBreedAttempt;
 pub use events::PlayerAttackAttempt;
 pub use events::PlayerItemPickupAttempt;
 pub use events::{AdvancementProgressOperation, PlayerAdvancementProgressEvent};
+pub use events::{BlockDropsAttempt, BlockDropsBreakerSnapshot, BlockDropsItemSnapshot};
 pub use events::{
     BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty,
 };
@@ -228,6 +230,21 @@ pub use events::{
     FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
 };
 pub use events::{PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot};
+pub use events::{
+    PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
+    MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL,
+    MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+};
+pub use events::{
+    PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt,
+    MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
+    MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+};
+pub use events::{
+    MAX_BLOCK_DROPS_ATTEMPT_CALLBACKS, MAX_BLOCK_DROPS_ATTEMPT_DROPS,
+    MAX_BLOCK_DROPS_ATTEMPT_DURABILITY, MAX_BLOCK_DROPS_ATTEMPT_EXPERIENCE,
+    MAX_BLOCK_DROPS_ATTEMPT_ITEM_COUNT, MAX_BLOCK_DROPS_ATTEMPT_PAYLOAD_BYTES,
+};
 pub use gl::{
     GlBlendFactor, GlBufferTarget, GlBufferUsage, GlCapabilities, GlCommand, GlCullFace,
     GlDepthFunction, GlExecutionReport, GlFramebufferAttachment, GlIndexType, GlPrimitiveMode,
@@ -255,17 +272,23 @@ pub use network::{
 pub use player::{
     active_effects, clear_respawn_point, clear_team as clear_player_team, custom_stat,
     grant_advancement, increment_custom_stat, respawn_point, revoke_advancement,
-    selected_hotbar_slot, set_custom_stat, set_respawn_point, set_rotation,
-    set_selected_hotbar_slot, set_team as set_player_team, team as player_team, PlayerAbilities,
-    PlayerCustomStat, PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion,
-    PlayerRespawnPoint, PlayerSnapshot, PlayerTitleTimings, PlayerVelocity, PlayerVitals,
+    selected_hotbar_slot, send_rich_system_message, send_system_message, set_custom_stat,
+    set_respawn_point, set_rotation, set_selected_hotbar_slot, set_team as set_player_team,
+    team as player_team, PlayerAbilities, PlayerCustomStat, PlayerEquipment, PlayerEquipmentStack,
+    PlayerGameMode, PlayerMotion, PlayerRespawnPoint, PlayerSnapshot, PlayerTitleTimings,
+    PlayerVelocity, PlayerVitals, RichText, RichTextClickAction, RichTextColor, RichTextNode,
     MAX_PLAYER_ACTIVE_EFFECTS, MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES,
     MAX_PLAYER_ADVANCEMENT_ID_BYTES, MAX_PLAYER_HOTBAR_SLOT_INDEX, MAX_PLAYER_RESPAWN_ANGLE,
     MAX_PLAYER_RESPAWN_COORDINATE, MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES,
-    MAX_PLAYER_RESPAWN_POINT_BYTES, MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES, MAX_PLAYER_ROTATION_YAW,
-    MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_STATISTIC_VALUE, MAX_PLAYER_TEAM_NAME_BYTES,
-    MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_PLAYER_TITLE_TEXT_CODE_POINTS,
-    MAX_PLAYER_TITLE_TIMING_TICKS, MAX_PLAYER_VELOCITY_COMPONENT,
+    MAX_PLAYER_RESPAWN_POINT_BYTES, MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES,
+    MAX_PLAYER_RICH_SYSTEM_MESSAGE_DEPTH, MAX_PLAYER_RICH_SYSTEM_MESSAGE_NODES,
+    MAX_PLAYER_RICH_SYSTEM_MESSAGE_PAYLOAD_BYTES, MAX_PLAYER_RICH_SYSTEM_MESSAGE_STRING_BYTES,
+    MAX_PLAYER_RICH_SYSTEM_MESSAGE_TOTAL_UTF8_BYTES, MAX_PLAYER_ROTATION_YAW,
+    MAX_PLAYER_STATISTIC_INCREMENT, MAX_PLAYER_STATISTIC_VALUE,
+    MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES, MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS,
+    MAX_PLAYER_TEAM_NAME_BYTES, MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES,
+    MAX_PLAYER_TITLE_TEXT_CODE_POINTS, MAX_PLAYER_TITLE_TIMING_TICKS,
+    MAX_PLAYER_VELOCITY_COMPONENT,
 };
 pub use player_advancement::{
     grant_criterion as grant_advancement_criterion, progress as player_advancement_progress,
@@ -274,9 +297,11 @@ pub use player_advancement::{
     MAX_PLAYER_ADVANCEMENT_CRITERION_ID_BYTES, MAX_PLAYER_ADVANCEMENT_PROGRESS_BYTES,
 };
 pub use player_inventory::{
-    give_item as give_player_item, PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_GIVE_COUNT,
-    MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
-    MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+    give_item as give_player_item, move_stack as move_player_inventory_stack,
+    set_count as set_player_inventory_count, PlayerInventorySlotUpdate,
+    MAX_PLAYER_INVENTORY_GIVE_COUNT, MAX_PLAYER_INVENTORY_ITEM_ID_BYTES,
+    MAX_PLAYER_INVENTORY_MOVE_COUNT, MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
+    MAX_PLAYER_INVENTORY_SLOT_INDEX,
 };
 pub use player_statistics::{
     increment as increment_player_statistic, read as player_statistic,
@@ -427,8 +452,9 @@ pub mod prelude {
         MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES, MAX_ENTITY_EQUIPMENT_STACK_COUNT,
         MAX_ENTITY_HEAL_AMOUNT, MAX_ENTITY_NAVIGATION_RANGE, MAX_ENTITY_NAVIGATION_SPEED,
         MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
-        MAX_ENTITY_VELOCITY_COMPONENT, MAX_ENTITY_VITALS_VALUE, MAX_SPATIAL_QUERY_RADIUS,
-        MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY, TARGET_WRITE_CAPABILITY,
+        MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_ENTITY_VITALS_VALUE,
+        MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
+        TARGET_WRITE_CAPABILITY, TELEPORT_CAPABILITY,
     };
     pub use crate::entity_attributes;
     pub use crate::entity_attributes::{
@@ -456,15 +482,25 @@ pub mod prelude {
         ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse,
         ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
         PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
-        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerInteracted,
+        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
+        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
+        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerInteracted,
         PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt,
         PlayerJoined, PlayerLeft, PlayerMoved, PlayerSleepAttempt, PlayerTick,
         ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
         CLIENT_ACTION_CANCEL_CAPABILITY, DEFAULT_SERVER_TICK_INTERVAL,
+        MAX_BLOCK_DROPS_ATTEMPT_CALLBACKS, MAX_BLOCK_DROPS_ATTEMPT_DROPS,
+        MAX_BLOCK_DROPS_ATTEMPT_DURABILITY, MAX_BLOCK_DROPS_ATTEMPT_EXPERIENCE,
+        MAX_BLOCK_DROPS_ATTEMPT_ITEM_COUNT, MAX_BLOCK_DROPS_ATTEMPT_PAYLOAD_BYTES,
         MAX_CLIENT_ACTION_ATTEMPT_CALLBACKS, MAX_CRAFTED_ITEM_COUNT, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_SERVER_TICK_INTERVAL,
-        PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY, PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL,
+        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
+        MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA, PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY,
+        PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
     };
+    pub use crate::events::{BlockDropsAttempt, BlockDropsBreakerSnapshot, BlockDropsItemSnapshot};
     pub use crate::events::{
         FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
     };
@@ -504,16 +540,21 @@ pub mod prelude {
     pub use crate::player::{
         active_effects, clear_item_cooldown, clear_respawn_point, clear_team, grant_advancement,
         has_item_cooldown, respawn_point, revoke_advancement, selected_hotbar_slot,
-        set_custom_stat, set_item_cooldown, set_respawn_point, set_rotation,
-        set_selected_hotbar_slot, set_team, team, PlayerAbilities, PlayerEquipment,
-        PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint, PlayerSnapshot,
-        PlayerVelocity, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
-        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_ADVANCEMENT_ID_BYTES,
-        MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES, MAX_PLAYER_HOTBAR_SLOT_INDEX,
-        MAX_PLAYER_ITEM_COOLDOWN_TICKS, MAX_PLAYER_RESPAWN_ANGLE, MAX_PLAYER_RESPAWN_COORDINATE,
-        MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES, MAX_PLAYER_RESPAWN_POINT_BYTES,
-        MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES, MAX_PLAYER_ROTATION_YAW, MAX_PLAYER_STATISTIC_VALUE,
-        MAX_PLAYER_TEAM_NAME_BYTES, MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_VELOCITY_COMPONENT,
+        send_rich_system_message, send_system_message, set_custom_stat, set_item_cooldown,
+        set_respawn_point, set_rotation, set_selected_hotbar_slot, set_team, team, PlayerAbilities,
+        PlayerEquipment, PlayerEquipmentStack, PlayerGameMode, PlayerMotion, PlayerRespawnPoint,
+        PlayerSnapshot, PlayerVelocity, PlayerVitals, RichText, RichTextClickAction, RichTextColor,
+        RichTextNode, MAX_PLAYER_ACTIVE_EFFECTS, MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES,
+        MAX_PLAYER_ADVANCEMENT_ID_BYTES, MAX_PLAYER_COOLDOWN_ITEM_ID_BYTES,
+        MAX_PLAYER_HOTBAR_SLOT_INDEX, MAX_PLAYER_ITEM_COOLDOWN_TICKS, MAX_PLAYER_RESPAWN_ANGLE,
+        MAX_PLAYER_RESPAWN_COORDINATE, MAX_PLAYER_RESPAWN_DIMENSION_ID_BYTES,
+        MAX_PLAYER_RESPAWN_POINT_BYTES, MAX_PLAYER_RESPAWN_SNAPSHOT_BYTES,
+        MAX_PLAYER_RICH_SYSTEM_MESSAGE_DEPTH, MAX_PLAYER_RICH_SYSTEM_MESSAGE_NODES,
+        MAX_PLAYER_RICH_SYSTEM_MESSAGE_PAYLOAD_BYTES, MAX_PLAYER_RICH_SYSTEM_MESSAGE_STRING_BYTES,
+        MAX_PLAYER_RICH_SYSTEM_MESSAGE_TOTAL_UTF8_BYTES, MAX_PLAYER_ROTATION_YAW,
+        MAX_PLAYER_STATISTIC_VALUE, MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES,
+        MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS, MAX_PLAYER_TEAM_NAME_BYTES,
+        MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_VELOCITY_COMPONENT,
     };
     pub use crate::player_advancement;
     pub use crate::player_advancement::{
@@ -524,10 +565,12 @@ pub mod prelude {
     };
     pub use crate::player_inventory;
     pub use crate::player_inventory::{
-        give_item as give_player_item, PlayerInventorySlotUpdate,
+        give_item as give_player_item, move_stack as move_player_inventory_stack,
+        set_count as set_player_inventory_count, PlayerInventorySlotUpdate,
         MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_GIVE_COUNT,
-        MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_SLOTS,
-        MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+        MAX_PLAYER_INVENTORY_ITEM_ID_BYTES, MAX_PLAYER_INVENTORY_MOVE_COUNT,
+        MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
+        MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     pub use crate::player_statistics;
     pub use crate::player_statistics::{
@@ -545,26 +588,28 @@ pub mod prelude {
         register_boolean_component, register_brewing_recipe, register_cooking_recipe,
         register_creative_tab, register_custom_registry, register_custom_value,
         register_effect_tick, register_entity, register_entity_ai_goal, register_entity_model,
-        register_fluid, register_fluid_with_visuals, register_integer_component, register_item,
-        register_particle, register_potion, register_recipe_serializer, register_shaped_recipe,
-        register_shapeless_recipe, register_smithing_transform_recipe, register_sound,
-        register_string_component, register_villager_trade, set_block_behavior,
-        set_block_random_ticking, set_block_shape, set_block_state_light_level,
-        set_block_state_shape, set_entity_attribute, set_item_attribute_modifier,
-        set_item_boolean_component, set_item_food, set_item_food_with_effects,
-        set_item_integer_component, set_item_rarity, set_item_string_component,
-        AttributeModifierOperation, BlockBehavior, BlockDefinition, BlockEntityModelDefinition,
-        BlockPushReaction, BlockShape, BlockSound, BlockStateProperty, CookingRecipeDefinition,
-        CookingRecipeKind, CreativeTabDefinition, EffectCategory, EntityAiGoal, EntityAttribute,
-        EntityDefinition, EntityModelDefinition, FluidDefinition, FluidVisualDefinition,
-        IntegerComponentDefinition, ItemAttributeModifier, ItemAttributeSlot, ItemDefinition,
-        ItemFood, ItemFoodEffect, ItemFoodEffects, ItemRarity, ModelAnimation, ModelAnimationAxis,
-        ModelCuboid, RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey,
-        ShapelessRecipeDefinition, SmithingTransformRecipeDefinition, StringComponentDefinition,
-        VillagerTradeItem, VillagerTradeOffer, MAX_BLOCK_INTEGER_PROPERTY_VALUE,
-        MAX_BLOCK_INTEGER_PROPERTY_VALUES, MAX_BLOCK_STATE_PROPERTIES, MAX_BLOCK_STATE_VARIANTS,
-        MAX_BOUND_MODEL_CUBOIDS, MAX_ITEM_ATTRIBUTE_MODIFIERS, MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT,
-        MAX_ITEM_FOOD_EFFECTS, MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
+        register_entity_spawn_egg, register_fluid, register_fluid_with_visuals,
+        register_integer_component, register_item, register_particle, register_potion,
+        register_recipe_serializer, register_shaped_recipe, register_shapeless_recipe,
+        register_smithing_transform_recipe, register_sound, register_string_component,
+        register_villager_trade, set_block_behavior, set_block_random_ticking, set_block_shape,
+        set_block_state_light_level, set_block_state_shape, set_entity_attribute,
+        set_item_attribute_modifier, set_item_boolean_component, set_item_food,
+        set_item_food_with_effects, set_item_integer_component, set_item_rarity,
+        set_item_string_component, AttributeModifierOperation, BlockBehavior, BlockDefinition,
+        BlockEntityModelDefinition, BlockPushReaction, BlockShape, BlockSound, BlockStateProperty,
+        CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition, EffectCategory,
+        EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition, FluidDefinition,
+        FluidVisualDefinition, IntegerComponentDefinition, ItemAttributeModifier,
+        ItemAttributeSlot, ItemDefinition, ItemFood, ItemFoodEffect, ItemFoodEffects, ItemRarity,
+        ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition,
+        ShapedRecipeKey, ShapelessRecipeDefinition, SmithingTransformRecipeDefinition,
+        StringComponentDefinition, VillagerTradeItem, VillagerTradeOffer,
+        MAX_BLOCK_INTEGER_PROPERTY_VALUE, MAX_BLOCK_INTEGER_PROPERTY_VALUES,
+        MAX_BLOCK_STATE_PROPERTIES, MAX_BLOCK_STATE_VARIANTS, MAX_BOUND_MODEL_CUBOIDS,
+        MAX_ENTITY_SPAWN_EGG_RGB_COLOR, MAX_ITEM_ATTRIBUTE_MODIFIERS,
+        MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT, MAX_ITEM_FOOD_EFFECTS,
+        MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
         MIN_BLOCK_INTEGER_PROPERTY_VALUE,
     };
     pub use crate::render;

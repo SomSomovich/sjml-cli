@@ -37,6 +37,10 @@ pub const MAX_ITEM_STACK_SNAPSHOT_BYTES: usize =
     1 + 4 + 4 + MAX_ITEM_ID_BYTES + 3 * 4 + 2 * (1 + 4) + 1 + 4 + MAX_CUSTOM_ITEM_NAME_BYTES;
 /// Maximum item count one [`transfer`] call may move.
 pub const MAX_ITEM_TRANSFER_COUNT: u32 = 64;
+/// Maximum count accepted by the block stack-count setter before item/slot-specific host checks.
+pub const MAX_ITEM_STACK_COUNT: u32 = 99;
+/// Maximum damage value accepted by the block-inventory durability setter before item validation.
+pub const MAX_BLOCK_INVENTORY_DAMAGE: u32 = 65_535;
 /// Maximum absolute X/Z coordinate accepted by block-inventory mutations.
 pub const MAX_INVENTORY_COORDINATE: i32 = 30_000_000;
 
@@ -270,6 +274,26 @@ extern "C" {
         position: i32,
         position_length: i32,
         slot: i32,
+    ) -> i32;
+
+    #[link_name = "set_count"]
+    fn imported_set_count(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        count: i32,
+    ) -> i32;
+
+    #[link_name = "set_damage"]
+    fn imported_set_damage(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        damage: i32,
     ) -> i32;
 
     #[link_name = "read_lore"]
@@ -537,6 +561,85 @@ pub fn move_stack(
             destination_slot,
             count,
         );
+        Err(unsupported_target())
+    }
+}
+
+/// Changes the count of an existing stack in an already-loaded block container.
+///
+/// The item and every component are preserved. The count must be in `1..=99` and fit both the
+/// item's current maximum stack size and the concrete slot's limit. The host requires a
+/// modifiable item-handler capability and a resolved loot container; if the handler rejects a
+/// write, the host attempts to restore and verifies the original stack. This requires
+/// `world.read` and `inventory.write`, runs synchronously on the owning server thread, and never
+/// loads chunks.
+pub fn set_count(world: WorldHandle, position: BlockPos, slot: u32, count: u32) -> SjmlResult<()> {
+    validate_slot(slot)?;
+    validate_inventory_position(position)?;
+    validate_item_stack_count(count)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: stable input buffers remain live for this synchronous host call.
+        let status = unsafe {
+            imported_set_count(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                count as i32,
+            )
+        };
+        status_result(status, "host rejected the block inventory count update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, count);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets durability on an existing damageable stack in an already-loaded block container.
+///
+/// This changes only the damage value, preserving item identity, count, and all other
+/// components. Empty or nondamageable slots are rejected, as are values at or above the item's
+/// maximum durability. The input is bounded to `0..=65_535`; the host checks the actual item
+/// maximum. This requires `world.read` and `inventory.write`, runs on the owning server thread,
+/// and never loads chunks.
+pub fn set_damage(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    damage: u32,
+) -> SjmlResult<()> {
+    validate_slot(slot)?;
+    validate_inventory_position(position)?;
+    validate_block_inventory_damage(damage)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: stable input buffers remain live for this synchronous host call.
+        let status = unsafe {
+            imported_set_damage(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                damage as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the block inventory durability update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, damage);
         Err(unsupported_target())
     }
 }
@@ -1372,6 +1475,26 @@ fn validate_transfer_count(count: u32) -> SjmlResult<()> {
     Ok(())
 }
 
+fn validate_item_stack_count(count: u32) -> SjmlResult<()> {
+    if count == 0 || count > MAX_ITEM_STACK_COUNT {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "item stack count must be within 1..=99",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_block_inventory_damage(damage: u32) -> SjmlResult<()> {
+    if damage > MAX_BLOCK_INVENTORY_DAMAGE {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block inventory damage must be within 0..=65535",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_inventory_position(position: BlockPos) -> SjmlResult<()> {
     if i64::from(position.x).abs() > i64::from(MAX_INVENTORY_COORDINATE)
         || i64::from(position.z).abs() > i64::from(MAX_INVENTORY_COORDINATE)
@@ -1440,15 +1563,16 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         clear_custom_name, clear_lore, move_stack, read_boolean_component, read_enchantment_level,
-        read_integer_component, read_lore, remove_enchantment, set_custom_name,
-        set_enchantment_level, set_lore, transfer, validate_custom_name, validate_enchantment_id,
+        read_integer_component, read_lore, remove_enchantment, set_count, set_custom_name,
+        set_damage, set_enchantment_level, set_lore, transfer, validate_block_inventory_damage,
+        validate_custom_name, validate_enchantment_id, validate_item_stack_count,
         validate_lore_line, validate_lore_lines, validate_slot, validate_transfer_count,
         write_boolean_component, write_integer_component, BlockPos, Direction, InventoryEndpoint,
-        ItemStackSnapshot, MAX_BLOCK_INVENTORY_ENCHANTMENT_ID_BYTES,
+        ItemStackSnapshot, MAX_BLOCK_INVENTORY_DAMAGE, MAX_BLOCK_INVENTORY_ENCHANTMENT_ID_BYTES,
         MAX_BLOCK_INVENTORY_ENCHANTMENT_LEVEL, MAX_BLOCK_INVENTORY_LORE_BYTES,
         MAX_BLOCK_INVENTORY_LORE_LINES, MAX_BLOCK_INVENTORY_LORE_LINE_BYTES,
         MAX_CUSTOM_ITEM_NAME_BYTES, MAX_CUSTOM_ITEM_NAME_CHARS, MAX_INVENTORY_COORDINATE,
-        MAX_INVENTORY_SLOTS, MAX_ITEM_TRANSFER_COUNT,
+        MAX_INVENTORY_SLOTS, MAX_ITEM_STACK_COUNT, MAX_ITEM_TRANSFER_COUNT,
     };
     use crate::{ErrorCode, WorldHandle};
 
@@ -1464,6 +1588,80 @@ mod tests {
             validate_transfer_count(MAX_ITEM_TRANSFER_COUNT + 1)
                 .unwrap_err()
                 .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_stack_count_is_bounded_and_nonzero() {
+        assert_eq!(validate_item_stack_count(1), Ok(()));
+        assert_eq!(validate_item_stack_count(MAX_ITEM_STACK_COUNT), Ok(()));
+        assert_eq!(
+            validate_item_stack_count(0).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_item_stack_count(MAX_ITEM_STACK_COUNT + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn set_count_validates_slot_position_and_generic_count_before_host_call() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        assert_eq!(
+            set_count(world, position, 0, 0).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_count(world, position, MAX_INVENTORY_SLOTS as u32, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_count(
+                world,
+                BlockPos {
+                    x: MAX_INVENTORY_COORDINATE + 1,
+                    y: 64,
+                    z: 0,
+                },
+                0,
+                1,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn block_inventory_damage_is_bounded_before_host_access() {
+        assert_eq!(validate_block_inventory_damage(0), Ok(()));
+        assert_eq!(
+            validate_block_inventory_damage(MAX_BLOCK_INVENTORY_DAMAGE),
+            Ok(())
+        );
+        assert_eq!(
+            validate_block_inventory_damage(MAX_BLOCK_INVENTORY_DAMAGE + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            set_damage(
+                world,
+                BlockPos { x: 0, y: 64, z: 0 },
+                0,
+                MAX_BLOCK_INVENTORY_DAMAGE + 1,
+            )
+            .unwrap_err()
+            .code(),
             ErrorCode::InvalidArgument
         );
     }
