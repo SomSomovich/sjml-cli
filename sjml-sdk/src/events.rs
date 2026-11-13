@@ -62,6 +62,10 @@ pub const MAX_PLAYER_POTION_USE_ITEM_COUNT: u32 = 64;
 pub const MAX_PLAYER_POTION_USE_DURATION_TICKS: u32 = 72_000;
 /// Maximum callbacks invoked for one potion-use attempt.
 pub const MAX_PLAYER_POTION_USE_ATTEMPT_CALLBACKS: usize = 64;
+/// Maximum count represented by one detached `player.totem_use_attempt` snapshot.
+pub const MAX_PLAYER_TOTEM_USE_COUNT: u32 = 64;
+/// Maximum callbacks invoked for one synchronous totem-use attempt.
+pub const MAX_PLAYER_TOTEM_USE_ATTEMPT_CALLBACKS: usize = 64;
 
 /// Synchronous, non-cancellable snapshot emitted after meaningful logical-server player movement.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -762,6 +766,165 @@ impl StableDecode for PlayerPotionUseAttemptAction {
             value => Err(SjmlError::new(
                 ErrorCode::InvalidArgument,
                 format!("player potion-use action code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+/// Synchronous cancellable attempt to use a totem before it prevents a player's death.
+///
+/// NeoForge's logical-server `LivingUseTotemEvent` fires before the totem effect is applied.
+/// Return [`PlayerTotemUseAttemptAction::Cancel`] to prevent the totem from saving the player.
+/// The event includes the detached damage type and, when present, the causing entity identity,
+/// but never exposes a Minecraft object, damage source, or mutable item stack. Both
+/// `events.subscribe` and `events.cancel` are required.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerTotemUseAttempt {
+    /// Canonical UUID string of the player whose totem would be used.
+    pub player_id: String,
+    /// Resource location of the player's current dimension.
+    pub dimension_id: String,
+    /// Registry ID of the damage type that would trigger the totem.
+    pub damage_type_id: String,
+    /// UUID of the causing entity, or `None` for environmental damage.
+    pub source_entity_id: Option<String>,
+    /// Registry ID of the causing entity type, or `None` for environmental damage.
+    pub source_entity_type_id: Option<String>,
+    /// Registry ID of the totem item being used.
+    pub totem_id: String,
+    /// Totem stack count, bounded by the host to `1..=64`.
+    pub count: u32,
+    /// `main_hand` or `off_hand`.
+    pub hand: String,
+}
+
+impl StableEncode for PlayerTotemUseAttempt {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_totem_use_attempt(self)?;
+        encoder.write_i32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encode_bounded_event_string(&self.dimension_id, encoder)?;
+        encode_bounded_event_string(&self.damage_type_id, encoder)?;
+        encode_optional_bounded_event_string(&self.source_entity_id, encoder)?;
+        encode_optional_bounded_event_string(&self.source_entity_type_id, encoder)?;
+        encode_bounded_event_string(&self.totem_id, encoder)?;
+        encoder.write_u32(self.count)?;
+        encode_bounded_event_string(&self.hand, encoder)
+    }
+}
+
+impl StableDecode for PlayerTotemUseAttempt {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema_version = decoder.read_i32()?;
+        if schema_version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!("PlayerTotemUseAttempt schema version {schema_version} is unsupported"),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            dimension_id: decode_bounded_event_string(decoder)?,
+            damage_type_id: decode_bounded_event_string(decoder)?,
+            source_entity_id: decode_optional_bounded_event_string(decoder)?,
+            source_entity_type_id: decode_optional_bounded_event_string(decoder)?,
+            totem_id: decode_bounded_event_string(decoder)?,
+            count: decoder.read_u32()?,
+            hand: decode_bounded_event_string(decoder)?,
+        };
+        validate_player_totem_use_attempt(&event)?;
+        Ok(event)
+    }
+}
+
+fn encode_optional_bounded_event_string(
+    value: &Option<String>,
+    encoder: &mut Encoder,
+) -> SjmlResult<()> {
+    match value {
+        Some(value) => encode_bounded_event_string(value, encoder),
+        None => encoder.write_u32(u32::MAX),
+    }
+}
+
+fn decode_optional_bounded_event_string(decoder: &mut Decoder<'_>) -> SjmlResult<Option<String>> {
+    let length = decoder.read_u32()?;
+    if length == u32::MAX {
+        return Ok(None);
+    }
+    let length = usize::try_from(length).map_err(|_| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "optional totem event string length does not fit this platform",
+        )
+    })?;
+    if length > 256 {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "optional totem event string exceeds the 256-byte limit",
+        ));
+    }
+    String::from_utf8(decoder.read_raw(length)?.to_vec())
+        .map(Some)
+        .map_err(|_| {
+            SjmlError::new(
+                ErrorCode::InvalidUtf8,
+                "optional totem event string is not valid UTF-8",
+            )
+        })
+}
+
+fn validate_player_totem_use_attempt(event: &PlayerTotemUseAttempt) -> SjmlResult<()> {
+    let source_identity_is_valid = match (&event.source_entity_id, &event.source_entity_type_id) {
+        (None, None) => true,
+        (Some(entity_id), Some(entity_type_id)) => {
+            canonical_uuid(entity_id) && canonical_resource_location(entity_type_id)
+        }
+        _ => false,
+    };
+    if !canonical_uuid(&event.player_id)
+        || !canonical_resource_location(&event.dimension_id)
+        || !canonical_resource_location(&event.damage_type_id)
+        || !canonical_resource_location(&event.totem_id)
+        || !source_identity_is_valid
+        || !(event.hand == "main_hand" || event.hand == "off_hand")
+        || event.count == 0
+        || event.count > MAX_PLAYER_TOTEM_USE_COUNT
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player totem-use attempt contains invalid detached identity, item, hand, or count data",
+        ));
+    }
+    Ok(())
+}
+
+/// Synchronous decision returned by `player.totem_use_attempt`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum PlayerTotemUseAttemptAction {
+    /// Allow the totem effect to save the player.
+    Pass,
+    /// Cancel the totem effect; the pending damage/death proceeds normally.
+    Cancel,
+}
+
+impl StableEncode for PlayerTotemUseAttemptAction {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_u8(match self {
+            Self::Pass => 0,
+            Self::Cancel => 1,
+        })
+    }
+}
+
+impl StableDecode for PlayerTotemUseAttemptAction {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u8()? {
+            0 => Ok(Self::Pass),
+            1 => Ok(Self::Cancel),
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("player totem-use action code {value} is not supported"),
             )),
         }
     }
@@ -2451,13 +2614,13 @@ mod tests {
         PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
         PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt,
         PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction,
-        PlayerRespawned, PlayerSleepAttempt, PlayerTick, PlayerVillagerTraded,
-        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
-        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
-        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
-        MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        PlayerRespawned, PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt,
+        PlayerTotemUseAttemptAction, PlayerVillagerTraded, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
+        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
+        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -4301,6 +4464,99 @@ mod tests {
         assert_eq!(
             to_bytes(&oversized_item_id).unwrap_err().code(),
             ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn player_totem_use_attempt_matches_host_schema_and_validates_detached_source() {
+        let attempt = PlayerTotemUseAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            damage_type_id: "minecraft:player_attack".to_owned(),
+            source_entity_id: Some("00000000-0000-0000-0000-000000000002".to_owned()),
+            source_entity_type_id: Some("minecraft:zombie".to_owned()),
+            totem_id: "minecraft:totem_of_undying".to_owned(),
+            count: 1,
+            hand: "off_hand".to_owned(),
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &attempt.player_id);
+        append_test_string(&mut expected, &attempt.dimension_id);
+        append_test_string(&mut expected, &attempt.damage_type_id);
+        append_test_string(&mut expected, attempt.source_entity_id.as_ref().unwrap());
+        append_test_string(
+            &mut expected,
+            attempt.source_entity_type_id.as_ref().unwrap(),
+        );
+        append_test_string(&mut expected, &attempt.totem_id);
+        expected.extend_from_slice(&attempt.count.to_le_bytes());
+        append_test_string(&mut expected, &attempt.hand);
+        assert_eq!(
+            encoded, expected,
+            "Rust bytes must match host schema-v1 layout"
+        );
+        assert_eq!(
+            from_bytes::<PlayerTotemUseAttempt>(&encoded).unwrap(),
+            attempt
+        );
+
+        let environmental = PlayerTotemUseAttempt {
+            damage_type_id: "minecraft:lava".to_owned(),
+            source_entity_id: None,
+            source_entity_type_id: None,
+            hand: "main_hand".to_owned(),
+            ..attempt.clone()
+        };
+        let encoded = to_bytes(&environmental).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &environmental.player_id);
+        append_test_string(&mut expected, &environmental.dimension_id);
+        append_test_string(&mut expected, &environmental.damage_type_id);
+        expected.extend_from_slice(&u32::MAX.to_le_bytes());
+        expected.extend_from_slice(&u32::MAX.to_le_bytes());
+        append_test_string(&mut expected, &environmental.totem_id);
+        expected.extend_from_slice(&environmental.count.to_le_bytes());
+        append_test_string(&mut expected, &environmental.hand);
+        assert_eq!(
+            encoded, expected,
+            "None must use the host's -1 length sentinel"
+        );
+        assert_eq!(
+            from_bytes::<PlayerTotemUseAttempt>(&encoded).unwrap(),
+            environmental
+        );
+
+        for action in [
+            PlayerTotemUseAttemptAction::Pass,
+            PlayerTotemUseAttemptAction::Cancel,
+        ] {
+            let encoded = to_bytes(&action).unwrap();
+            assert_eq!(encoded.len(), 1);
+            assert_eq!(
+                from_bytes::<PlayerTotemUseAttemptAction>(&encoded).unwrap(),
+                action
+            );
+        }
+        assert!(from_bytes::<PlayerTotemUseAttemptAction>(&[2]).is_err());
+
+        let mut invalid_pair = environmental.clone();
+        invalid_pair.source_entity_id = Some("00000000-0000-0000-0000-000000000002".to_owned());
+        assert_eq!(
+            to_bytes(&invalid_pair).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let mut invalid_count = environmental.clone();
+        invalid_count.count = MAX_PLAYER_TOTEM_USE_COUNT + 1;
+        assert_eq!(
+            to_bytes(&invalid_count).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let mut invalid_type = environmental;
+        invalid_type.damage_type_id = "lava".to_owned();
+        assert_eq!(
+            to_bytes(&invalid_type).unwrap_err().code(),
+            ErrorCode::InvalidArgument
         );
     }
 

@@ -16,15 +16,30 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.94.0`, Rust SDK/macros `0.92.0`, private CLI
-`0.1.24`, and ABI `1.84.0`. ABI compatibility remains major-version based: host
-0.94.0 accepts ABI `1.0.x` through `1.84.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.84.0` and host range
-`^0.94.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.95.0`, Rust SDK/macros `0.93.0`, private CLI
+`0.1.25`, and ABI `1.85.0`. ABI compatibility remains major-version based: host
+0.95.0 accepts ABI `1.0.x` through `1.85.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.85.0` and host range
+`^0.95.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.85.0
+
+Three synchronous cancellable server callbacks are available to modules with
+`events.subscribe` and `events.cancel`. `player.totem_use_attempt` runs before a
+player's totem effect; cancellation prevents the save and leaves pending damage
+in place. `entity.shield_block_attempt` is emitted only when the vanilla shield
+eligibility check passed; cancellation disables that block and incoming damage
+continues. `entity.teleport_attempt` covers the documented server
+`EntityTeleportEvent` subclasses and captures source/target positions without
+loading the destination chunk. Each callback runs on the owning server thread,
+uses detached bounded values, and cannot be handled asynchronously. See
+[player totem attempts](PLAYER_TOTEM_USE_ATTEMPT.md), [shield block attempts]
+(ENTITY_SHIELD_BLOCK_ATTEMPT.md), and [entity teleport attempts]
+(ENTITY_TELEPORT_ATTEMPT.md).
 
 ### APIs added in ABI 1.84.0
 
@@ -403,3 +418,5 @@ Host 0.90.0 / ABI 1.80.0 / SDK/macros 0.88.0 adds per-state friction overrides f
 Host 0.93.0 / ABI 1.83.0 / SDK/macros 0.91.0 adds bounded stack-count and durability updates, component-preserving player inventory moves, loaded-only entity teleports, custom-name visibility, registered-mob spawn eggs, block-drop suppression, XP-point and level-change callbacks, and bounded rich system messages. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,274 host tests, 474 core tests (one skipped), and all 146 required GameTests. Cargo passed 26 CLI, 47 macro, 389 SDK unit, 172 SDK integration, and 12 documentation tests; strict workspace Clippy, SDK wasm32, and native test/Clippy/wasm32 checks for all four example workspaces passed. These headless checks do not verify visible client behavior or remote multiplayer; no crates.io publication or public CLI sync was made.
 
 Host 0.94.0 / ABI 1.84.0 / SDK/macros 0.92.0 adds multi-box registered-block shapes, detached entity target snapshots, cancellable potion-use attempts, and active-screen mouse-release vetoes. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,286 host tests, 478 core tests (one skipped), and all 147 required GameTests. Cargo passed 26 CLI, 47 macro, 394 SDK unit, 172 SDK integration, and 12 documentation tests; strict workspace Clippy, SDK wasm32, and native test/Clippy/wasm32 checks for all four example workspaces passed. These headless checks do not verify visible mouse-release behavior or remote multiplayer; no crates.io publication or public CLI sync was made.
+
+- On 2026-11-13, host 0.95.0 / ABI 1.85.0 / SDK/macros 0.93.0 / private CLI 0.1.25 passed Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer`: 1,295 host tests, 489 core tests (one skipped), and all 150 required GameTests passed. The live guest exercised totem-use cancellation, shield-block veto, and teleport veto. Cargo passed 26 CLI, 49 macro, 401 SDK unit, 175 SDK integration, and 12 documentation tests (663 total); strict workspace Clippy and SDK wasm32 example compilation passed. The root, multi-module, world-render, and OpenGL-geometry example workspaces passed formatting, offline tests, strict Clippy, and wasm32 builds. Headless checks do not verify visible client behavior or remote multiplayer; no crates.io release or public CLI sync was made.

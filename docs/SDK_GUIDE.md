@@ -25,10 +25,20 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes SDK 0.92.0 and core ABI 1.84.0. Live
+unverified. This guide describes the private SDK workspace target 0.93.0
+and core ABI 1.85.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
-SDK 0.92.0 adds bounded multi-box block shapes, detached `entity::target_snapshot`
+SDK 0.93.0 adds synchronous cancellable `player.totem_use_attempt`,
+`entity.shield_block_attempt`, and `entity.teleport_attempt` callbacks. These
+callbacks run on the logical server thread, require `events.subscribe` and
+`events.cancel`, and cannot be handled asynchronously. A shield veto lets the
+incoming hit proceed; a totem veto prevents the saving effect; a teleport veto
+prevents the captured server teleport. See [totem use attempts]
+(PLAYER_TOTEM_USE_ATTEMPT.md), [shield block attempts]
+(ENTITY_SHIELD_BLOCK_ATTEMPT.md), and [entity teleport attempts]
+(ENTITY_TELEPORT_ATTEMPT.md).
+SDK 0.92.0 added bounded multi-box block shapes, detached `entity::target_snapshot`
 results while preserving the legacy `entity::target` handle API, cancellable
 `player.potion_use_attempt` callbacks, and active-screen mouse-release vetoes.
 Shapes use 1–8 finite, normalized AABBs. A target snapshot has no handle and is
@@ -444,7 +454,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.92.0"
+sjml-sdk = "0.93.0"
 ```
 
 For development against this checkout, use
@@ -457,8 +467,8 @@ package in Minecraft; see the [project configuration guide](PROJECT_CONFIGURATIO
 ## Public API map
 
 The SDK's Rust crate name is `sjml`; each public module below is linked to its
-versioned [docs.rs API](https://docs.rs/sjml-sdk/0.92.0/sjml/). The exact
-function signatures and public types there are the reference for Rust callers.
+versioned [docs.rs API](https://docs.rs/sjml-sdk/0.92.0/sjml/). Those links cover the latest registry release (0.92.0); the private 0.93.0
+workspace adds the event types described above.
 
 | Module | Main API |
 | --- | --- |
@@ -480,7 +490,7 @@ function signatures and public types there are the reference for Rust callers.
 | [`entity`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity/) | Loaded non-player entity snapshots and detached Mob target snapshots, same-dimension teleports that stay inside already-loaded chunks, custom names and their vanilla visibility flag, six-slot equipment snapshots, enumeration, spatial queries, bounded raycasts, active effects, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |
 | [`entity_attributes`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity_attributes/) | Bounded reads and base-value writes for 31 built-in vanilla living-entity and server-player attributes, plus module-owned transient modifiers on loaded non-player living entities with automatic owner cleanup. |
 | [`entity_data`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.92.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/respawn/advancement/sleep, registered-block/item callbacks, cancellable `block.drops_attempt`, mutable/cancellable player XP-point and level-change attempts, cancellable potion-use starts, item tooltip and outgoing-chat callbacks, and crafting/inventory/resource events. |
+| [`events`](https://docs.rs/sjml-sdk/0.92.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/respawn/advancement/sleep, registered-block/item callbacks, cancellable `block.drops_attempt`, mutable/cancellable player XP-point and level-change attempts, cancellable potion, totem, shield-block, and entity-teleport attempts, item tooltip and outgoing-chat callbacks, and crafting/inventory/resource events. |
 | [`gl`](https://docs.rs/sjml-sdk/0.92.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
 | [`host`](https://docs.rs/sjml-sdk/0.92.0/sjml/host/) | ABI version query and host logging. |
 | [`inventory`](https://docs.rs/sjml-sdk/0.92.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, integer/boolean component updates, and slot transfers. Block inventories support custom names, bounded count and durability writes, preflighted moves, and enchantment reads/writes/removal on loaded stacks. |

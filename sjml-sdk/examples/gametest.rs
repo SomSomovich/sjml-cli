@@ -54,10 +54,14 @@ mod entity_navigation;
 mod entity_riding;
 #[path = "gametest/entity_rotation.rs"]
 mod entity_rotation;
+#[path = "gametest/entity_shield_block_attempt.rs"]
+mod entity_shield_block_attempt;
 #[path = "gametest/entity_target.rs"]
 mod entity_target;
 #[path = "gametest/entity_teleport.rs"]
 mod entity_teleport;
+#[path = "gametest/entity_teleport_attempt.rs"]
+mod entity_teleport_attempt;
 #[path = "gametest/entity_tick.rs"]
 mod entity_tick;
 #[path = "gametest/gameplay_events.rs"]
@@ -94,6 +98,8 @@ mod player_statistics;
 mod player_tab_list;
 #[path = "gametest/player_tick.rs"]
 mod player_tick;
+#[path = "gametest/player_totem_use_attempt.rs"]
+mod player_totem_use_attempt;
 #[path = "gametest/player_villager_trade.rs"]
 mod player_villager_trade;
 #[path = "gametest/scoreboard.rs"]
@@ -607,6 +613,9 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     player_equipment_changed::initialize()?;
     player_item_use_attempt::initialize()?;
     player_potion_use_attempt::initialize()?;
+    player_totem_use_attempt::initialize()?;
+    entity_teleport_attempt::initialize()?;
+    entity_shield_block_attempt::initialize()?;
     block_use::initialize()?;
     block_tick::initialize()?;
     block_random_tick::initialize()?;

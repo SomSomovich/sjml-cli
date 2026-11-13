@@ -119,6 +119,23 @@ fn check_item_use_attempt(arguments: ItemUseAttemptCheckArguments) -> SjmlResult
             "player.potion_use_attempt delivered and cancelled the expected potion use".to_owned(),
         );
     }
+    if arguments.item_id == "minecraft:totem_of_undying" {
+        if !super::player_totem_use_attempt::matches_existing_item_use_check(
+            &arguments.player_id,
+            &arguments.dimension_id,
+            &arguments.hand,
+            &arguments.item_id,
+            arguments.count,
+        )? {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "player.totem_use_attempt did not match the requested GameTest snapshot",
+            ));
+        }
+        return Ok(
+            "player.totem_use_attempt delivered and cancelled the expected totem use".to_owned(),
+        );
+    }
 
     let observed = LAST_ITEM_USE_ATTEMPT.lock().map_err(|_| {
         SjmlError::new(

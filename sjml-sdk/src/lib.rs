@@ -107,6 +107,7 @@ pub mod command_suggestions;
 pub mod entity;
 pub mod entity_attributes;
 pub mod entity_data;
+pub mod entity_teleport_attempt;
 mod error;
 pub mod events;
 pub mod gl;
@@ -126,6 +127,7 @@ pub mod render;
 pub mod scoreboard;
 pub mod screen_input;
 mod serialization;
+pub mod shield_block_attempt;
 pub mod storage;
 pub mod task;
 pub mod widgets;
@@ -207,6 +209,11 @@ pub use entity::{
 pub use entity_attributes::{
     AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
     MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
+};
+pub use entity_teleport_attempt::{
+    EntityTeleportAttempt, EntityTeleportAttemptAction, EntityTeleportCause,
+    ENTITY_TELEPORT_ATTEMPT_CANCEL_CAPABILITY, MAX_ENTITY_TELEPORT_ATTEMPT_COORDINATE,
+    MAX_ENTITY_TELEPORT_ATTEMPT_ID_BYTES,
 };
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use events::BlockGrowAttempt;
@@ -351,6 +358,7 @@ pub use serialization::{
     from_bytes, to_bytes, Decoder, Encoder, StableDecode, StableEncode, MAX_COLLECTION_ITEMS,
     MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
 };
+pub use shield_block_attempt::{EntityShieldBlockAttempt, EntityShieldBlockAttemptAction};
 pub use sjml_macros::{
     client_command, client_command_suggestions, client_music_selection, command,
     command_suggestions, compute, event, event_async, mod_init, mod_register, mod_shutdown, recipe,
@@ -473,6 +481,10 @@ pub mod prelude {
     pub use crate::entity_data;
     pub use crate::entity_data::{
         ENTITY_DATA_MISSING, MAX_ENTITY_DATA_KEY_BYTES, MAX_ENTITY_DATA_VALUE_BYTES,
+    };
+    pub use crate::entity_teleport_attempt::{
+        EntityTeleportAttempt, EntityTeleportAttemptAction, EntityTeleportCause,
+        ENTITY_TELEPORT_ATTEMPT_CANCEL_CAPABILITY,
     };
     pub use crate::error::{ErrorCode, SjmlError, SjmlResult};
     pub use crate::events;
@@ -652,6 +664,9 @@ pub mod prelude {
     };
     pub use crate::serialization::{
         from_bytes, to_bytes, MAX_COLLECTION_ITEMS, MAX_PAYLOAD_BYTES, MAX_STRING_BYTES,
+    };
+    pub use crate::shield_block_attempt::{
+        EntityShieldBlockAttempt, EntityShieldBlockAttemptAction,
     };
     pub use crate::storage;
     pub use crate::storage::{

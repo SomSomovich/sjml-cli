@@ -622,6 +622,7 @@ fn error(span: Span, message: impl AsRef<str>) -> TokenStream2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_async::expand_event_async;
     use proc_macro2::TokenStream;
     use quote::quote;
 
@@ -970,6 +971,34 @@ mod tests {
             .to_string()
             .contains("sjml_v1_event_player.fished_attempt"));
         assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
+    fn cancellable_player_totem_use_attempt_requires_synchronous_handler() {
+        let generated = expand_event_async(
+            quote!(name = "player.totem_use_attempt"),
+            quote! {
+                async fn totem_attempt(_: PlayerTotemUseAttempt) -> SjmlResult<()> { Ok(()) }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("player.totem_use_attempt is cancellable"));
+    }
+
+    #[test]
+    fn cancellable_entity_shield_block_and_teleport_attempts_require_synchronous_handlers() {
+        for name in ["entity.shield_block_attempt", "entity.teleport_attempt"] {
+            let generated = expand_event_async(
+                quote!(name = #name),
+                quote! {
+                    async fn attempt(_: EntityTeleportAttempt) -> SjmlResult<()> { Ok(()) }
+                },
+            );
+            assert!(generated
+                .to_string()
+                .contains(&format!("{name} is cancellable")));
+        }
     }
 
     #[test]

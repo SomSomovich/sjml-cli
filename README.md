@@ -52,9 +52,9 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.92.0"`; that crate must be available from a configured Cargo registry.
-Until the SDK crates are published, use `--sdk-path` when you need to compile
-the generated project.
+"0.93.0"`; that crate must be available from a configured Cargo registry. This
+private target version is not published yet, so use `--sdk-path` to compile the
+generated project until the matching SDK crates are released.
 
 ## Documentation
 
@@ -71,6 +71,7 @@ the generated project.
 - [Compatibility and host support](docs/COMPATIBILITY.md)
 - [Minecraft API coverage matrix](docs/minecraft-api-coverage.md)
 - [Cancellable player item-pickup attempts](docs/PLAYER_ITEM_PICKUP_ATTEMPT.md)
+- [Totem-use attempts](docs/PLAYER_TOTEM_USE_ATTEMPT.md), [shield-block attempts](docs/ENTITY_SHIELD_BLOCK_ATTEMPT.md), and [entity teleport attempts](docs/ENTITY_TELEPORT_ATTEMPT.md)
 - [Registered item behavior](docs/CUSTOM_ITEM_BEHAVIOR.md), [player inventory enchantments](docs/PLAYER_INVENTORY_ENCHANTMENTS.md), [scoreboard access](docs/SCOREBOARD.md), and [module-owned scoreboard objectives](docs/SCOREBOARD_OBJECTIVES.md)
 - [Client music selection](docs/CLIENT_MUSIC.md), [breeding](docs/ENTITY_BREED_ATTEMPTS.md), and [crop growth](docs/BLOCK_GROW_ATTEMPTS.md)
 - [Client localization lookups](docs/CLIENT_LOCALIZATION.md)

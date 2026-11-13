@@ -73,5 +73,13 @@ crate-type = ["cdylib"]
 name = "player_potion_use_attempt"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "player_totem_use_attempt"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "entity_teleport_attempt"
+crate-type = ["cdylib"]
+
 [dependencies]
 sjml-macros.workspace = true
