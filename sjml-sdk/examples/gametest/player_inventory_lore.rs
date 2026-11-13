@@ -1,5 +1,5 @@
 use sjml::{
-    ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode, command, player, player_inventory,
+    command, player, player_inventory, ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode,
 };
 
 #[derive(StableDecode)]

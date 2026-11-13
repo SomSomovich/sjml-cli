@@ -1122,26 +1122,27 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
+        clear_item_custom_name, clear_lore, give_item, read_enchantment_level, read_lore,
+        remove_enchantment, set_damage, set_enchantment_level, set_item_custom_name, set_lore,
+        set_slot, validate_custom_name, validate_damage, validate_enchantment_access,
+        validate_give_item, validate_inventory, validate_lore_line, validate_lore_lines,
+        PlayerInventoryLorePayload, PlayerInventorySlotUpdate,
         MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES,
         MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS, MAX_PLAYER_INVENTORY_DAMAGE,
         MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES, MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL,
-        MAX_PLAYER_INVENTORY_GIVE_COUNT, MAX_PLAYER_INVENTORY_SLOT_COUNT,
-        MAX_PLAYER_INVENTORY_SLOT_INDEX, MAX_PLAYER_INVENTORY_SLOTS, PlayerInventoryLorePayload,
-        PlayerInventorySlotUpdate, clear_item_custom_name, clear_lore, give_item,
-        read_enchantment_level, read_lore, remove_enchantment, set_damage, set_enchantment_level,
-        set_item_custom_name, set_lore, set_slot, validate_custom_name, validate_damage,
-        validate_enchantment_access, validate_give_item, validate_inventory, validate_lore_line,
-        validate_lore_lines,
+        MAX_PLAYER_INVENTORY_GIVE_COUNT, MAX_PLAYER_INVENTORY_LORE_LINE_BYTES,
+        MAX_PLAYER_INVENTORY_LORE_LINE_CODE_POINTS, MAX_PLAYER_INVENTORY_SLOTS,
+        MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use super::{
         read, read_boolean_component, read_integer_component, write_boolean_component,
         write_integer_component,
     };
+    use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
     use crate::ErrorCode;
     #[cfg(not(target_arch = "wasm32"))]
     use crate::PlayerHandle;
-    use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
 
     #[test]
     fn player_inventory_snapshot_is_bounded_to_128_slots() {
@@ -1526,16 +1527,14 @@ mod tests {
                 "noncanonical registry ID {id:?} must be rejected before host access"
             );
         }
-        assert!(
-            validate_enchantment_access(
-                0,
-                &format!(
-                    "x:{}",
-                    "a".repeat(MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES - 2)
-                )
+        assert!(validate_enchantment_access(
+            0,
+            &format!(
+                "x:{}",
+                "a".repeat(MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES - 2)
             )
-            .is_ok()
-        );
+        )
+        .is_ok());
         assert_eq!(
             validate_enchantment_access(
                 0,

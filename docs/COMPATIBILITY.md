@@ -16,13 +16,23 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.88.0`, the Rust SDK/macros are `0.86.0`, and the ABI is
-`1.78.0`. ABI compatibility remains major-version based: host 0.88.0 accepts ABI
-`1.0.x` through `1.78.0`; it rejects later contracts it does not know. Packages
-using newer APIs declare ABI `^1.78.0` and host range `^0.88.0`.
+The current host is `0.89.0`, the Rust SDK/macros are `0.87.0`, and the ABI is
+`1.79.0`. ABI compatibility remains major-version based: host 0.89.0 accepts ABI
+`1.0.x` through `1.79.0`; it rejects later contracts it does not know. Packages
+using the current APIs declare ABI `^1.79.0` and host range `^0.89.0`.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### Entity glowing permission migration for ABI 1.79.0
+
+`entity::set_glowing` now requires `entity.read` and the dedicated
+`entity.glowing.write` capability. `entity.state.write` continues to authorize
+only `entity::set_silent`. Update both the module's manifest and the server's
+`config/sjml-permissions.toml` grant before upgrading a package that calls
+`set_glowing`; the host will not bind that import without the new permission.
+Read operations are unchanged. See [entity state flags](ENTITY_STATE_FLAGS.md)
+and [project capability grants](PROJECT_CONFIGURATION.md#capability-requests-and-server-grants).
 
 ## Logical side and current API coverage
 
@@ -326,3 +336,5 @@ Host 0.86.0 / ABI 1.76.0 / SDK/macros 0.84.0 adds module-owned player tab-list c
 Host 0.87.0 / ABI 1.77.0 / SDK/macros 0.85.0 adds bounded block update options, host-evaluated translation/scale model keyframes, registered-item grants to live player inventories with returned overflow, and exact-value player statistic setters. These APIs use explicit permissions, bounds, and typed host bindings. Gradle `--configuration-cache --offline test build runGameTestServer` passed 1,164 host tests, 434 core tests (one skipped), and all 129 required GameTests. The private CLI 0.1.17 workspace passed 26 CLI, 43 macro, 355 SDK unit, 157 SDK integration, and 12 documentation tests, strict Clippy, SDK/example WebAssembly checks, and offline tests for all four example workspaces. The private CLI crate is 0.1.17 locally; no crates.io publication or public CLI sync was made.
 
 Host 0.88.0 / ABI 1.78.0 / SDK/macros 0.86.0 adds owner-scoped client-screen closing, guarded server player rotation writes, detached equipment snapshots for loaded non-player living entities, and static crafting remainders for registered standalone items. The APIs use explicit capability, context, owner, registry, and size checks. Gradle passed 1,176 host tests, 436 core tests (one skipped), and all 131 required dedicated-server GameTests; the CLI workspace passed 26 CLI, 43 macro, 358 SDK unit, 162 SDK integration, and 12 documentation tests plus strict Clippy and wasm32/example checks. This did not verify visible client behavior or a remote multiplayer session; no release was made to crates.io or the public CLI repository.
+
+Host 0.89.0 / ABI 1.79.0 / SDK/macros 0.87.0 adds criterion-level advancement progress notifications, loaded-world game-event dispatch, and a separate permission for glowing-flag writes. It also completes item-pickup vetoes and plain-text player inventory lore with live GameTest coverage. The private CLI's generated-project template and examples now declare the matching versions. Gradle passed 1,190 host tests, 449 core tests (one skipped), and all 136 required GameTests. The private CLI 0.1.19 workspace passed 26 CLI, 45 macro, 363 SDK unit, 167 SDK integration, and 12 documentation tests; strict Clippy, SDK/example wasm32 checks, and offline tests for all example workspaces passed. Visible client behavior and remote multiplayer remain unverified; no release was made to crates.io or the public CLI repository.

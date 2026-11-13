@@ -10,12 +10,13 @@ let currently_silent = sjml::entity::is_silent(entity)?;
 sjml::entity::set_silent(entity, false)?;
 ```
 
-Reading either flag requires `entity.read`. Changing either flag also requires
+Reading either flag requires `entity.read`. Changing the glowing flag also
+requires `entity.glowing.write`; changing the silent flag requires
 `entity.state.write`. Both operations run synchronously on the owning logical
 server thread and revalidate the module-scoped entity handle. A handle becomes
 stale when the entity is removed, leaves its level, or the module closes.
 
-`is_glowing` and `set_glowing` read or change Minecraft's entity-level glowing
+`is_glowing` reads and `set_glowing` changes Minecraft's entity-level glowing
 flag. Client tracking and rendering determine whether a connected client shows
 the outline; this API does not expose render state. The silent flag controls
 Minecraft's ordinary entity sound behavior. These operations do not expose

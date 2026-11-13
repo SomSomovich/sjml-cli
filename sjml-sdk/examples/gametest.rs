@@ -96,6 +96,8 @@ mod world_block_tag;
 mod world_difficulty;
 #[path = "gametest/world_fluid_state.rs"]
 mod world_fluid_state;
+#[path = "gametest/world_game_event.rs"]
+mod world_game_event;
 #[path = "gametest/world_item_spawn.rs"]
 mod world_item_spawn;
 #[path = "gametest/world_item_tag.rs"]
@@ -772,7 +774,7 @@ fn observe_server_tick(event: ServerTick) -> SjmlResult<()> {
 fn observe_inventory_changed(event: InventoryChanged) -> SjmlResult<()> {
     if event.change_type == "picked_up"
         && event.item_id == "minecraft:diamond"
-        && event.count == 2
+        && event.count == 3
         && event.slot.is_none()
     {
         SAW_INVENTORY_PICKUP.store(true, Ordering::Relaxed);

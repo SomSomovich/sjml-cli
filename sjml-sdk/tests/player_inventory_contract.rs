@@ -1,6 +1,6 @@
 pub use sjml::{
-    abi, to_bytes, Decoder, ErrorCode, PlayerHandle, SjmlError, SjmlResult, StableDecode,
-    MAX_PAYLOAD_BYTES,
+    abi, from_bytes, to_bytes, Decoder, ErrorCode, PlayerHandle, SjmlError, SjmlResult,
+    StableDecode, StableEncode, MAX_PAYLOAD_BYTES,
 };
 
 pub mod inventory {
@@ -15,6 +15,7 @@ pub use player_inventory::{
     give_item as player_inventory_give_item, set_damage as player_inventory_set_damage,
     set_item_custom_name as player_inventory_set_item_custom_name,
     set_slot as player_inventory_set_slot, PlayerInventorySlotUpdate,
+    MAX_PLAYER_INVENTORY_LORE_BYTES,
 };
 
 use sjml::inventory::{InventorySnapshot, ItemStackDescriptor};

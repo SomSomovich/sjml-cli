@@ -38,6 +38,12 @@ fn native_world_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        world::emit_game_event(handle, BlockPos { x: 1, y: 64, z: 2 }, "minecraft:step")
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
         world::daylight_cycle_enabled(handle).unwrap_err().code(),
         ErrorCode::UnknownErrorCode
     );
@@ -73,6 +79,26 @@ fn native_world_api_reports_unsupported_imports() {
             .code(),
         ErrorCode::UnknownErrorCode
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn game_event_ids_are_validated_before_the_host_import() {
+    let handle = WorldHandle::new(1, 2, 3, 4).unwrap();
+    let position = BlockPos { x: 1, y: 64, z: 2 };
+    for invalid in [
+        "Minecraft:step",
+        "minecraft:bad path",
+        "a:b:c",
+        "minecraft:",
+    ] {
+        assert_eq!(
+            world::emit_game_event(handle, position, invalid)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
 }
 
 #[test]

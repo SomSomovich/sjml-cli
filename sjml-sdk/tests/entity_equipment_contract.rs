@@ -1,4 +1,5 @@
-use sjml::{entity, from_bytes, to_bytes, EntityEquipmentSlot, EntityHandle, ErrorCode};
+use sjml::entity::EntityEquipmentSlot;
+use sjml::{entity, from_bytes, to_bytes, EntityHandle, ErrorCode};
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
@@ -16,9 +17,13 @@ fn native_equipment_write_validates_item_id_before_unsupported_import() {
     let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
     assert_eq!(entity::EQUIPMENT_WRITE_CAPABILITY, "entity.equipment.write");
     assert_eq!(
-        entity::try_equip_default(handle, EntityEquipmentSlot::MainHand, "minecraft:iron_sword")
-            .unwrap_err()
-            .code(),
+        entity::try_equip_default(
+            handle,
+            EntityEquipmentSlot::MainHand,
+            "minecraft:iron_sword"
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::UnknownErrorCode
     );
     for invalid_id in ["Minecraft:iron_sword", "minecraft:", "minecraft:bad id"] {

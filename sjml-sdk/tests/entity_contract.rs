@@ -337,3 +337,9 @@ fn entity_rotation_uses_schema_v1_yaw_then_pitch_and_checks_finite_bounds() {
         ErrorCode::InvalidArgument
     );
 }
+
+#[test]
+fn entity_glowing_and_silent_writes_use_separate_capabilities() {
+    assert_eq!(entity::GLOWING_WRITE_CAPABILITY, "entity.glowing.write");
+    assert_eq!(entity::STATE_WRITE_CAPABILITY, "entity.state.write");
+}

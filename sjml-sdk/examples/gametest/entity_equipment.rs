@@ -1,4 +1,5 @@
-use sjml::{command, entity, EntityEquipmentSlot, ErrorCode, SjmlError, SjmlResult, StableDecode};
+use sjml::entity::EntityEquipmentSlot;
+use sjml::{command, entity, ErrorCode, SjmlError, SjmlResult, StableDecode};
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
@@ -100,7 +101,11 @@ fn equips_only_an_empty_slot_and_preserves_the_existing_stack(
             )
         })?;
 
-    if !entity::try_equip_default(handle, EntityEquipmentSlot::MainHand, "minecraft:iron_sword")? {
+    if !entity::try_equip_default(
+        handle,
+        EntityEquipmentSlot::MainHand,
+        "minecraft:iron_sword",
+    )? {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "the initially empty main-hand slot rejected its first default item",
@@ -108,7 +113,10 @@ fn equips_only_an_empty_slot_and_preserves_the_existing_stack(
     }
     let first_snapshot = entity::equipment(handle)?;
     let sword = first_snapshot.main_hand.as_ref().ok_or_else(|| {
-        SjmlError::new(ErrorCode::InvalidArgument, "the main-hand item was not visible after insertion")
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the main-hand item was not visible after insertion",
+        )
     })?;
     if sword.item_id != "minecraft:iron_sword" || sword.count != 1 || sword.damage != 0 {
         return Err(SjmlError::new(
@@ -116,14 +124,21 @@ fn equips_only_an_empty_slot_and_preserves_the_existing_stack(
             "entity equipment readback did not match the default iron sword",
         ));
     }
-    if entity::try_equip_default(handle, EntityEquipmentSlot::MainHand, "minecraft:diamond_sword")? {
+    if entity::try_equip_default(
+        handle,
+        EntityEquipmentSlot::MainHand,
+        "minecraft:diamond_sword",
+    )? {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "an occupied equipment slot accepted a replacement",
         ));
     }
     let final_snapshot = entity::equipment(handle)?;
-    if final_snapshot.main_hand.as_ref().map(|stack| stack.item_id.as_str())
+    if final_snapshot
+        .main_hand
+        .as_ref()
+        .map(|stack| stack.item_id.as_str())
         != Some("minecraft:iron_sword")
     {
         return Err(SjmlError::new(

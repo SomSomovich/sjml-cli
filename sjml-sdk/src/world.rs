@@ -50,6 +50,10 @@ pub const MAX_WORLD_PROJECTILES_PER_TICK: usize = 4;
 pub const MAX_WORLD_ITEM_SPAWNS_PER_TICK: usize = 16;
 /// Maximum stack count accepted by [`spawn_item`] before the host checks the item's own limit.
 pub const MAX_WORLD_ITEM_STACK_COUNT: u32 = 64;
+/// Maximum UTF-8 bytes accepted for a registered game-event ID.
+pub const MAX_WORLD_GAME_EVENT_ID_BYTES: usize = 256;
+/// Maximum game events one module may emit per logical-server tick.
+pub const MAX_WORLD_GAME_EVENTS_PER_TICK: usize = 32;
 /// Maximum magnitude accepted for [`ItemSpawnVelocity`], in blocks per tick.
 pub const MAX_WORLD_ITEM_SPAWN_SPEED: f64 = 4.0;
 /// Maximum number of block positions visited by one collision query.
@@ -1010,6 +1014,16 @@ struct WorldItemSpawnRequest {
     velocity_z: f64,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+struct WorldGameEventRequest {
+    world: WorldHandle,
+    position: BlockPos,
+    event_id: String,
+}
+
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_world_v1")]
 extern "C" {
@@ -1143,6 +1157,8 @@ extern "C" {
     fn imported_spawn_projectile(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_item"]
     fn imported_spawn_item(query: i32, query_length: i32) -> i32;
+    #[link_name = "emit_game_event"]
+    fn imported_emit_game_event(query: i32, query_length: i32) -> i32;
     #[link_name = "set_block"]
     fn imported_set_block(
         handle: i32,
@@ -3029,6 +3045,50 @@ pub fn spawn_item(
             Err(SjmlError::from_abi_code(
                 status as u32,
                 "host rejected the ordinary item spawn",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+/// Emits one registered Minecraft game event at the center of a loaded block position.
+///
+/// The module must request and receive `world.read` and `world.write`. The event ID must be a
+/// canonical lowercase `namespace:path` value present in the addressed level's game-event registry.
+/// The event is sent with no entity or affected-block source, preventing a guest from impersonating
+/// a player or another Minecraft object. The position must fit the world's build height and border
+/// and its chunk must already be loaded; the call never loads chunks. Each module may emit at most
+/// [`MAX_WORLD_GAME_EVENTS_PER_TICK`] events per logical-server tick.
+pub fn emit_game_event(world: WorldHandle, position: BlockPos, event_id: &str) -> SjmlResult<()> {
+    validate_resource_id(event_id, "game-event")?;
+    if event_id.len() > MAX_WORLD_GAME_EVENT_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "game-event ID exceeds the 256-byte ABI bound",
+        ));
+    }
+    validate_world_position(position)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldGameEventRequest {
+            world,
+            position,
+            event_id: event_id.to_owned(),
+        })?;
+        // SAFETY: the stable request is live and readable until the synchronous host call returns.
+        let status = unsafe {
+            imported_emit_game_event(query.as_ptr() as usize as u32 as i32, query.len() as i32)
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the Minecraft game event",
             ))
         }
     }

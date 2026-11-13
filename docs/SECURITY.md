@@ -392,9 +392,10 @@ the live module-scoped handle and logical-server thread. Values are limited to
 `entity::custom_name` reads a bounded plain-text name from a live loaded non-player entity under `entity.read`. Set and clear calls also require `entity.custom_name.write`; the host builds `Component.literal` text, rejecting styling/control payloads and oversized names. Player names and arbitrary text components are outside this API.
 
 `entity::is_glowing` and `entity::is_silent` read only two fixed vanilla flags
-from live loaded non-player entities under `entity.read`. Their setters also
-require `entity.state.write`; the host rejects client, static-registration, and
-stale-handle calls. These flags do not expose general entity metadata or NBT.
+from live loaded non-player entities under `entity.read`. `set_glowing` also
+requires `entity.glowing.write`; `set_silent` requires `entity.state.write`. The
+host rejects client, static-registration, and stale-handle calls. These flags do
+not expose general entity metadata or NBT.
 
 `entity::is_ai_enabled` and `entity::set_ai_enabled` operate only on loaded
 vanilla `Mob` instances. Reads require `entity.read`; writes additionally

@@ -6,7 +6,7 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.78.0**. Versions use SemVer. A host supports
+The current core ABI version is **1.79.0**. Versions use SemVer. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
 incompatible. Build metadata does not affect version ordering. ABI 1.78.0 adds owner-scoped closing for guest screens, guarded server player rotation writes, detached six-slot equipment snapshots for loaded living non-player entities, and static crafting remainders for registered standalone items. ABI 1.76.0 adds module-owned player tab-list headers/footers and dummy scoreboard objectives, post-success villager-trade notifications, bounded ordinary item spawning, and exact-state block sound and predicate overrides. ABI 1.75.0 adds owner-scoped player boss bars, loaded non-player living-entity vitals and bounded healing, and exact-state emitted-light overrides for registered blocks. ABI 1.74.0 adds per-state bounded shape overrides for
@@ -1863,6 +1863,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `notify_neighbors_at` | `handle_ptr, handle_len, x, y, z` | Run the ordinary vanilla neighbor update at a loaded position; status only |
 | `spawn_entity` | `query_ptr, query_len` | Spawn one registered, non-player entity from a bounded schema-v1 world/type/position record; status only |
 | `spawn_item` | `query_ptr, query_len` | Spawn one bounded ordinary stack from the current item registry, with loaded-only position checks and bounded velocity; status only |
+| `emit_game_event` | `query_ptr, query_len` | Dispatch one canonical game-event registry ID at a loaded block center with an empty source context; status only |
 | `spawn_particle` | `handle_ptr, handle_len, x, y, z, particle_id_ptr, particle_id_len` | Spawn one registered simple particle at the center of a loaded block; status only |
 | `play_sound` | `handle_ptr, handle_len, x, y, z, sound_id_ptr, sound_id_len, volume_bits, pitch_bits` | Play one registered sound at the center of a loaded block; status only |
 | `weather` | `(handle_ptr: i32, handle_len: i32, output_ptr: i32, output_capacity: i32) -> i32` | Write an 18-byte schema-v1 weather snapshot |
@@ -2081,6 +2082,20 @@ already-loaded chunks. Velocity may be zero and has a magnitude limit of 4.0
 blocks per tick. A module may spawn 16 stacks per logical-server tick. Static
 registration, client contexts, invalid values, and unloaded positions are
 rejected; this call never loads a chunk or accepts NBT/data components.
+
+`emit_game_event` requires `world.read` and `world.write`. The schema-v1
+request is little-endian `u32 schema=1`, the 24-byte module-owned world handle,
+`u32 position_schema=1`, three signed `i32` block coordinates, a `u32`
+UTF-8 byte length, and a canonical lowercase game-event registry ID of 3–256
+bytes. The host resolves the ID against the selected level's current
+`Registries.GAME_EVENT` registry and dispatches it at the block center with no
+entity source or affected block state. The position must be inside build height
+and the world border, and its chunk must already be loaded. The host never
+loads chunks and allows at most 32 events per module per logical-server tick.
+Unknown IDs, invalid positions, static-registration calls, client contexts, or
+wrong-thread calls fail closed. Event behavior is the normal Minecraft and
+mod-listener behavior for that event ID; a guest cannot impersonate a player or
+other entity through the context. See [world game events](WORLD_GAME_EVENTS.md).
 
 `spawn_particle` has the same handle, thread, build-height, loaded-chunk, and
 `world.write` checks. It accepts only a registered `SimpleParticleType`, emits
@@ -2400,9 +2415,10 @@ registration and client calls return `PERMISSION_DENIED`. See
 ## Live entity state flags
 
 `sjml_entity_v1.is_glowing` and `is_silent` read two stable flags from loaded
-non-player entities. Both require `entity.read`. `set_glowing` and `set_silent`
-also require the separate `entity.state.write` grant and accept only a little-
-endian `i32` boolean (`0` or `1`). Reads write a little-endian `u32` boolean to
+non-player entities. Both require `entity.read`. `set_glowing` additionally
+requires `entity.glowing.write`; `set_silent` requires `entity.state.write`. Both
+setters accept only a little-endian `i32` boolean (`0` or `1`). Reads write a
+little-endian `u32` boolean to
 a checked four-byte output span. All calls validate the module-owned 24-byte
 entity handle and run on the owning server thread. Static-registration and
 client calls fail closed. See [entity state flags](ENTITY_STATE_FLAGS.md).

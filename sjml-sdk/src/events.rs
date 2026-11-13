@@ -183,11 +183,17 @@ fn validate_advancement_progress(event: &PlayerAdvancementProgressEvent) -> Sjml
     if !canonical_uuid(&event.player_id)
         || !canonical_resource_location(&event.advancement_id)
         || event.criterion_id.is_empty()
-        || event.player_id.len() > 256
+    {
+        return Err(invalid());
+    }
+    if event.player_id.len() > 256
         || event.advancement_id.len() > 256
         || event.criterion_id.len() > 256
     {
-        return Err(invalid());
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "advancement progress event string exceeds the 256-byte limit",
+        ));
     }
     Ok(())
 }
@@ -1795,21 +1801,21 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        subscribe, subscribe_with_interval, unsubscribe, BlockBreak, BlockBreakAttempt,
-        BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockGrowAttempt, BlockPlace,
-        BlockPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty, BlockUseAction,
-        ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
+        subscribe, subscribe_with_interval, unsubscribe, AdvancementProgressOperation, BlockBreak,
+        BlockBreakAttempt, BlockFertilizeAttempt, BlockFluidPlaceAttempt, BlockGrowAttempt,
+        BlockPlace, BlockPlaceAttempt, BlockRandomTick, BlockTick, BlockTickProperty,
+        BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand, ClientChatSendAttempt,
         ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt, EntityDamageAttempt,
         EntityDamaged, EntityDeath, EntityDeathAttempt, EntityEffectApplicationAttempt,
         EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntitySpawned,
-        AdvancementProgressOperation, EntityTargetAttempt, EntityTick, EventPriority,
-        ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
-        ModuleBlockUse, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
-        PlayerAdvancementEarned, PlayerAdvancementProgressEvent, PlayerAttackAttempt,
-        PlayerDropAttempt, PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerItemCrafted, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt,
-        PlayerTick, PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
+        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemUse,
+        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerDropAttempt,
+        PlayerFishedAttempt, PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted,
+        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerRespawned,
+        PlayerSleepAttempt, PlayerTick, PlayerVillagerTraded, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, MAX_SERVER_TICK_INTERVAL,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;

@@ -50,6 +50,10 @@ pub const MAX_ENTITY_EQUIPMENT_DAMAGE: u32 = 1_000_000;
 pub const MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES: u32 = 1666;
 /// Capability required with `entity.read` to add a default item to an empty entity equipment slot.
 pub const EQUIPMENT_WRITE_CAPABILITY: &str = "entity.equipment.write";
+/// Capability required with `entity.read` to change a loaded entity's glowing flag.
+pub const GLOWING_WRITE_CAPABILITY: &str = "entity.glowing.write";
+/// Capability required with `entity.read` to change a loaded entity's silent flag.
+pub const STATE_WRITE_CAPABILITY: &str = "entity.state.write";
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 /// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
@@ -239,6 +243,7 @@ pub enum EntityEquipmentSlot {
 }
 
 impl EntityEquipmentSlot {
+    #[cfg(target_arch = "wasm32")]
     const fn code(self) -> u32 {
         match self {
             Self::MainHand => 1,
@@ -253,6 +258,7 @@ impl EntityEquipmentSlot {
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
+#[cfg(target_arch = "wasm32")]
 struct EntityEquipmentWriteResult {
     equipped: bool,
 }
@@ -511,7 +517,8 @@ extern "C" {
     #[link_name = "equipment"]
     fn imported_equipment(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_equipment"]
-    fn imported_set_equipment(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
+    fn imported_set_equipment(request: i32, request_length: i32, output: i32, capacity: i32)
+        -> i32;
     #[link_name = "riding_snapshot"]
     fn imported_riding_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "target"]
@@ -1721,8 +1728,8 @@ pub fn is_glowing(handle: EntityHandle) -> SjmlResult<bool> {
 /// Sets the entity-level glowing flag on a loaded non-player entity.
 ///
 /// The module must request and receive both `entity.read` and
-/// `entity.state.write`. Normal Minecraft entity data synchronization still
-/// controls whether connected clients see the outline.
+/// [`GLOWING_WRITE_CAPABILITY`]. Normal Minecraft entity data synchronization
+/// still controls whether connected clients see the outline.
 pub fn set_glowing(handle: EntityHandle, glowing: bool) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
     {
@@ -1781,8 +1788,8 @@ pub fn is_silent(handle: EntityHandle) -> SjmlResult<bool> {
 /// Sets whether a loaded non-player entity suppresses its ordinary sounds.
 ///
 /// The module must request and receive both `entity.read` and
-/// `entity.state.write`. Minecraft's sound engine and entity tracking remain
-/// responsible for client-side behavior.
+/// [`STATE_WRITE_CAPABILITY`]. Minecraft's sound engine and entity tracking
+/// remain responsible for client-side behavior.
 pub fn set_silent(handle: EntityHandle, silent: bool) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
     {

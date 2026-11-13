@@ -262,3 +262,11 @@ recomposes active SJML module contributions in deterministic order and removes
 only the calling module's text on clear or shutdown. Both calls require
 `entity.read` and `player.ui.tab_list`; see `docs/PLAYER_TAB_LIST.md` in the
 workspace.
+
+SDK 0.87.0 separates permission to change an entity's glowing outline from
+permission to change its silent flag. `entity::set_glowing` now requires
+`entity.read` and `entity.glowing.write`; `entity::set_silent` continues to use
+`entity.state.write`. Existing modules that call `set_glowing` must add the new
+capability to both their manifest and the administrator grant. See
+`docs/ENTITY_STATE_FLAGS.md` and `docs/PROJECT_CONFIGURATION.md` in the
+workspace.
