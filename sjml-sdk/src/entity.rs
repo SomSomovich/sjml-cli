@@ -1657,7 +1657,6 @@ mod tests {
         MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE,
         MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_VELOCITY_COMPONENT,
         MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
-        TARGET_WRITE_CAPABILITY,
     };
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
