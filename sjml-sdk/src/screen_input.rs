@@ -26,6 +26,9 @@ pub type ScreenInputSubscriptionHandle = EventSubscriptionHandle;
 /// Module-owned handle for synchronous active-screen key veto callbacks.
 pub type ScreenKeyPressedSubscriptionHandle = EventSubscriptionHandle;
 
+/// Module-owned handle for synchronous active-screen mouse-release veto callbacks.
+pub type ScreenMouseReleasedSubscriptionHandle = EventSubscriptionHandle;
+
 /// Detached press data available before the active screen's `keyPressed` handler runs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ScreenKeyPressedEvent {
@@ -38,12 +41,33 @@ pub struct ScreenKeyPressedEvent {
     pub repeat: bool,
 }
 
-/// A click or key press from the active screen, captured on the client main thread.
+/// Detached release data captured before the active screen's `mouseReleased` handler runs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenMouseReleasedEvent {
+    /// Scaled logical GUI X coordinate.
+    pub mouse_x: f32,
+    /// Scaled logical GUI Y coordinate.
+    pub mouse_y: f32,
+    /// GLFW mouse button index.
+    pub button: u8,
+    /// Shift, Control, Alt, Super, Caps Lock, and Num Lock occupy the low six bits.
+    pub modifiers: u8,
+}
+
+/// A click, release, or key press from the active screen, captured on the client main thread.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScreenInputEvent {
     /// Mouse click coordinates are scaled GUI units. Buttons range from 0 through 31;
     /// modifier bits are Shift, Control, Alt, Super, Caps Lock, and Num Lock.
     MouseButtonPressed {
+        mouse_x: f32,
+        mouse_y: f32,
+        button: u8,
+        modifiers: u8,
+    },
+    /// Mouse button release coordinates are scaled GUI units. This event is delivered only to
+    /// the separate `subscribe_mouse_released` lane, so older subscribers never see a new tag.
+    MouseButtonReleased {
         mouse_x: f32,
         mouse_y: f32,
         button: u8,
@@ -74,6 +98,19 @@ impl ScreenInputEvent {
     fn validate(self) -> SjmlResult<Self> {
         match self {
             Self::MouseButtonPressed {
+                mouse_x,
+                mouse_y,
+                button,
+                modifiers,
+            } => {
+                validate_coordinate(mouse_x)?;
+                validate_coordinate(mouse_y)?;
+                if button > 31 {
+                    return Err(invalid("mouse button is outside the supported range"));
+                }
+                validate_modifiers(modifiers)?;
+            }
+            Self::MouseButtonReleased {
                 mouse_x,
                 mouse_y,
                 button,
@@ -132,6 +169,10 @@ extern "C" {
     fn imported_subscribe_key_pressed(callback_id: i64, handle_output_pointer: i32) -> i32;
     #[link_name = "unsubscribe_key_pressed"]
     fn imported_unsubscribe_key_pressed(handle_pointer: i32, handle_length: i32) -> i32;
+    #[link_name = "subscribe_mouse_released"]
+    fn imported_subscribe_mouse_released(callback_id: i64, handle_output_pointer: i32) -> i32;
+    #[link_name = "unsubscribe_mouse_released"]
+    fn imported_unsubscribe_mouse_released(handle_pointer: i32, handle_length: i32) -> i32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -142,7 +183,15 @@ type Callback =
 struct CallbackEntry {
     callback: Callback,
     handle: Option<ScreenInputSubscriptionHandle>,
-    key_pressed_only: bool,
+    subscription_kind: SubscriptionKind,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SubscriptionKind {
+    General,
+    KeyPressed,
+    MouseReleased,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -154,7 +203,7 @@ struct Callbacks {
 
 #[cfg(target_arch = "wasm32")]
 impl Callbacks {
-    fn insert<F>(&mut self, callback: F, key_pressed_only: bool) -> SjmlResult<u64>
+    fn insert<F>(&mut self, callback: F, subscription_kind: SubscriptionKind) -> SjmlResult<u64>
     where
         F: FnMut(ScreenInputEvent) -> SjmlResult<bool> + 'static,
     {
@@ -171,7 +220,7 @@ impl Callbacks {
             CallbackEntry {
                 callback: std::rc::Rc::new(std::cell::RefCell::new(Box::new(callback))),
                 handle: None,
-                key_pressed_only,
+                subscription_kind,
             },
         );
         Ok(id)
@@ -203,8 +252,11 @@ where
 {
     #[cfg(target_arch = "wasm32")]
     {
-        let callback_id =
-            CALLBACKS.with(|registry| registry.borrow_mut().insert(callback, false))?;
+        let callback_id = CALLBACKS.with(|registry| {
+            registry
+                .borrow_mut()
+                .insert(callback, SubscriptionKind::General)
+        })?;
         let output = allocate_host_input(HANDLE_BYTES);
         if output == 0 {
             CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
@@ -276,7 +328,11 @@ where
             }),
             _ => Ok(false),
         };
-        let callback_id = CALLBACKS.with(|registry| registry.borrow_mut().insert(adapter, true))?;
+        let callback_id = CALLBACKS.with(|registry| {
+            registry
+                .borrow_mut()
+                .insert(adapter, SubscriptionKind::KeyPressed)
+        })?;
         let output = allocate_host_input(HANDLE_BYTES);
         if output == 0 {
             CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
@@ -324,14 +380,91 @@ where
     }
 }
 
+/// Subscribes a synchronous callback to active-screen mouse-button releases only.
+/// Return `true` to veto the screen's `mouseReleased` handler. Requires
+/// `client.input.screen_cancel`; older general screen-input subscribers never receive release events.
+pub fn subscribe_mouse_released<F>(callback: F) -> SjmlResult<ScreenMouseReleasedSubscriptionHandle>
+where
+    F: FnMut(ScreenMouseReleasedEvent) -> SjmlResult<bool> + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut callback = callback;
+        let adapter = move |event: ScreenInputEvent| match event {
+            ScreenInputEvent::MouseButtonReleased {
+                mouse_x,
+                mouse_y,
+                button,
+                modifiers,
+            } => callback(ScreenMouseReleasedEvent {
+                mouse_x,
+                mouse_y,
+                button,
+                modifiers,
+            }),
+            _ => Ok(false),
+        };
+        let callback_id = CALLBACKS.with(|registry| {
+            registry
+                .borrow_mut()
+                .insert(adapter, SubscriptionKind::MouseReleased)
+        })?;
+        let output = allocate_host_input(HANDLE_BYTES);
+        if output == 0 {
+            CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate screen mouse-release veto handle output",
+            ));
+        }
+        // SAFETY: initialize the complete live output allocation before the host writes the handle.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, HANDLE_BYTES as usize) };
+        // SAFETY: the output allocation remains live during the synchronous host import.
+        let status =
+            unsafe { imported_subscribe_mouse_released(callback_id as i64, output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful host call initialized the complete handle allocation.
+            from_bytes::<ScreenMouseReleasedSubscriptionHandle>(unsafe {
+                core::slice::from_raw_parts(output as *const u8, HANDLE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected screen mouse-release subscription",
+            ))
+        };
+        // SAFETY: release the exact allocation passed to the host import.
+        unsafe { deallocate_host_input(output, HANDLE_BYTES) };
+        match result {
+            Ok(handle) => {
+                CALLBACKS.with(|registry| {
+                    if let Some(entry) = registry.borrow_mut().entries.get_mut(&callback_id) {
+                        entry.handle = Some(handle);
+                    }
+                });
+                Ok(handle)
+            }
+            Err(error) => {
+                CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+                Err(error)
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = callback;
+        Err(unsupported())
+    }
+}
+
 /// Removes an active subscription from both the host and guest callback registry.
 pub fn unsubscribe(handle: ScreenInputSubscriptionHandle) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
     {
-        let (callback_id, key_pressed_only) = CALLBACKS
+        let (callback_id, subscription_kind) = CALLBACKS
             .with(|registry| {
                 registry.borrow().entries.iter().find_map(|(&id, entry)| {
-                    (entry.handle == Some(handle)).then_some((id, entry.key_pressed_only))
+                    (entry.handle == Some(handle)).then_some((id, entry.subscription_kind))
                 })
             })
             .ok_or_else(|| {
@@ -342,12 +475,23 @@ pub fn unsubscribe(handle: ScreenInputSubscriptionHandle) -> SjmlResult<()> {
             })?;
         let bytes = to_bytes(&handle)?;
         // SAFETY: the stable handle bytes live for the complete synchronous host call.
-        let status = if key_pressed_only {
-            // SAFETY: the exact serialized handle remains live for the synchronous host call.
-            unsafe { imported_unsubscribe_key_pressed(bytes.as_ptr() as i32, bytes.len() as i32) }
-        } else {
-            // SAFETY: the exact serialized handle remains live for the synchronous host call.
-            unsafe { imported_unsubscribe(bytes.as_ptr() as i32, bytes.len() as i32) }
+        let status = match subscription_kind {
+            SubscriptionKind::General => {
+                // SAFETY: the exact serialized handle remains live for the synchronous host call.
+                unsafe { imported_unsubscribe(bytes.as_ptr() as i32, bytes.len() as i32) }
+            }
+            SubscriptionKind::KeyPressed => {
+                // SAFETY: the exact serialized handle remains live for the synchronous host call.
+                unsafe {
+                    imported_unsubscribe_key_pressed(bytes.as_ptr() as i32, bytes.len() as i32)
+                }
+            }
+            SubscriptionKind::MouseReleased => {
+                // SAFETY: the exact serialized handle remains live for the synchronous host call.
+                unsafe {
+                    imported_unsubscribe_mouse_released(bytes.as_ptr() as i32, bytes.len() as i32)
+                }
+            }
         };
         if status != 0 {
             return Err(SjmlError::from_abi_code(
@@ -373,6 +517,12 @@ pub fn unsubscribe_key_pressed(handle: ScreenKeyPressedSubscriptionHandle) -> Sj
     unsubscribe(handle)
 }
 
+/// Removes the synchronous active-screen mouse-release callback returned by
+/// [`subscribe_mouse_released`].
+pub fn unsubscribe_mouse_released(handle: ScreenMouseReleasedSubscriptionHandle) -> SjmlResult<()> {
+    unsubscribe(handle)
+}
+
 #[cfg(target_arch = "wasm32")]
 struct ScreenInputDelivery {
     callback_id: u64,
@@ -394,6 +544,12 @@ impl StableDecode for ScreenInputDelivery {
         }
         let event = match decoder.read_u8()? {
             0 => ScreenInputEvent::MouseButtonPressed {
+                mouse_x: decoder.read_f32()?,
+                mouse_y: decoder.read_f32()?,
+                button: decoder.read_u8()?,
+                modifiers: decoder.read_u8()?,
+            },
+            4 => ScreenInputEvent::MouseButtonReleased {
                 mouse_x: decoder.read_f32()?,
                 mouse_y: decoder.read_f32()?,
                 button: decoder.read_u8()?,
@@ -503,6 +659,13 @@ mod tests {
             modifiers: 0x03,
         };
         assert_eq!(click.validate().unwrap(), click);
+        let release = ScreenInputEvent::MouseButtonReleased {
+            mouse_x: 80.0,
+            mouse_y: 30.0,
+            button: 1,
+            modifiers: 0x02,
+        };
+        assert_eq!(release.validate().unwrap(), release);
         let key = ScreenInputEvent::KeyPressed {
             key_code: -1,
             scan_code: 65_535,
@@ -533,6 +696,14 @@ mod tests {
             mouse_x: f32::NAN,
             mouse_y: 0.0,
             button: 0,
+            modifiers: 0,
+        }
+        .validate()
+        .is_err());
+        assert!(ScreenInputEvent::MouseButtonReleased {
+            mouse_x: 0.0,
+            mouse_y: 0.0,
+            button: 32,
             modifiers: 0,
         }
         .validate()

@@ -1,8 +1,8 @@
 # Loaded Mob targets
 
-The entity API can inspect the current target of a loaded vanilla `Mob`, assign a loaded living
-non-player entity, or clear the current target. These calls use handles from the calling module's
-own entity table.
+The entity API can inspect a loaded vanilla `Mob`'s current target as a detached snapshot, assign a
+loaded living non-player entity, or clear the current target. Assignment uses handles from the
+calling module's own entity table; target reads return no handle or Minecraft object.
 
 ## Capabilities
 
@@ -41,20 +41,31 @@ fn choose_target(mob_id: &str, target_id: &str) -> SjmlResult<()> {
     let target = target.expect("the loaded target must be present");
     entity::set_target(mob, target)?;
 
-    if entity::target(mob)? != Some(target) {
+    if entity::target_snapshot(mob)?.as_ref().map(|snapshot| snapshot.uuid.as_str()) != Some(target_id) {
         return Err(sjml::SjmlError::new(
             sjml::ErrorCode::InvalidArgument,
             "the selected target was not retained",
         ));
     }
-    entity::clear_target(mob)
+    entity::clear_target(mob)?;
+    if entity::target_snapshot(mob)?.is_some() {
+        return Err(sjml::SjmlError::new(
+            sjml::ErrorCode::InvalidArgument,
+            "the target was not cleared",
+        ));
+    }
+    Ok(())
 }
 ```
 
-`entity::target(mob)` returns `None` both when the Mob has no target and when its current target
-is a player. Player handles are not exposed through the entity handle API. `set_target` accepts
-only a live, loaded, non-player living entity handle and rejects the Mob itself. Clearing a target
-also clears an existing player target.
+`entity::target_snapshot(mob)` returns `Option<EntityTargetSnapshot>` with the target UUID, canonical entity
+type and dimension IDs, and bounded coordinates. It returns `None` when the Mob has no target or its
+target is a player. The detached snapshot never creates a handle. `entity::target_handle(mob)` keeps
+the legacy module-scoped handle read as an explicit alias. The original `entity::target(mob)` also
+continues to return `Option<EntityHandle>` using the existing `sjml_entity_v1.target` import; that
+handle belongs to the calling module. `set_target` accepts only a live, loaded, non-player living entity
+handle, rejects the Mob itself, and bounds target distance to 128 blocks. Clearing a target also
+clears an existing player target.
 
 Every handle must belong to the calling module and identify the same live entity instance on the
 same bound logical server. The Mob and selected target must be in the **same loaded dimension**;
@@ -63,17 +74,24 @@ synchronously on the owning server thread. Validation checks the existing entity
 without requesting or loading chunks. Stale, foreign-owner, unloaded, cross-server, or
 cross-dimension handles are rejected.
 
+The host checks that the Mob and target are alive and have finite coordinates within ±30,000,000
+blocks. It invokes vanilla `Mob.setTarget`; a later `entity::target_snapshot(mob)` call reads back
+the actual target selected by Minecraft and its event hooks. Target inspection and mutation never
+request or load chunks.
+
 ## ABI v1
 
 The imports are in `sjml_entity_v1` and use 24-byte entity handles:
 
 | Import | Parameters | Required capabilities | Result |
 | --- | --- | --- | --- |
-| `target` | mob handle pointer and length, output pointer and capacity | `entity.read` | status; output is a versioned optional target handle |
+| `target_snapshot` | mob handle pointer and length, output pointer and capacity | `entity.read` | status; output is a versioned optional detached snapshot |
+| `target` | mob handle pointer and length, output pointer and capacity | `entity.read` | status; versioned optional module-scoped handle (existing ABI) |
 | `set_target` | mob handle pointer and length, target handle pointer and length | `entity.read`, `entity.target.write` | status |
 | `clear_target` | mob handle pointer and length | `entity.read`, `entity.target.write` | status |
 
-The target response is little-endian: a 32-bit schema number (`1`), an option tag (`0` for no
-exposed target, `1` followed by one 24-byte handle). It is exactly 5 bytes for `None` and 29 bytes
-for `Some`; the guest reserves the 29-byte maximum and ignores unused output-buffer padding.
-Unknown schemas, invalid tags, malformed handles, and truncated response data fail decoding.
+`target_snapshot` returns a little-endian schema-v1 optional snapshot containing UUID, type ID,
+dimension ID, and three 64-bit coordinates. Its maximum response is 593 bytes; the guest reserves
+that bounded size and ignores output-buffer padding. The existing `target` response remains exactly
+5 bytes for `None` and 29 bytes for `Some`. Unknown schemas, malformed IDs, invalid option tags,
+out-of-range coordinates, and truncated response data fail decoding.

@@ -13,6 +13,11 @@ const MAX_BLOCK_STATE_PROPERTY_NAME_BYTES: usize = 32;
 const MAX_BLOCK_STATE_VALUE_BYTES: usize = 5;
 const BLOCK_STATE_SHAPE_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_SHAPE_PAYLOAD_BYTES: usize = 512;
+const BLOCK_SHAPE_BOXES_SCHEMA_VERSION: u32 = 1;
+const BLOCK_SHAPE_BOXES_HEADER_BYTES: usize = 2 * core::mem::size_of::<u32>();
+const BLOCK_SHAPE_BOX_BYTES: usize = 6 * core::mem::size_of::<f32>();
+const MAX_BLOCK_SHAPE_BOXES_PAYLOAD_BYTES: usize =
+    BLOCK_SHAPE_BOXES_HEADER_BYTES + MAX_BLOCK_SHAPE_BOXES * BLOCK_SHAPE_BOX_BYTES;
 const BLOCK_STATE_LIGHT_LEVEL_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES: usize = 512;
 const BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION: u32 = 2;
@@ -46,6 +51,8 @@ pub const MAX_ENTITY_SPAWN_EGG_RGB_COLOR: u32 = 0x00ff_ffff;
 pub const MAX_BLOCK_STATE_PROPERTIES: usize = 7;
 /// Maximum possible state combinations on one registered block.
 pub const MAX_BLOCK_STATE_VARIANTS: usize = 128;
+/// Maximum axis-aligned boxes in one registered block's bounded multi-box shape.
+pub const MAX_BLOCK_SHAPE_BOXES: usize = 8;
 /// Maximum values in a single bounded integer block-state property.
 pub const MAX_BLOCK_INTEGER_PROPERTY_VALUES: usize = 16;
 /// Minimum value in a bounded integer block-state property.
@@ -489,6 +496,74 @@ impl BlockShape {
                 max_z,
             } => (2, [min_x, min_y, min_z, max_x, max_y, max_z]),
         }
+    }
+}
+
+/// One validated axis-aligned cuboid in block-local normalized coordinates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockAabb {
+    min: [f32; 3],
+    max: [f32; 3],
+}
+
+impl BlockAabb {
+    /// Creates a cuboid whose corners are finite, within 0.0 through 1.0, and strictly ordered.
+    pub fn new(min: [f32; 3], max: [f32; 3]) -> SjmlResult<Self> {
+        let value = Self { min, max };
+        value.validate()?;
+        Ok(value)
+    }
+
+    /// Returns the minimum x/y/z corner.
+    pub const fn min(&self) -> [f32; 3] {
+        self.min
+    }
+
+    /// Returns the maximum x/y/z corner.
+    pub const fn max(&self) -> [f32; 3] {
+        self.max
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        if self
+            .min
+            .iter()
+            .chain(self.max.iter())
+            .any(|value| !value.is_finite() || *value < 0.0 || *value > 1.0)
+            || (0..3).any(|axis| self.min[axis] >= self.max[axis])
+        {
+            return Err(invalid_argument(
+                "block box corners must be finite, inside 0..=1, and strictly ordered",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A validated union of one through eight block-local cuboids.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockShapeBoxes {
+    boxes: Vec<BlockAabb>,
+}
+
+impl BlockShapeBoxes {
+    /// Creates a multi-box shape, rejecting empty lists and lists above [`MAX_BLOCK_SHAPE_BOXES`].
+    pub fn new(boxes: impl IntoIterator<Item = BlockAabb>) -> SjmlResult<Self> {
+        let boxes: Vec<_> = boxes.into_iter().collect();
+        if boxes.is_empty() || boxes.len() > MAX_BLOCK_SHAPE_BOXES {
+            return Err(invalid_argument(
+                "block multi-box shape must contain 1 through 8 boxes",
+            ));
+        }
+        for cuboid in &boxes {
+            cuboid.validate()?;
+        }
+        Ok(Self { boxes })
+    }
+
+    /// Returns the immutable cuboids in this shape.
+    pub fn boxes(&self) -> &[BlockAabb] {
+        &self.boxes
     }
 }
 
@@ -1663,6 +1738,13 @@ extern "C" {
         max_y_bits: i32,
         max_z_bits: i32,
     ) -> i32;
+    #[link_name = "set_block_shape_boxes"]
+    fn imported_set_block_shape_boxes(
+        path_pointer: i32,
+        path_length: i32,
+        payload_pointer: i32,
+        payload_length: i32,
+    ) -> i32;
     #[link_name = "set_block_behavior"]
     fn imported_set_block_behavior(
         path_pointer: i32,
@@ -2661,6 +2743,24 @@ fn encode_block_state_shape(state: &[(&str, &str)], shape: BlockShape) -> SjmlRe
     Ok(payload)
 }
 
+fn encode_block_shape_boxes(shape: &BlockShapeBoxes) -> SjmlResult<Vec<u8>> {
+    if shape.boxes.is_empty() || shape.boxes.len() > MAX_BLOCK_SHAPE_BOXES {
+        return Err(invalid_argument(
+            "block multi-box shape must contain 1 through 8 boxes",
+        ));
+    }
+    let mut payload = Vec::with_capacity(MAX_BLOCK_SHAPE_BOXES_PAYLOAD_BYTES);
+    payload.extend_from_slice(&BLOCK_SHAPE_BOXES_SCHEMA_VERSION.to_le_bytes());
+    payload.extend_from_slice(&(shape.boxes.len() as u32).to_le_bytes());
+    for cuboid in &shape.boxes {
+        cuboid.validate()?;
+        for value in cuboid.min.into_iter().chain(cuboid.max) {
+            payload.extend_from_slice(&value.to_bits().to_le_bytes());
+        }
+    }
+    Ok(payload)
+}
+
 /// Applies one fixed selection and collision shape to a block already staged by this module.
 ///
 /// The shape is used for selection, collision, occlusion, and support checks. Call this during
@@ -2696,6 +2796,40 @@ pub fn set_block_shape(path: &str, shape: BlockShape) -> SjmlResult<()> {
     }
 }
 
+/// Applies a union of one through eight AABBs to a block already staged by this module.
+///
+/// Call this during `#[mod_register]`, after [`register_block`]. Each box uses block-local
+/// coordinates from 0.0 through 1.0 and must have finite, strictly ordered corners. The union is
+/// used for selection, collision, occlusion, and support geometry. This uses its own bounded ABI
+/// import and leaves the legacy single-box [`set_block_shape`] import unchanged.
+pub fn set_block_shape_boxes(path: &str, shape: &BlockShapeBoxes) -> SjmlResult<()> {
+    validate_path(path)?;
+    let payload = encode_block_shape_boxes(shape)?;
+    if payload.len() > MAX_BLOCK_SHAPE_BOXES_PAYLOAD_BYTES {
+        return Err(invalid_argument(
+            "block multi-box shape payload exceeds its supported byte limit",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded path and versioned shape payload before returning.
+        let status = unsafe {
+            imported_set_block_shape_boxes(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                payload.as_ptr() as usize as u32 as i32,
+                payload.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the block multi-box shape");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = payload;
+        Err(unsupported_target())
+    }
+}
+
 /// Stages a block and assigns its selection and collision shape in one call.
 pub fn register_block_with_shape(
     path: &str,
@@ -2706,6 +2840,18 @@ pub fn register_block_with_shape(
     shape.validate()?;
     register_block(path, definition)?;
     set_block_shape(path, shape)
+}
+
+/// Stages a block and assigns its union-of-boxes selection and collision shape in one call.
+pub fn register_block_with_shape_boxes(
+    path: &str,
+    definition: BlockDefinition,
+    shape: &BlockShapeBoxes,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    encode_block_shape_boxes(shape)?;
+    register_block(path, definition)?;
+    set_block_shape_boxes(path, shape)
 }
 
 /// Applies bounded vanilla movement and physical properties to a block already staged by this module.
@@ -4766,6 +4912,66 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn multi_box_block_shapes_are_bounded_and_encode_exactly() {
+        let left = BlockAabb::new([0.0, 0.0, 0.0], [0.25, 1.0, 1.0]).unwrap();
+        let right = BlockAabb::new([0.75, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        assert_eq!(left.min(), [0.0, 0.0, 0.0]);
+        assert_eq!(right.max(), [1.0, 1.0, 1.0]);
+        let shape = BlockShapeBoxes::new([left, right]).unwrap();
+        assert_eq!(shape.boxes(), &[left, right]);
+
+        let encoded = encode_block_shape_boxes(&shape).unwrap();
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 2);
+        assert_eq!(encoded.len(), 8 + 2 * 24);
+        assert_eq!(
+            u32::from_le_bytes(encoded[8..12].try_into().unwrap()),
+            0.0_f32.to_bits()
+        );
+        assert_eq!(
+            u32::from_le_bytes(encoded[20..24].try_into().unwrap()),
+            0.25_f32.to_bits()
+        );
+        assert!(encoded.len() <= MAX_BLOCK_SHAPE_BOXES_PAYLOAD_BYTES);
+        let maximum =
+            BlockShapeBoxes::new(std::iter::repeat_n(left, MAX_BLOCK_SHAPE_BOXES)).unwrap();
+        assert_eq!(
+            encode_block_shape_boxes(&maximum).unwrap().len(),
+            MAX_BLOCK_SHAPE_BOXES_PAYLOAD_BYTES
+        );
+
+        for (minimum, maximum) in [
+            ([0.5, 0.0, 0.0], [0.5, 1.0, 1.0]),
+            ([f32::NAN, 0.0, 0.0], [1.0, 1.0, 1.0]),
+            ([-0.01, 0.0, 0.0], [1.0, 1.0, 1.0]),
+            ([0.0, 0.0, 0.0], [1.01, 1.0, 1.0]),
+        ] {
+            assert_eq!(
+                BlockAabb::new(minimum, maximum).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            BlockShapeBoxes::new([]).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            BlockShapeBoxes::new(std::iter::repeat_n(left, MAX_BLOCK_SHAPE_BOXES + 1))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_block_shape_boxes("block", &shape).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_block_shape_boxes("../bad", &shape).unwrap_err().code(),
+            ErrorCode::InvalidArgument
         );
     }
 

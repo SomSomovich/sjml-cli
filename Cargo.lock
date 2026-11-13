@@ -468,7 +468,7 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
 name = "sjml-cli"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "base64",
  "clap",
@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "sjml-macros"
-version = "0.91.0"
+version = "0.92.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "sjml-sdk"
-version = "0.91.0"
+version = "0.92.0"
 dependencies = [
  "sjml-macros",
 ]

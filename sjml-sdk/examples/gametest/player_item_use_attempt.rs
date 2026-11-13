@@ -102,6 +102,24 @@ struct ItemUseAttemptCheckArguments {
 
 #[command(name = "player.item_use_attempt.check")]
 fn check_item_use_attempt(arguments: ItemUseAttemptCheckArguments) -> SjmlResult<String> {
+    if arguments.item_id == "minecraft:potion" {
+        if !super::player_potion_use_attempt::matches_existing_item_use_check(
+            &arguments.player_id,
+            &arguments.dimension_id,
+            &arguments.hand,
+            &arguments.item_id,
+            arguments.count,
+        )? {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "player.potion_use_attempt did not match the requested GameTest snapshot",
+            ));
+        }
+        return Ok(
+            "player.potion_use_attempt delivered and cancelled the expected potion use".to_owned(),
+        );
+    }
+
     let observed = LAST_ITEM_USE_ATTEMPT.lock().map_err(|_| {
         SjmlError::new(
             ErrorCode::UnknownErrorCode,

@@ -84,6 +84,8 @@ mod player_inventory_give;
 mod player_inventory_lore;
 #[path = "gametest/player_item_use_attempt.rs"]
 mod player_item_use_attempt;
+#[path = "gametest/player_potion_use_attempt.rs"]
+mod player_potion_use_attempt;
 #[path = "gametest/player_respawn_point.rs"]
 mod player_respawn_point;
 #[path = "gametest/player_statistics.rs"]
@@ -152,10 +154,14 @@ static SAW_VETOED_DIAMOND_PICKUP_ATTEMPT: AtomicBool = AtomicBool::new(false);
 fn register_test_content() -> SjmlResult<()> {
     registry::register_block("gametest_block", BlockDefinition::default())?;
     registry::register_block_entity("gametest_machine", "gametest_block")?;
-    registry::register_block_with_shape(
+    let shape_boxes = BlockShapeBoxes::new([
+        BlockAabb::new([0.25, 0.0, 0.25], [0.75, 0.5, 0.45])?,
+        BlockAabb::new([0.25, 0.0, 0.55], [0.75, 0.5, 0.75])?,
+    ])?;
+    registry::register_block_with_shape_boxes(
         "gametest_shaped_block",
         BlockDefinition::default(),
-        BlockShape::cuboid([0.25, 0.0, 0.25], [0.75, 0.5, 0.75])?,
+        &shape_boxes,
     )?;
     registry::register_block_with_behavior(
         "gametest_behavior_block",
@@ -600,6 +606,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     player_tick::initialize()?;
     player_equipment_changed::initialize()?;
     player_item_use_attempt::initialize()?;
+    player_potion_use_attempt::initialize()?;
     block_use::initialize()?;
     block_tick::initialize()?;
     block_random_tick::initialize()?;

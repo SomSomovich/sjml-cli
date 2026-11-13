@@ -16,13 +16,36 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current host is `0.93.0`, the Rust SDK/macros are `0.91.0`, and the ABI is
-`1.83.0`. ABI compatibility remains major-version based: host 0.93.0 accepts ABI
-`1.0.x` through `1.83.0`; it rejects later contracts it does not know. Packages
-using the current APIs declare ABI `^1.83.0` and host range `^0.93.0`.
+The current target is host `0.94.0`, Rust SDK/macros `0.92.0`, private CLI
+`0.1.24`, and ABI `1.84.0`. ABI compatibility remains major-version based: host
+0.94.0 accepts ABI `1.0.x` through `1.84.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.84.0` and host range
+`^0.94.0`. The private CLI version is documented for the Codex workspace; no
+crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.84.0
+
+Registered blocks can declare a shape as the union of 1–8 normalized, block-local
+AABBs. Coordinates must be finite and within 0..=1, with strictly ordered bounds;
+the union provides selection, collision, occlusion, and support geometry. Shapes
+are static and same-module registration is required. `entity::target_snapshot`
+returns detached UUID/type/dimension/coordinate data for a loaded Mob's target;
+it returns `None` if the target is absent or a player and never creates a handle.
+The legacy `entity::target` still returns its `Option<EntityHandle>`. The
+synchronous logical-server `player.potion_use_attempt` event covers only
+`PotionItem` use before it starts, not other consumables or already-active use.
+Its snapshot bounds count to 1..=64, use duration to 1..=72,000 ticks, item IDs
+to 256 UTF-8 bytes, and dispatch to 64 authorized callbacks; async handlers
+cannot veto it. Active-screen mouse-release callbacks run on the client main
+thread, accept button IDs 0..=31, and can veto only the active screen's release
+handler under `client.input.screen_cancel`; global releases remain
+observational. Each API retains its side, thread, callback, payload, handle,
+and capability limits. See [block shapes](WORLD_BLOCK_SHAPES.md),
+[entity targets](ENTITY_TARGETS.md), [potion-use attempts](PLAYER_POTION_USE_ATTEMPT.md),
+and [active-screen mouse releases](SCREEN_INPUT_MOUSE_RELEASE.md).
 
 ### APIs added in ABI 1.83.0
 
@@ -48,10 +71,6 @@ handle, loaded-chunk, and payload checks. See [block drops](BLOCK_DROPS_ATTEMPT.
 ### APIs added in ABI 1.82.0
 
 `inventory::read_enchantment_level`, `set_enchantment_level`, and `remove_enchantment` operate on existing stacks in already-loaded block inventories. Reads require `world.read` and `inventory.read`; writes require `world.read` and `inventory.write`. The synchronous owner-routed `item.attack_attempt` event requires `events.subscribe` and `events.cancel` and applies only to the calling module's registered main-hand item. Villager trade declarations can set an initial demand from -1,000 to 1,000 through `content.register`; ABI 1.81 clients using the earlier registration import continue to register offers with demand 0. Entity-scoped storage now returns `STALE_HANDLE` for missing or unloaded entities and never loads their chunks. See [block/player enchantments](PLAYER_INVENTORY_ENCHANTMENTS.md), [item attack callbacks](ITEM_ATTACK_EVENTS.md), [villager offers](VILLAGER_TRADES.md), and [storage scopes](STORAGE.md).
-
-### APIs added in ABI 1.81.0
-
-`player.equipment_changed` requires `events.subscribe` and `player.equipment.observe`; it reports bounded detached previous/current item snapshots for server-player equipment changes. Block-inventory lore access requires the existing `inventory.read` or `inventory.write` grants and never loads an unavailable position. `registry::set_item_max_stack_size` is restricted to registration-time changes for standalone items owned by the calling module; damageable items must retain stack size one. See [player equipment changes](PLAYER_EQUIPMENT_CHANGED.md), [block-inventory lore](BLOCK_INVENTORY_LORE.md), and [item stack size](ITEM_STACK_SIZE.md).
 
 ### New permissions and block-behavior schema in ABI 1.80.0
 
@@ -377,9 +396,10 @@ Host 0.88.0 / ABI 1.78.0 / SDK/macros 0.86.0 adds owner-scoped client-screen clo
 
 Host 0.89.0 / ABI 1.79.0 / SDK/macros 0.87.0 adds criterion-level advancement progress notifications, loaded-world game-event dispatch, and a separate permission for glowing-flag writes. It also completes item-pickup vetoes and plain-text player inventory lore with live GameTest coverage. The private CLI's generated-project template and examples now declare the matching versions. Gradle passed 1,190 host tests, 449 core tests (one skipped), and all 136 required GameTests. The private CLI 0.1.19 workspace passed 26 CLI, 45 macro, 363 SDK unit, 167 SDK integration, and 12 documentation tests; strict Clippy, SDK/example wasm32 checks, and offline tests for all example workspaces passed. Visible client behavior and remote multiplayer remain unverified; no release was made to crates.io or the public CLI repository.
 
+Host 0.90.0 / ABI 1.80.0 / SDK/macros 0.88.0 adds per-state friction overrides for registered blocks, bounded loaded-only fluid-tick scheduling, and sampled physical-client cursor movement. The fluid scheduler requires `world.fluid_tick.schedule` and never loads chunks. NeoForge 21.1.265 has no raw global mouse-move event, so cursor deltas are sampled at most once per client tick and reset when the screen/window/cursor context changes.
 
 Host 0.90.0 / ABI 1.80.0 / SDK/macros 0.88.0 adds per-state friction overrides for registered blocks, bounded loaded-only fluid-tick scheduling, and sampled physical-client cursor movement. The fluid scheduler requires `world.fluid_tick.schedule` and never loads chunks. NeoForge 21.1.265 has no raw global mouse-move event, so cursor deltas are sampled at most once per client tick and reset when the screen/window/cursor context changes. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,197 host tests and 454 core tests (one skipped), with all 137 required GameTests passing. Cargo passed 26 CLI, 45 macro, 365 SDK unit, 167 SDK integration, and 12 doc tests; strict Clippy, SDK wasm32 compilation, and native/Clippy/wasm32 checks for the root, multi-module, world-render, and OpenGL-geometry example workspaces passed. These headless checks do not verify visible cursor behavior or remote multiplayer; no crates.io publication or public CLI sync was made.
 
-Host 0.91.0 / ABI 1.81.0 / SDK/macros 0.89.0 adds bounded server-player equipment-change notifications, safe plain-text lore access for existing stacks in loaded block inventories, and registration-time max stack sizes for module-owned standalone items. Lore changes preserve other stack components, and damageable registered items remain stack size one. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,209 host tests, 456 core tests (one skipped), and all 140 required GameTests. Cargo passed 26 CLI, 46 macro, 371 SDK unit, 168 SDK integration, and 12 doc tests; strict Clippy, SDK wasm32, and all four example workspace test/Clippy/wasm32 checks passed. These headless checks do not verify visible client behavior or remote multiplayer; no crates.io publication or public CLI sync was made.
-
 Host 0.93.0 / ABI 1.83.0 / SDK/macros 0.91.0 adds bounded stack-count and durability updates, component-preserving player inventory moves, loaded-only entity teleports, custom-name visibility, registered-mob spawn eggs, block-drop suppression, XP-point and level-change callbacks, and bounded rich system messages. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,274 host tests, 474 core tests (one skipped), and all 146 required GameTests. Cargo passed 26 CLI, 47 macro, 389 SDK unit, 172 SDK integration, and 12 documentation tests; strict workspace Clippy, SDK wasm32, and native test/Clippy/wasm32 checks for all four example workspaces passed. These headless checks do not verify visible client behavior or remote multiplayer; no crates.io publication or public CLI sync was made.
+
+Host 0.94.0 / ABI 1.84.0 / SDK/macros 0.92.0 adds multi-box registered-block shapes, detached entity target snapshots, cancellable potion-use attempts, and active-screen mouse-release vetoes. Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer` passed 1,286 host tests, 478 core tests (one skipped), and all 147 required GameTests. Cargo passed 26 CLI, 47 macro, 394 SDK unit, 172 SDK integration, and 12 documentation tests; strict workspace Clippy, SDK wasm32, and native test/Clippy/wasm32 checks for all four example workspaces passed. These headless checks do not verify visible mouse-release behavior or remote multiplayer; no crates.io publication or public CLI sync was made.

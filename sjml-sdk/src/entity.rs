@@ -92,6 +92,21 @@ pub const TELEPORT_CAPABILITY: &str = "entity.teleport";
 pub const MAX_ENTITY_TELEPORT_COORDINATE: f64 = 30_000_000.0;
 /// Maximum response bytes for the versioned optional loaded-Mob target handle.
 pub const MAX_ENTITY_TARGET_RESPONSE_BYTES: usize = 4 + 1 + 24;
+/// Maximum absolute distance accepted when assigning a loaded Mob target, in blocks.
+pub const MAX_ENTITY_TARGET_RANGE: f64 = 128.0;
+/// Maximum UTF-8 byte length of a canonical UUID in a detached target snapshot.
+pub const MAX_ENTITY_TARGET_UUID_BYTES: usize = 36;
+/// Maximum UTF-8 byte length of a canonical target or dimension ID.
+pub const MAX_ENTITY_TARGET_ID_BYTES: usize = 256;
+/// Maximum absolute coordinate in a detached entity target snapshot.
+pub const MAX_ENTITY_TARGET_COORDINATE: f64 = 30_000_000.0;
+/// Maximum output bytes for one optional detached loaded-Mob target snapshot.
+pub const MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES: usize = 4
+    + 1
+    + 4
+    + (4 + MAX_ENTITY_TARGET_UUID_BYTES)
+    + 2 * (4 + MAX_ENTITY_TARGET_ID_BYTES)
+    + 3 * core::mem::size_of::<f64>();
 
 /// Current identity, type, dimension, and coordinates of one loaded non-player entity.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -109,6 +124,66 @@ pub struct EntitySnapshot {
     pub y: f64,
     /// Current Z coordinate.
     pub z: f64,
+}
+
+/// Detached bounded identity and position of a loaded non-player living Mob target.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityTargetSnapshot {
+    /// Canonical lowercase UUID string.
+    pub uuid: String,
+    /// Canonical namespace:path entity type ID.
+    pub entity_type_id: String,
+    /// Canonical namespace:path dimension ID.
+    pub dimension_id: String,
+    /// Current X coordinate in blocks.
+    pub x: f64,
+    /// Current Y coordinate in blocks.
+    pub y: f64,
+    /// Current Z coordinate in blocks.
+    pub z: f64,
+}
+
+impl EntityTargetSnapshot {
+    /// Creates a detached target snapshot after validating its bounded identity and coordinates.
+    pub fn new(
+        uuid: impl Into<String>,
+        entity_type_id: impl Into<String>,
+        dimension_id: impl Into<String>,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> SjmlResult<Self> {
+        let snapshot = Self {
+            uuid: uuid.into(),
+            entity_type_id: entity_type_id.into(),
+            dimension_id: dimension_id.into(),
+            x,
+            y,
+            z,
+        };
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        if !canonical_entity_uuid(&self.uuid)
+            || self.uuid.len() > MAX_ENTITY_TARGET_UUID_BYTES
+            || self.entity_type_id.len() > MAX_ENTITY_TARGET_ID_BYTES
+            || self.dimension_id.len() > MAX_ENTITY_TARGET_ID_BYTES
+            || validate_entity_type_id(&self.entity_type_id).is_err()
+            || validate_entity_type_id(&self.dimension_id).is_err()
+            || !bounded_target_coordinate(self.x)
+            || !bounded_target_coordinate(self.y)
+            || !bounded_target_coordinate(self.z)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity target snapshot contains invalid or unbounded identity or coordinates",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Detached velocity of one loaded living non-player entity, in blocks per tick.
@@ -527,6 +602,8 @@ extern "C" {
     fn imported_riding_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "target"]
     fn imported_target(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "target_snapshot"]
+    fn imported_target_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_target"]
     fn imported_set_target(mob: i32, mob_length: i32, target: i32, target_length: i32) -> i32;
     #[link_name = "clear_target"]
@@ -668,6 +745,13 @@ struct EntityRaycastResult {
 #[sjml(version = 1)]
 struct EntityTargetResult {
     target: Option<EntityHandle>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct EntityTargetSnapshotResult {
+    target: Option<EntityTargetSnapshot>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -905,6 +989,20 @@ fn invalid_entity_type_id() -> SjmlError {
     )
 }
 
+fn canonical_entity_uuid(value: &str) -> bool {
+    if value.len() != MAX_ENTITY_TARGET_UUID_BYTES {
+        return false;
+    }
+    value.bytes().enumerate().all(|(index, byte)| match index {
+        8 | 13 | 18 | 23 => byte == b'-',
+        _ => byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte),
+    })
+}
+
+fn bounded_target_coordinate(value: f64) -> bool {
+    value.is_finite() && value.abs() <= MAX_ENTITY_TARGET_COORDINATE
+}
+
 /// Returns all loaded non-player entities across the server's loaded dimensions, including modded
 /// dimensions, sorted by canonical UUID. Enumeration does not load chunks and returns the complete
 /// list or an error at the per-module handle quota; it never truncates. Before server binding and
@@ -982,11 +1080,46 @@ pub fn riding_snapshot(handle: EntityHandle) -> SjmlResult<EntityRidingSnapshot>
     }
 }
 
-/// Reads a loaded Mob's current loaded non-player target handle, if it has one.
+/// Reads a detached bounded snapshot of a loaded Mob's current live non-player target.
 ///
 /// Requires `entity.read` and runs synchronously on the owning logical-server thread.
-/// Player targets and Mobs without a target are reported as `None`; target handles
-/// are created only for loaded non-player living entities in the same dimension.
+/// Player targets and Mobs without a target are reported as `None`. The returned snapshot contains
+/// only UUID, entity type, dimension, and finite bounded coordinates; it exposes no entity handle.
+pub fn target_snapshot(mob: EntityHandle) -> SjmlResult<Option<EntityTargetSnapshot>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&mob)?;
+        let response = read_output::<EntityTargetSnapshotResult>(
+            MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: handle bytes and the bounded output allocation live through this import.
+                unsafe {
+                    imported_target_snapshot(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        if let Some(snapshot) = &response.target {
+            snapshot.validate()?;
+        }
+        Ok(response.target)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = mob;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads a loaded Mob's current loaded non-player target handle, if it has one.
+///
+/// This preserves the original SDK and `sjml_entity_v1.target` import contract. Player targets and
+/// Mobs without a target are reported as `None`; returned handles remain scoped to this module.
+/// Use [`target_snapshot`] when detached identity and position data are enough.
 pub fn target(mob: EntityHandle) -> SjmlResult<Option<EntityHandle>> {
     #[cfg(target_arch = "wasm32")]
     {
@@ -1012,6 +1145,11 @@ pub fn target(mob: EntityHandle) -> SjmlResult<Option<EntityHandle>> {
         let _ = mob;
         Err(unsupported_target())
     }
+}
+
+/// Alias for [`target`] that makes the returned module-scoped handle explicit at the call site.
+pub fn target_handle(mob: EntityHandle) -> SjmlResult<Option<EntityHandle>> {
+    target(mob)
 }
 
 /// Sets one loaded non-player living entity as the current target of a loaded Mob.
@@ -2245,16 +2383,19 @@ mod tests {
     use super::{
         active_effects, apply_effect, clear_custom_name, clear_target, custom_name, damage,
         fire_ticks, navigate_to, raycast, remove_effect, set_custom_name, set_fire_ticks,
-        set_target, set_velocity, target, teleport, validate_active_effects, validate_custom_name,
-        validate_entity_raycast, validate_navigation_target, validate_spatial_query,
-        validate_teleport_target, within, ActiveEffect, ActiveEffectsResponse,
-        EntityCustomNameResponse, EntityNavigationRequest, EntityNavigationResult,
-        EntityRaycastQuery, EntityRaycastResult, EntityTargetResult, EntityTeleportRequest,
-        EntityVelocity, SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
+        set_target, set_velocity, target, target_snapshot, teleport, validate_active_effects,
+        validate_custom_name, validate_entity_raycast, validate_navigation_target,
+        validate_spatial_query, validate_teleport_target, within, ActiveEffect,
+        ActiveEffectsResponse, EntityCustomNameResponse, EntityNavigationRequest,
+        EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityTargetResult,
+        EntityTargetSnapshot, EntityTargetSnapshotResult, EntityTeleportRequest, EntityVelocity,
+        SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
         MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
         MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
         MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
-        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
+        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_TARGET_COORDINATE,
+        MAX_ENTITY_TARGET_ID_BYTES, MAX_ENTITY_TARGET_RANGE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
+        MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES, MAX_ENTITY_TARGET_UUID_BYTES,
         MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
         MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
     };
@@ -2574,12 +2715,139 @@ mod tests {
         let target_handle = EntityHandle::new(1, 2, 4, 4).unwrap();
         assert_eq!(target(mob).unwrap_err().code(), ErrorCode::UnknownErrorCode);
         assert_eq!(
+            target_snapshot(mob).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
             set_target(mob, target_handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            super::target_handle(mob).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
         );
         assert_eq!(
             clear_target(mob).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn target_snapshot_contract_is_detached_bounded_and_versioned() {
+        assert_eq!(MAX_ENTITY_TARGET_RANGE, 128.0);
+        assert_eq!(MAX_ENTITY_TARGET_UUID_BYTES, 36);
+        assert_eq!(MAX_ENTITY_TARGET_ID_BYTES, 256);
+        assert_eq!(MAX_ENTITY_TARGET_COORDINATE, 30_000_000.0);
+        assert_eq!(MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES, 593);
+
+        let target = EntityTargetSnapshot::new(
+            "00000000-0000-0000-0000-000000000001",
+            "minecraft:pig",
+            "minecraft:overworld",
+            1.25,
+            64.0,
+            -2.5,
+        )
+        .unwrap();
+        let response = EntityTargetSnapshotResult {
+            target: Some(target.clone()),
+        };
+        let encoded = crate::to_bytes(&response).unwrap();
+        assert_eq!(
+            encoded.len(),
+            4 + 1
+                + 4
+                + (4 + target.uuid.len())
+                + (4 + target.entity_type_id.len())
+                + (4 + target.dimension_id.len())
+                + 24
+        );
+        assert_eq!(
+            crate::from_bytes::<EntityTargetSnapshotResult>(&encoded).unwrap(),
+            response
+        );
+
+        let absent = crate::to_bytes(&EntityTargetSnapshotResult { target: None }).unwrap();
+        assert_eq!(absent, [1_u32.to_le_bytes().as_slice(), &[0]].concat());
+        assert_eq!(
+            crate::from_bytes::<EntityTargetSnapshotResult>(&absent)
+                .unwrap()
+                .target,
+            None
+        );
+    }
+
+    #[test]
+    fn target_snapshot_constructor_rejects_noncanonical_or_unbounded_fields() {
+        for (uuid, entity_type_id, dimension_id, x, y, z) in [
+            (
+                "00000000-0000-0000-0000-00000000000A",
+                "minecraft:pig",
+                "minecraft:overworld",
+                0.0,
+                0.0,
+                0.0,
+            ),
+            (
+                "00000000-0000-0000-0000-000000000001",
+                "Minecraft:pig",
+                "minecraft:overworld",
+                0.0,
+                0.0,
+                0.0,
+            ),
+            (
+                "00000000-0000-0000-0000-000000000001",
+                "minecraft:pig",
+                "bad dimension",
+                0.0,
+                0.0,
+                0.0,
+            ),
+            (
+                "00000000-0000-0000-0000-000000000001",
+                "minecraft:pig",
+                "minecraft:overworld",
+                f64::NAN,
+                0.0,
+                0.0,
+            ),
+            (
+                "00000000-0000-0000-0000-000000000001",
+                "minecraft:pig",
+                "minecraft:overworld",
+                0.0,
+                0.0,
+                30_000_001.0,
+            ),
+        ] {
+            assert_eq!(
+                EntityTargetSnapshot::new(uuid, entity_type_id, dimension_id, x, y, z)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn target_snapshot_response_rejects_noncanonical_host_fields() {
+        let invalid = EntityTargetSnapshot {
+            uuid: "00000000-0000-0000-0000-00000000000A".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+        };
+        let encoded = crate::to_bytes(&EntityTargetSnapshotResult {
+            target: Some(invalid),
+        })
+        .unwrap();
+        let decoded = crate::from_bytes::<EntityTargetSnapshotResult>(&encoded).unwrap();
+        assert_eq!(
+            decoded.target.unwrap().validate().unwrap_err().code(),
+            ErrorCode::InvalidArgument
         );
     }
 

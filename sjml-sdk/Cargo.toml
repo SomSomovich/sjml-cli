@@ -38,6 +38,10 @@ name = "client_cursor_moved"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "screen_mouse_released"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "player_equipment_changed"
 crate-type = ["cdylib"]
 
@@ -54,11 +58,19 @@ name = "block_drops_attempt"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "block_multi_box_shape"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "player_experience_change_attempt"
 crate-type = ["cdylib"]
 
 [[example]]
 name = "player_experience_level_change_attempt"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "player_potion_use_attempt"
 crate-type = ["cdylib"]
 
 [dependencies]

@@ -422,11 +422,13 @@ in the current loaded dimension, and invokes the vanilla Mob path navigator
 only after checking that the target corridor is loaded. It does not expose
 path nodes or allow a guest callback from inside pathfinding.
 
-`entity::target` reads the current target of a loaded Mob under `entity.read`.
-Setting or clearing a target also requires `entity.target.write`; both Mob and
-target handles must be live in the same loaded server dimension, and the target
-must be a non-player living entity. The API does not load chunks or expose the
-Mob's goal selector.
+`entity::target_snapshot` returns a bounded detached snapshot of the loaded Mob's current
+non-player living target under `entity.read`; it does not create or leak an entity
+handle. The original `entity::target` retains its module-scoped handle result.
+Setting or clearing a target also requires `entity.target.write`; the Mob
+and target must be live in the same loaded server dimension, and the target must
+be alive and within 128 blocks. Target reads and writes run on the server thread,
+do not load chunks, and do not expose the Mob's goal selector.
 
 `entity::teleport` requires `entity.read` plus `entity.teleport` and accepts
 only a live, unmounted non-player entity. It validates finite bounded

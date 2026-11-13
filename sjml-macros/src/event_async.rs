@@ -47,6 +47,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "player.attack_attempt"
             | "player.experience_change_attempt"
             | "player.experience_level_change_attempt"
+            | "player.potion_use_attempt"
             | "player.fished_attempt"
             | "world.explosion_attempt"
             | "client.screen.key_pressed"
@@ -487,6 +488,15 @@ mod tests {
                 },
             ),
             "player.experience_level_change_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.potion_use_attempt"),
+                quote! {
+                    async fn potion_use_attempt(_: PlayerPotionUseAttempt) -> SjmlResult<()> { Ok(()) }
+                },
+            ),
+            "player.potion_use_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

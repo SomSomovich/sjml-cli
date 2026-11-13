@@ -56,6 +56,12 @@ pub const MIN_PLAYER_EXPERIENCE_LEVEL_DELTA: i32 = -20_000;
 pub const MAX_PLAYER_EXPERIENCE_LEVEL_DELTA: i32 = 20_000;
 /// Maximum `level_before` value represented by the level-change event snapshot.
 pub const MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT: i32 = 1_000_000;
+/// Maximum count captured for one potion-use start callback.
+pub const MAX_PLAYER_POTION_USE_ITEM_COUNT: u32 = 64;
+/// Maximum use duration captured for one potion-use start callback, in ticks.
+pub const MAX_PLAYER_POTION_USE_DURATION_TICKS: u32 = 72_000;
+/// Maximum callbacks invoked for one potion-use attempt.
+pub const MAX_PLAYER_POTION_USE_ATTEMPT_CALLBACKS: usize = 64;
 
 /// Synchronous, non-cancellable snapshot emitted after meaningful logical-server player movement.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
@@ -653,6 +659,112 @@ pub struct PlayerItemUseAttempt {
     pub item_id: String,
     /// Stack count in `0..=1_000_000`.
     pub count: u32,
+}
+
+/// Synchronous cancellable attempt to start drinking a potion on the logical server.
+///
+/// NeoForge emits `LivingEntityUseItemEvent.Start` before the item becomes the entity's active
+/// use item, and cancellation prevents that start. The host filters to `PotionItem`, so milk,
+/// food, bows, and other item-use starts are not included. Only detached values cross the ABI;
+/// the callback runs on the server thread and requires `events.subscribe` plus `events.cancel`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerPotionUseAttempt {
+    /// Canonical UUID string of the player who began using the potion.
+    pub player_id: String,
+    /// Resource location of the level where potion use started.
+    pub dimension_id: String,
+    /// Registry ID of the potion item.
+    pub item_id: String,
+    /// Potion stack count in `1..=64`.
+    pub count: u32,
+    /// Remaining item-use duration in ticks in `1..=72_000`.
+    pub duration_ticks: u32,
+    /// `main_hand` or `off_hand`.
+    pub hand: String,
+}
+
+impl StableEncode for PlayerPotionUseAttempt {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_potion_use_attempt(self)?;
+        encoder.write_i32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encode_bounded_event_string(&self.dimension_id, encoder)?;
+        encode_bounded_event_string(&self.item_id, encoder)?;
+        encoder.write_u32(self.count)?;
+        encoder.write_u32(self.duration_ticks)?;
+        encode_bounded_event_string(&self.hand, encoder)
+    }
+}
+
+impl StableDecode for PlayerPotionUseAttempt {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema_version = decoder.read_i32()?;
+        if schema_version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!("PlayerPotionUseAttempt schema version {schema_version} is unsupported"),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            dimension_id: decode_bounded_event_string(decoder)?,
+            item_id: decode_bounded_event_string(decoder)?,
+            count: decoder.read_u32()?,
+            duration_ticks: decoder.read_u32()?,
+            hand: decode_bounded_event_string(decoder)?,
+        };
+        validate_player_potion_use_attempt(&event)?;
+        Ok(event)
+    }
+}
+
+fn validate_player_potion_use_attempt(event: &PlayerPotionUseAttempt) -> SjmlResult<()> {
+    if !canonical_uuid(&event.player_id)
+        || !canonical_resource_location(&event.dimension_id)
+        || !canonical_resource_location(&event.item_id)
+        || !(event.hand == "main_hand" || event.hand == "off_hand")
+        || event.count == 0
+        || event.count > MAX_PLAYER_POTION_USE_ITEM_COUNT
+        || event.duration_ticks == 0
+        || event.duration_ticks > MAX_PLAYER_POTION_USE_DURATION_TICKS
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player potion-use attempt contains invalid detached player, item, hand, count, or duration data",
+        ));
+    }
+    Ok(())
+}
+
+/// Synchronous decision returned by `player.potion_use_attempt`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum PlayerPotionUseAttemptAction {
+    /// Allow the potion-use start to continue.
+    Pass,
+    /// Cancel the potion-use start before the potion can be consumed.
+    Cancel,
+}
+
+impl StableEncode for PlayerPotionUseAttemptAction {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_u8(match self {
+            Self::Pass => 0,
+            Self::Cancel => 1,
+        })
+    }
+}
+
+impl StableDecode for PlayerPotionUseAttemptAction {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u8()? {
+            0 => Ok(Self::Pass),
+            1 => Ok(Self::Cancel),
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("player potion-use action code {value} is not supported"),
+            )),
+        }
+    }
 }
 
 /// Synchronous use callback for an item declared by the receiving module.
@@ -2338,10 +2450,12 @@ mod tests {
         PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
         PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
         PlayerInteracted, PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt,
-        PlayerItemUseAttempt, PlayerMoved, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
-        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        WorldLifecycle, MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction,
+        PlayerRespawned, PlayerSleepAttempt, PlayerTick, PlayerVillagerTraded,
+        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle,
+        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
         MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
+        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
         MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
         MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
@@ -4093,6 +4207,100 @@ mod tests {
         assert_eq!(
             from_bytes::<PlayerItemUseAttempt>(&encoded).unwrap(),
             empty_hand
+        );
+    }
+
+    #[test]
+    fn potion_use_attempt_matches_host_schema_and_bounds_values() {
+        let attempt = PlayerPotionUseAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            item_id: "minecraft:potion".to_owned(),
+            count: 1,
+            duration_ticks: 32,
+            hand: "off_hand".to_owned(),
+        };
+        let encoded = to_bytes(&attempt).unwrap();
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &attempt.player_id);
+        append_test_string(&mut expected, &attempt.dimension_id);
+        append_test_string(&mut expected, &attempt.item_id);
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&32_u32.to_le_bytes());
+        append_test_string(&mut expected, &attempt.hand);
+        assert_eq!(
+            encoded, expected,
+            "Rust bytes must match the host schema-v1 payload"
+        );
+        assert_eq!(
+            from_bytes::<PlayerPotionUseAttempt>(&encoded).unwrap(),
+            attempt
+        );
+
+        let maximums = PlayerPotionUseAttempt {
+            player_id: attempt.player_id.clone(),
+            dimension_id: attempt.dimension_id.clone(),
+            item_id: format!("test:{}", "a".repeat(251)),
+            count: MAX_PLAYER_POTION_USE_ITEM_COUNT,
+            duration_ticks: MAX_PLAYER_POTION_USE_DURATION_TICKS,
+            hand: "main_hand".to_owned(),
+        };
+        let encoded_maximums = to_bytes(&maximums).unwrap();
+        assert_eq!(
+            from_bytes::<PlayerPotionUseAttempt>(&encoded_maximums).unwrap(),
+            maximums
+        );
+
+        for action in [
+            PlayerPotionUseAttemptAction::Pass,
+            PlayerPotionUseAttemptAction::Cancel,
+        ] {
+            let encoded = to_bytes(&action).unwrap();
+            assert_eq!(encoded.len(), 1);
+            assert_eq!(
+                from_bytes::<PlayerPotionUseAttemptAction>(&encoded).unwrap(),
+                action
+            );
+        }
+        assert!(from_bytes::<PlayerPotionUseAttemptAction>(&[2]).is_err());
+
+        let mut invalid_count = attempt.clone();
+        invalid_count.count = MAX_PLAYER_POTION_USE_ITEM_COUNT + 1;
+        assert_eq!(
+            to_bytes(&invalid_count).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let mut invalid_duration = attempt.clone();
+        invalid_duration.duration_ticks = MAX_PLAYER_POTION_USE_DURATION_TICKS + 1;
+        assert_eq!(
+            to_bytes(&invalid_duration).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let mut invalid_hand = attempt;
+        invalid_hand.hand = "head".to_owned();
+        assert_eq!(
+            to_bytes(&invalid_hand).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let mut invalid_dimension = maximums.clone();
+        invalid_dimension.dimension_id = "overworld".to_owned();
+        assert_eq!(
+            to_bytes(&invalid_dimension).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let mut invalid_item_id = maximums.clone();
+        invalid_item_id.item_id = "potion".to_owned();
+        assert_eq!(
+            to_bytes(&invalid_item_id).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        let oversized_item_id = PlayerPotionUseAttempt {
+            item_id: format!("test:{}", "a".repeat(252)),
+            ..maximums
+        };
+        assert_eq!(
+            to_bytes(&oversized_item_id).unwrap_err().code(),
+            ErrorCode::PayloadTooLarge
         );
     }
 
