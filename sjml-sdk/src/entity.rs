@@ -34,6 +34,12 @@ pub const MAX_ENTITY_PITCH_DEGREES: f32 = 90.0;
 pub const ROTATION_WRITE_CAPABILITY: &str = "entity.rotation.write";
 /// Maximum damage amount accepted by one [`damage`] call.
 pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
+/// Maximum positive heal amount accepted by one [`heal`] call.
+pub const MAX_ENTITY_HEAL_AMOUNT: f32 = 64.0;
+/// Current health, maximum health, or absorption value returned in one bounded snapshot.
+pub const MAX_ENTITY_VITALS_VALUE: f32 = 1_000_000.0;
+/// Capability required with `entity.read` to request a bounded heal for a live entity.
+pub const HEALTH_WRITE_CAPABILITY: &str = "entity.health.write";
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 /// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
@@ -107,6 +113,40 @@ pub struct EntityRotation {
     pub yaw: f32,
     /// Pitch around the horizontal axis, bounded to -90..=90 degrees.
     pub pitch: f32,
+}
+
+/// Detached health, maximum health, and absorption values for one living non-player entity.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityVitals {
+    /// Current health, between zero and `max_health`.
+    pub health: f32,
+    /// Current effective maximum health, finite and within the host response bound.
+    pub max_health: f32,
+    /// Current absorption health, independently bounded by the host response limit.
+    pub absorption: f32,
+}
+
+impl EntityVitals {
+    #[cfg(target_arch = "wasm32")]
+    fn validate(self) -> SjmlResult<()> {
+        if !self.health.is_finite()
+            || !self.max_health.is_finite()
+            || !self.absorption.is_finite()
+            || self.max_health <= 0.0
+            || self.max_health > MAX_ENTITY_VITALS_VALUE
+            || self.health < 0.0
+            || self.health > self.max_health
+            || self.absorption < 0.0
+            || self.absorption > MAX_ENTITY_VITALS_VALUE
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned non-finite or out-of-range entity health values",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl EntityRotation {
@@ -393,6 +433,8 @@ extern "C" {
     ) -> i32;
     #[link_name = "rotation"]
     fn imported_rotation(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "vitals"]
+    fn imported_vitals(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_rotation"]
     fn imported_set_rotation(
         handle: i32,
@@ -400,6 +442,8 @@ extern "C" {
         rotation: i32,
         rotation_length: i32,
     ) -> i32;
+    #[link_name = "heal"]
+    fn imported_heal(handle: i32, handle_length: i32, amount_bits: i32) -> i32;
     #[link_name = "damage"]
     fn imported_damage(handle: i32, handle_length: i32, amount_bits: i32) -> i32;
 }
@@ -1102,6 +1146,37 @@ pub fn rotation(handle: EntityHandle) -> SjmlResult<EntityRotation> {
     }
 }
 
+/// Reads current health, effective maximum health, and absorption for one loaded living entity.
+///
+/// The module must request `entity.read`. The host returns exactly one schema-v1 snapshot and
+/// rejects non-finite values, health outside `0..=max_health`, maximum health outside
+/// `0..=1,000,000`, or absorption outside `0..=1,000,000`. The target must be a live, loaded,
+/// non-player living entity on the owning server thread; this call never loads a chunk.
+pub fn vitals(handle: EntityHandle) -> SjmlResult<EntityVitals> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let vitals = read_output::<EntityVitals>(16, |output, capacity| {
+            // SAFETY: read_output owns the destination allocation for this synchronous import.
+            unsafe {
+                imported_vitals(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        vitals.validate()?;
+        Ok(vitals)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 /// Sets yaw and pitch on one loaded non-player entity.
 ///
 /// The module must request and receive both `entity.read` and
@@ -1634,6 +1709,40 @@ pub fn damage(handle: EntityHandle, amount: f32) -> SjmlResult<()> {
             )
         };
         status_result(status, "host rejected the entity damage request")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Requests one bounded heal for a loaded living non-player entity.
+///
+/// The module must request and receive both `entity.read` and `entity.health.write`; amounts must
+/// be finite and within `(0, 64]`. Minecraft's ordinary `LivingEntity::heal` path handles the
+/// request, so vanilla behavior and existing heal-attempt callbacks can cancel or ignore it. A
+/// successful result means Minecraft received the heal request, not that health necessarily
+/// changed. The host checks the live handle and owning server thread and does not load chunks.
+pub fn heal(handle: EntityHandle, amount: f32) -> SjmlResult<()> {
+    if !amount.is_finite() || amount <= 0.0 || amount > MAX_ENTITY_HEAL_AMOUNT {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity heal amount must be finite and within (0, 64]",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and f32 bits remain valid during this synchronous import.
+        let status = unsafe {
+            imported_heal(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as u32 as i32,
+                amount.to_bits() as i32,
+            )
+        };
+        status_result(status, "host rejected the entity heal request")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

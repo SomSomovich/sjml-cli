@@ -2271,7 +2271,7 @@ never loads chunks and returns whether Minecraft accepted the path. It does not
 expose path nodes or custom pathfinding callbacks. See
 [bounded entity navigation](ENTITY_NAVIGATION.md).
 
-Loaded non-player entities also expose bounded yaw/pitch reads and writes with `entity::rotation` and `entity::set_rotation`; writes require `entity.read` plus `entity.rotation.write`. See [entity rotation](ENTITY_ROTATION.md).
+Loaded non-player entities also expose bounded yaw/pitch reads and writes with `entity::rotation` and `entity::set_rotation`; writes require `entity.read` plus `entity.rotation.write`. See [entity rotation](ENTITY_ROTATION.md). They also expose a bounded `entity::vitals` snapshot and normal-path `entity::heal` request; healing requires `entity.read` plus `entity.health.write`, while reads require `entity.read`. See [entity vitals and healing](ENTITY_HEALTH.md).
 
 ## Entity-attached opaque data
 

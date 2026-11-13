@@ -32,6 +32,8 @@ mod entity_breed_attempt;
 mod entity_effect_application;
 #[path = "gametest/entity_heal_attempt.rs"]
 mod entity_heal_attempt;
+#[path = "gametest/entity_health.rs"]
+mod entity_health;
 #[path = "gametest/entity_join_attempt.rs"]
 mod entity_join_attempt;
 #[path = "gametest/entity_knockback_attempt.rs"]

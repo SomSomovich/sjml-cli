@@ -2189,6 +2189,8 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | `remove_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len` | Remove one registered active effect from a loaded living non-player entity; status only |
 | `discard` | `(handle_ptr: i32, handle_len: i32) -> i32` | Discard one loaded non-player entity and revoke its handle; status only |
 | `damage` | `(handle_ptr: i32, handle_len: i32, amount_bits: i32) -> i32` | Apply bounded generic damage to a loaded living non-player entity; requires `entity.read` and `entity.damage` |
+| `vitals` | `handle_ptr, handle_len, out_ptr, out_capacity` | Exact 16-byte schema-v1 current health, max health, and absorption snapshot; requires `entity.read` |
+| `heal` | `(handle_ptr: i32, handle_len: i32, amount_bits: i32) -> i32` | Request ordinary-path healing for a loaded living non-player entity; requires `entity.read` and `entity.health.write` |
 | `rotation` | `handle_ptr, handle_len, out_ptr, out_capacity` | Write schema-v1 `u32(1)`, `f32 yaw`, `f32 pitch`; requires `entity.read` |
 | `set_rotation` | `handle_ptr, handle_len, rotation_ptr, rotation_len` | Set bounded yaw and pitch from an exact 12-byte schema-v1 record; requires `entity.read` and `entity.rotation.write` |
 
@@ -2211,6 +2213,7 @@ uses Minecraft's generic damage source and normal `LivingEntity.hurt` path;
 the guest cannot choose an attacker or damage type, and vanilla mitigation
 and cancellation remain in effect. See
 [generic entity damage](ENTITY_DAMAGE.md).
+`vitals` returns a finite bounded schema-v1 record: little-endian `u32(1)`, `f32 health`, `f32 max_health`, and `f32 absorption`; the exact length is 16 bytes. Health is within `0..=max_health`, maximum health is within `(0, 1,000,000]`, and absorption is within `0..=1,000,000`. Reading requires `entity.read`. `heal` accepts raw finite `f32` bits in `(0, 64]` and requires both `entity.read` and `entity.health.write`; it calls Minecraft's normal `LivingEntity.heal` method, so heal-attempt callbacks and vanilla behavior may cancel or ignore it. Both imports revalidate a live loaded non-player living entity on the owning server thread and never load chunks. See [entity vitals and healing](ENTITY_HEALTH.md).
 Riding reads require `entity.read`. `riding_snapshot` uses a little-endian
 schema-v1 record: `u32` version, `u8` vehicle-presence tag, the optional
 relationship record, `u32` passenger count, then sorted relationship records;
