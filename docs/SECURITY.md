@@ -412,6 +412,8 @@ target handles must be live in the same loaded server dimension, and the target
 must be a non-player living entity. The API does not load chunks or expose the
 Mob's goal selector.
 
+`entity::equipment` reads the six fixed vanilla equipment slots of a live loaded non-player `LivingEntity` under `entity.read`. It returns detached canonical item ID/count/damage/max-damage values only; no NBT, data components, or mutable item handles cross the ABI. The call checks the live module-owned handle and owning server thread without loading chunks. See [loaded entity equipment](ENTITY_EQUIPMENT.md).
+
 `entity.projectile_impact_attempt` runs synchronously on the logical server before a projectile applies its hit. It requires `events.subscribe` and `events.cancel`; callbacks receive detached projectile and hit data, and only a successful guest veto cancels the impact. Block hit details are read only from an already-loaded chunk.
 
 `player.drop_attempt` is synchronous and cancellable only when the host can

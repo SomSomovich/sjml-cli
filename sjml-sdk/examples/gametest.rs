@@ -32,6 +32,8 @@ mod entity_attribute_modifiers;
 mod entity_breed_attempt;
 #[path = "gametest/entity_effect_application.rs"]
 mod entity_effect_application;
+#[path = "gametest/entity_equipment.rs"]
+mod entity_equipment;
 #[path = "gametest/entity_heal_attempt.rs"]
 mod entity_heal_attempt;
 #[path = "gametest/entity_health.rs"]

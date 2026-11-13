@@ -2287,6 +2287,7 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | --- | --- | --- |
 | `loaded` | `out_ptr, out_capacity` | Stable `Vec<EntityHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `EntitySnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `entity_type_id`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
+| `equipment` | `handle_ptr, handle_len, out_ptr, out_capacity` | Six fixed optional equipment slots as schema-v1 canonical item ID/count/damage/max-damage values; requires `entity.read` |
 | `riding_snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | Schema-v1 `EntityRidingSnapshot` with an optional vehicle identity and up to 16 sorted passenger identities |
 | `start_riding` | `passenger_ptr, passenger_len, vehicle_ptr, vehicle_len, out_ptr, out_capacity` | Writes little-endian `u32` `0`/`1` for refused/successful non-forced mount |
 | `stop_riding` | `passenger_ptr, passenger_len, out_ptr, out_capacity` | Writes little-endian `u32` `0`/`1` for no change/successful dismount |
@@ -2320,6 +2321,7 @@ the guest cannot choose an attacker or damage type, and vanilla mitigation
 and cancellation remain in effect. See
 [generic entity damage](ENTITY_DAMAGE.md).
 `vitals` returns a finite bounded schema-v1 record: little-endian `u32(1)`, `f32 health`, `f32 max_health`, and `f32 absorption`; the exact length is 16 bytes. Health is within `0..=max_health`, maximum health is within `(0, 1,000,000]`, and absorption is within `0..=1,000,000`. Reading requires `entity.read`. `heal` accepts raw finite `f32` bits in `(0, 64]` and requires both `entity.read` and `entity.health.write`; it calls Minecraft's normal `LivingEntity.heal` method, so heal-attempt callbacks and vanilla behavior may cancel or ignore it. Both imports revalidate a live loaded non-player living entity on the owning server thread and never load chunks. See [entity vitals and healing](ENTITY_HEALTH.md).
+`equipment` requires `entity.read` and returns a bounded schema-v1 snapshot for a live loaded non-player `LivingEntity`. The exact fixed slot order is main hand, offhand, head, chest, legs, feet; empty slots use `None`. Occupied slots expose only a canonical item ID, count, damage, and max damage. The output is capped at 1,666 bytes; IDs are at most 256 bytes, counts are `1..=4096`, and durability values are at most 1,000,000 with `damage <= max_damage`. No NBT, data components, or mutable stack access is exposed. The host validates the module-owned live handle and server thread and does not load chunks. See [loaded entity equipment](ENTITY_EQUIPMENT.md).
 Riding reads require `entity.read`. `riding_snapshot` uses a little-endian
 schema-v1 record: `u32` version, `u8` vehicle-presence tag, the optional
 relationship record, `u32` passenger count, then sorted relationship records;

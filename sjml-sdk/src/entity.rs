@@ -40,6 +40,14 @@ pub const MAX_ENTITY_HEAL_AMOUNT: f32 = 64.0;
 pub const MAX_ENTITY_VITALS_VALUE: f32 = 1_000_000.0;
 /// Capability required with `entity.read` to request a bounded heal for a live entity.
 pub const HEALTH_WRITE_CAPABILITY: &str = "entity.health.write";
+/// Maximum UTF-8 byte length of a canonical item registry ID in an entity equipment snapshot.
+pub const MAX_ENTITY_EQUIPMENT_ITEM_ID_BYTES: usize = 256;
+/// Maximum item count accepted in one detached entity equipment slot.
+pub const MAX_ENTITY_EQUIPMENT_STACK_COUNT: u32 = 4096;
+/// Maximum damage or maximum-damage value in a detached entity equipment slot.
+pub const MAX_ENTITY_EQUIPMENT_DAMAGE: u32 = 1_000_000;
+/// Maximum response bytes reserved for the six fixed slots in schema v1.
+pub const MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES: u32 = 1666;
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 /// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
@@ -125,6 +133,114 @@ pub struct EntityVitals {
     pub max_health: f32,
     /// Current absorption health, independently bounded by the host response limit.
     pub absorption: f32,
+}
+
+/// Detached item identity, count, and durability for one living entity equipment slot.
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityEquipmentStack {
+    /// Canonical lowercase namespace:path item registry ID.
+    pub item_id: String,
+    /// Current count in this equipment slot.
+    pub count: u32,
+    /// Current durability damage; zero for items without durability.
+    pub damage: u32,
+    /// Maximum durability damage; zero for items without durability.
+    pub max_damage: u32,
+}
+
+impl EntityEquipmentStack {
+    /// Constructs a detached equipment value after validating its ID, count, and durability.
+    pub fn new(
+        item_id: impl Into<String>,
+        count: u32,
+        damage: u32,
+        max_damage: u32,
+    ) -> SjmlResult<Self> {
+        let stack = Self {
+            item_id: item_id.into(),
+            count,
+            damage,
+            max_damage,
+        };
+        stack.validate()?;
+        Ok(stack)
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        let Some((namespace, path)) = self.item_id.split_once(':') else {
+            return Err(invalid_entity_equipment(
+                "item ID must be a canonical namespace:path value",
+            ));
+        };
+        if self.item_id.len() > MAX_ENTITY_EQUIPMENT_ITEM_ID_BYTES
+            || namespace.is_empty()
+            || path.is_empty()
+            || !namespace.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+            })
+            || !path.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
+            })
+        {
+            return Err(invalid_entity_equipment(
+                "item ID must be a canonical namespace:path value",
+            ));
+        }
+        if self.count == 0
+            || self.count > MAX_ENTITY_EQUIPMENT_STACK_COUNT
+            || self.damage > MAX_ENTITY_EQUIPMENT_DAMAGE
+            || self.max_damage > MAX_ENTITY_EQUIPMENT_DAMAGE
+            || self.damage > self.max_damage
+        {
+            return Err(invalid_entity_equipment(
+                "equipment count or durability is outside the supported range",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Detached six-slot equipment snapshot for one loaded living non-player entity.
+#[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityEquipment {
+    /// Main-hand item.
+    pub main_hand: Option<EntityEquipmentStack>,
+    /// Offhand item.
+    pub off_hand: Option<EntityEquipmentStack>,
+    /// Head armor slot.
+    pub head: Option<EntityEquipmentStack>,
+    /// Chest armor slot.
+    pub chest: Option<EntityEquipmentStack>,
+    /// Leg armor slot.
+    pub legs: Option<EntityEquipmentStack>,
+    /// Feet armor slot.
+    pub feet: Option<EntityEquipmentStack>,
+}
+
+impl EntityEquipment {
+    #[cfg(target_arch = "wasm32")]
+    fn validate(&self) -> SjmlResult<()> {
+        for stack in [
+            &self.main_hand,
+            &self.off_hand,
+            &self.head,
+            &self.chest,
+            &self.legs,
+            &self.feet,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            stack.validate()?;
+        }
+        Ok(())
+    }
+}
+
+fn invalid_entity_equipment(message: &str) -> SjmlError {
+    SjmlError::new(ErrorCode::InvalidArgument, message)
 }
 
 impl EntityVitals {
@@ -354,6 +470,8 @@ extern "C" {
     fn imported_raycast(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "snapshot"]
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "equipment"]
+    fn imported_equipment(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "riding_snapshot"]
     fn imported_riding_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "target"]
@@ -1169,6 +1287,38 @@ pub fn vitals(handle: EntityHandle) -> SjmlResult<EntityVitals> {
         })?;
         vitals.validate()?;
         Ok(vitals)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the six vanilla equipment slots for one loaded living non-player entity.
+///
+/// Requires `entity.read` and a live entity handle on the logical-server thread. Slots are
+/// returned in main hand, offhand, head, chest, legs, feet order. Each occupied slot contains
+/// only its canonical item ID, count, current damage, and maximum damage. Empty slots are `None`.
+/// This read does not load chunks and exposes no item NBT or data components.
+pub fn equipment(handle: EntityHandle) -> SjmlResult<EntityEquipment> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let equipment: EntityEquipment =
+            read_output(MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES, |output, capacity| {
+                // SAFETY: the encoded handle and destination remain live through this synchronous host import.
+                unsafe {
+                    imported_equipment(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            })?;
+        equipment.validate()?;
+        Ok(equipment)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
