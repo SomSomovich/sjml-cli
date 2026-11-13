@@ -192,6 +192,7 @@ module's manifest request and the administrator's list.
 | `entity.data.read`, `entity.data.write` | Reading or changing module-owned data attached to non-player entities. |
 | `inventory.read`, `inventory.write` | Reading loaded block/player inventories and detached item-stack snapshots, or changing registered block-inventory stacks, literal custom names on existing block- and player-inventory stacks, bounded slot transfers, player slots/durability, and same-module integer components. Player operations also require `entity.read`; block operations require `world.read` and an inventory capability. |
 | `block_entity.nbt.read` | Reading bounded block-entity snapshots and NBT. |
+| `block_entity.data.read`, `block_entity.data.write` | Reading or writing typed Boolean, i32, and string data on the calling module's own registered block entities; writes also require `world.write`. |
 | `network.mod`, `network.external` | Declaring/using SJML network channels; cross-module channels need `network.external`. |
 | `storage.read`, `storage.write` | Reading or changing persistent typed records. |
 | `service.call` | Calling versioned server-side guest services; client service calls are unavailable. |
@@ -204,7 +205,7 @@ module's manifest request and the administrator's list.
 | `client.input.screen_scroll` | Receiving/consuming active-screen scroll callbacks; requires `client.input`. |
 | `player.ui.actionbar` | Sending bounded literal action-bar text to a live player; also requires `entity.read`. |
 | `player.ui.title` | Sending bounded literal title and subtitle packets to a live player; also requires `entity.read`. |
-| `client.ui.screen` | Opening a bounded literal vanilla screen with up to four buttons on the physical client; button actions are dispatched directly to their owning module. |
+| `client.ui.screen` | Opening a bounded literal vanilla screen with buttons, text/list forms, checkboxes, or one numeric slider on the physical client; button actions are dispatched directly to their owning module. |
 | `client.chat.observe`, `client.chat.filter`, `client.chat.rewrite`, `client.chat.send`, `client.chat.send.observe` | Observing bounded incoming chat text, hiding its display insertion, replacing it with bounded rich text, sending ordinary signed chat through Minecraft's local player connection, or reading the local user's original outgoing text. Incoming filtering/replacement need their separate grants; outgoing observation also requires `events.subscribe`, and veto requires `events.cancel`. |
 | `client.ui.notify` | Showing bounded vanilla toast notifications on the physical client. |
 | `client.audio.play` | Playing a registered sound locally through Minecraft's sound manager and stopping a tracked one-shot owned by the module runtime. |

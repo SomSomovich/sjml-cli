@@ -2474,6 +2474,9 @@ runtime-scoped, use kind `BLOCK_ENTITY` (5), are non-transferable, and have a
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `BlockEntitySnapshot`: schema-v1 version, type ID, dimension ID, schema-v1 `BlockPos`, and block-state string |
 | `inventory` | `handle_ptr, handle_len, side_ptr, side_len, out_ptr, out_capacity` | Same stable `Option<InventorySnapshot>` as `sjml_inventory_v1.read` |
 | `nbt` | `handle_ptr, handle_len, out_ptr, out_capacity` | Versioned NBT tag tree described below |
+| `get_data` | `request_ptr, request_len, out_ptr, out_capacity` | Schema-v1 optional Boolean/i32/String value for one typed key |
+| `set_data` | `request_ptr, request_len` | Status only; sets one owner-private persistent typed value |
+| `remove_data` | `request_ptr, request_len` | Status only; removes one owner-private persistent value |
 
 `get` takes a 24-byte `WorldHandle` and a 16-byte stable `BlockPos` (schema
 version 1, then signed little-endian `i32` x/y/z). The output capacity must be
@@ -2502,6 +2505,21 @@ stable substitute for typed capabilities. Lookups do not load chunks. Handles
 become stale on block-entity replacement/removal, chunk or world unload, or
 module/runtime close. Every operation revalidates the live entity and required
 permissions. Native SDK builds report unsupported host imports.
+
+Typed persistent data is a separate API for `SjmlRegisteredBlockEntity` values
+created by the calling module. The request is schema-v1: `u32` version, `u8`
+operation (`0=get`, `1=set`, `2=remove`), 24-byte block-entity handle,
+length-prefixed UTF-8 key, `u8` value kind (`0=absent`, `1=boolean`,
+`2=i32`, `3=string`), and the typed value for `set`. The `get_data` response is
+`u32` version, `u8` option tag, and when present a kind byte plus its value.
+Boolean tags accept only zero or one. Keys are 1–64 lowercase ASCII letters,
+digits, or underscores; strings are printable UTF-8 up to 2,048 bytes. A block
+entity stores at most 64 keys/16 KiB, and each module has at most 64 writes or
+removals per server tick. Reads require `block_entity.data.read`; writes and
+removals require `block_entity.data.read`, `block_entity.data.write`, and
+`world.write`. The handle must identify the module's own registered block in
+an already loaded chunk. Generic NBT snapshots remove the private data tag.
+See [persistent block-entity data](BLOCK_ENTITY_PERSISTENT_DATA.md).
 
 ## Named network channels
 
