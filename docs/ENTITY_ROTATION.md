@@ -1,34 +1,48 @@
-# Entity rotation
+# Entity rotation and head yaw
 
-The Rust SDK reads and changes yaw and pitch on one live, loaded non-player entity:
+The entity API exposes detached rotation snapshots for loaded, non-player entities. The original
+`entity::rotation` / `entity::set_rotation` calls remain available for yaw and pitch. The
+`entity::orientation` / `entity::set_orientation` calls also read or set head yaw independently:
 
 ```rust
-let current = sjml::entity::rotation(handle)?;
-let desired = sjml::entity::EntityRotation::new(90.0, -20.0)?;
-sjml::entity::set_rotation(handle, desired)?;
+use sjml::prelude::*;
+
+fn rotate_entity(handle: EntityHandle) -> SjmlResult<()> {
+    let original = entity::orientation(handle)?;
+    let desired = EntityOrientation::new(90.0, -20.0, 120.0)?;
+    entity::set_orientation(handle, desired)?;
+    entity::set_orientation(handle, original)
+}
 ```
 
-Read requires `entity.read`. A write requires both `entity.read` and
-`entity.rotation.write`. Angles use degrees; yaw must be finite and within
-±36,000 degrees, and pitch must be finite within -90..=90 degrees. `EntityRotation::new`
-checks these bounds before the host call, and the host repeats the checks.
+Both reads require `entity.read`. Writes require `entity.read` and the separate
+`entity.rotation.write` grant. Yaw and head yaw must be finite and within ±36,000 degrees; pitch
+must be finite within -90..=90 degrees. The SDK constructors validate these bounds, and the host
+checks them again.
 
-The host accepts only an entity handle owned by the current module that still
-identifies the same loaded non-player entity. Calls run on the owning logical
-server thread. The provider checks the entity's current server level, UUID
-mapping, and already-loaded chunk before reading `Entity.getYRot()` /
-`Entity.getXRot()` or writing `Entity.setYRot()` / `Entity.setXRot()`. It never
-requests or loads a chunk. Player handles use the separate `player` API.
+Every call checks the module-owned entity handle, the live entity instance, logical-server context,
+and owning server thread. The provider accepts only entities in already-loaded chunks and never
+requests or loads a chunk. Player handles use the separate `player` API. Client modules and static
+registration cannot access these imports.
 
-The `sjml_entity_v1.rotation` import writes a 12-byte schema-v1 value:
-little-endian `u32(1)`, `f32 yaw`, then `f32 pitch`. `set_rotation` accepts the
-same exact 12-byte request alongside a 24-byte entity handle. An unsupported
-schema or wrong request length returns `INVALID_ARGUMENT`; a short read buffer
-returns `PAYLOAD_TOO_LARGE` before the entity is queried. Static registration
-and client-side calls are denied.
+The compiled SDK example is
+[`entity_orientation.rs`](../sjml-cli/sjml-sdk/examples/entity_orientation.rs). The dedicated
+server `EntityRotationGameTests` fixture reads, changes, and restores yaw, pitch, and head yaw on a
+loaded pig.
 
-`EntityRotationImportsTest` checks the wire encoding, bounds, permissions,
-thread validation, output preflight, and stale-handle rejection. The dedicated
-server `EntityRotationGameTests` fixture uses the guest command
-`entity.rotation.check <entity_id>` to read a pig's initial rotation, set and
-read a temporary rotation, and restore the original values.
+## ABI v1
+
+The existing `rotation` / `set_rotation` imports keep their 12-byte schema-v1 value:
+`u32(1)`, `f32 yaw`, `f32 pitch`.
+
+The `orientation` import writes a 16-byte schema-v1 snapshot. `set_orientation` accepts the same
+16-byte request alongside the existing 24-byte entity handle:
+
+1. `u32(1)` schema version.
+2. `f32` yaw.
+3. `f32` pitch.
+4. `f32` head yaw.
+
+All fields are little-endian. An invalid value or wrong payload length returns `INVALID_ARGUMENT`;
+an unsupported schema returns `INCOMPATIBLE_ABI_VERSION`. Output-buffer size is checked before
+resolving the live entity handle.

@@ -29,6 +29,8 @@ pub const MAX_ENTITY_VELOCITY_COMPONENT: f64 = 64.0;
 pub const MAX_ENTITY_YAW_DEGREES: f32 = 36_000.0;
 /// Maximum absolute pitch accepted for a loaded non-player entity, in degrees.
 pub const MAX_ENTITY_PITCH_DEGREES: f32 = 90.0;
+/// Maximum absolute head yaw accepted for a loaded non-player entity, in degrees.
+pub const MAX_ENTITY_HEAD_YAW_DEGREES: f32 = 36_000.0;
 /// Capability required with `entity.read` to change a loaded non-player entity's rotation.
 pub const ROTATION_WRITE_CAPABILITY: &str = "entity.rotation.write";
 /// Maximum damage amount accepted by one [`damage`] call.
@@ -59,8 +61,12 @@ pub const MAX_ENTITY_EQUIPMENT_STACK_COUNT: u32 = 4096;
 pub const MAX_ENTITY_EQUIPMENT_DAMAGE: u32 = 1_000_000;
 /// Maximum response bytes reserved for the six fixed slots in schema v1.
 pub const MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES: u32 = 1666;
-/// Capability required with `entity.read` to add a default item to an empty entity equipment slot.
+/// Maximum response bytes for one versioned vanilla Mob equipment drop chance.
+pub const MAX_ENTITY_EQUIPMENT_DROP_CHANCE_RESPONSE_BYTES: u32 = 8;
+/// Capability required with `entity.read` to equip a same-module registered default item or clear an entity slot.
 pub const EQUIPMENT_WRITE_CAPABILITY: &str = "entity.equipment.write";
+/// Capability required with `entity.read` to set a loaded Mob's equipment drop chance.
+pub const EQUIPMENT_DROP_CHANCE_WRITE_CAPABILITY: &str = "entity.equipment.drop_chance.write";
 /// Capability required with `entity.read` to change a loaded entity's glowing flag.
 pub const GLOWING_WRITE_CAPABILITY: &str = "entity.glowing.write";
 /// Capability required with `entity.read` to change a loaded entity's silent flag.
@@ -69,6 +75,10 @@ pub const STATE_WRITE_CAPABILITY: &str = "entity.state.write";
 pub const INVULNERABILITY_WRITE_CAPABILITY: &str = "entity.invulnerability.write";
 /// Capability required with `entity.read` to change a loaded living entity's current air supply.
 pub const AIR_SUPPLY_WRITE_CAPABILITY: &str = "entity.air.write";
+/// Capability required with `entity.read` to mark a loaded Mob persistent against natural despawn.
+pub const PERSISTENCE_WRITE_CAPABILITY: &str = "entity.persistence.write";
+/// Capability required with `entity.read` to change a loaded Mob's item-pickup flag.
+pub const LOOT_PICKUP_WRITE_CAPABILITY: &str = "entity.loot_pickup.write";
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 /// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
@@ -122,6 +132,30 @@ pub const MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES: usize = 4
     + (4 + MAX_ENTITY_TARGET_UUID_BYTES)
     + 2 * (4 + MAX_ENTITY_TARGET_ID_BYTES)
     + 3 * core::mem::size_of::<f64>();
+/// Maximum number of current offers returned by one loaded villager snapshot.
+pub const MAX_VILLAGER_TRADE_OFFERS: usize = 256;
+/// Maximum UTF-8 byte length of an offer registration ID or item registry ID.
+pub const MAX_VILLAGER_TRADE_ID_BYTES: usize = 256;
+/// Maximum item count represented in one villager offer snapshot.
+pub const MAX_VILLAGER_TRADE_ITEM_COUNT: u32 = 4_096;
+/// Maximum offer uses/max uses accepted by the live villager trade API.
+pub const MAX_VILLAGER_TRADE_USES: u32 = 1_000;
+/// Maximum absolute special price modifier accepted by the live villager trade API.
+pub const MAX_VILLAGER_TRADE_SPECIAL_PRICE: i32 = 10_000;
+/// Maximum absolute demand value accepted or returned by the live villager trade API.
+pub const MAX_VILLAGER_TRADE_DEMAND: i32 = 1_000_000;
+/// Maximum schema-v1 bytes returned for all offers of one loaded villager.
+pub const MAX_VILLAGER_TRADE_RESPONSE_BYTES: usize = 8 + MAX_VILLAGER_TRADE_OFFERS
+    * (4 + MAX_VILLAGER_TRADE_ID_BYTES
+        + 1
+        + (4 + MAX_VILLAGER_TRADE_ID_BYTES + 4)
+        + 4
+        + 1
+        + (4 + MAX_VILLAGER_TRADE_ID_BYTES + 4)
+        + (4 + MAX_VILLAGER_TRADE_ID_BYTES + 4)
+        + 4 * 4);
+/// Capability required with `entity.read` to mutate a registered offer on a loaded villager.
+pub const VILLAGER_TRADE_WRITE_CAPABILITY: &str = "villager.trade.write";
 
 /// Current identity, type, dimension, and coordinates of one loaded non-player entity.
 #[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
@@ -139,6 +173,44 @@ pub struct EntitySnapshot {
     pub y: f64,
     /// Current Z coordinate.
     pub z: f64,
+}
+
+/// Detached item identity and count from a live villager offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VillagerOfferItem {
+    /// Canonical namespace:path item registry ID.
+    pub item_id: String,
+    /// Item count for this part of the offer.
+    pub count: u32,
+}
+
+/// Detached view of one current offer on a loaded villager or wandering trader.
+///
+/// Unregistered vanilla/modded offers use synthetic `live/<index>` IDs and are read-only.
+/// Only offers registered by this module have canonical registration IDs that can be passed to
+/// the offer mutation functions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VillagerOffer {
+    /// Canonical SJML registration ID or synthetic `live/<index>` ID.
+    pub id: String,
+    /// True when this module owns the static offer registration.
+    pub registered: bool,
+    /// Base first input before demand/special-price modifiers.
+    pub input_a: VillagerOfferItem,
+    /// Current first-input count after Minecraft applies offer modifiers.
+    pub current_input_a_count: u32,
+    /// Optional second input.
+    pub input_b: Option<VillagerOfferItem>,
+    /// Output item and count.
+    pub result: VillagerOfferItem,
+    /// Number of completed uses.
+    pub uses: u32,
+    /// Immutable maximum uses configured when Minecraft created the offer.
+    pub max_uses: u32,
+    /// Current vanilla offer demand value.
+    pub demand: i32,
+    /// Current `specialPriceDiff` value.
+    pub special_price: i32,
 }
 
 /// Detached world-space axis-aligned bounds for one live loaded non-player entity.
@@ -308,6 +380,18 @@ pub struct EntityRotation {
     pub pitch: f32,
 }
 
+/// Detached yaw, pitch, and head yaw of one loaded non-player entity, in degrees.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityOrientation {
+    /// Entity yaw around the vertical axis, bounded to ±36,000 degrees.
+    pub yaw: f32,
+    /// Entity pitch around the horizontal axis, bounded to -90..=90 degrees.
+    pub pitch: f32,
+    /// Independent head yaw, bounded to ±36,000 degrees.
+    pub head_yaw: f32,
+}
+
 /// Detached health, maximum health, and absorption values for one living non-player entity.
 #[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -472,6 +556,13 @@ struct EntityEquipmentWriteResult {
     equipped: bool,
 }
 
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+#[cfg(target_arch = "wasm32")]
+struct EntityEquipmentClearResult {
+    cleared: bool,
+}
+
 impl EntityEquipment {
     #[cfg(target_arch = "wasm32")]
     fn validate(&self) -> SjmlResult<()> {
@@ -557,6 +648,35 @@ impl EntityRotation {
             return Err(SjmlError::new(
                 ErrorCode::InvalidArgument,
                 "entity yaw must be finite within ±36,000 degrees and pitch within -90..=90 degrees",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl EntityOrientation {
+    /// Constructs a detached orientation after checking finite angles and supported bounds.
+    pub fn new(yaw: f32, pitch: f32, head_yaw: f32) -> SjmlResult<Self> {
+        let orientation = Self {
+            yaw,
+            pitch,
+            head_yaw,
+        };
+        orientation.validate()?;
+        Ok(orientation)
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if !self.yaw.is_finite()
+            || self.yaw.abs() > MAX_ENTITY_YAW_DEGREES
+            || !self.pitch.is_finite()
+            || !(-MAX_ENTITY_PITCH_DEGREES..=MAX_ENTITY_PITCH_DEGREES).contains(&self.pitch)
+            || !self.head_yaw.is_finite()
+            || self.head_yaw.abs() > MAX_ENTITY_HEAD_YAW_DEGREES
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity yaw and head yaw must be finite within ±36,000 degrees; pitch must be within -90..=90 degrees",
             ));
         }
         Ok(())
@@ -709,6 +829,218 @@ impl StableDecode for ActiveEffectsResponse {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
+struct VillagerOffersResponse {
+    offers: Vec<VillagerOffer>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for VillagerOffersResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported live villager-offer response schema",
+            ));
+        }
+        let count = decoder.read_length(MAX_VILLAGER_TRADE_OFFERS)?;
+        let mut offers = Vec::new();
+        offers.try_reserve_exact(count).map_err(|_| {
+            SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not reserve memory for live villager offers",
+            )
+        })?;
+        for _ in 0..count {
+            let id = decode_villager_trade_string(decoder)?;
+            let registered = match decoder.read_u8()? {
+                0 => false,
+                1 => true,
+                _ => {
+                    return Err(SjmlError::new(
+                        ErrorCode::InvalidArgument,
+                        "villager offer registered flag must be 0 or 1",
+                    ));
+                }
+            };
+            let input_a = decode_villager_offer_item(decoder)?;
+            let current_input_a_count = decoder.read_u32()?;
+            let input_b = match decoder.read_u8()? {
+                0 => None,
+                1 => Some(decode_villager_offer_item(decoder)?),
+                _ => {
+                    return Err(SjmlError::new(
+                        ErrorCode::InvalidArgument,
+                        "villager offer second-input flag must be 0 or 1",
+                    ));
+                }
+            };
+            let result = decode_villager_offer_item(decoder)?;
+            let uses = decoder.read_u32()?;
+            let max_uses = decoder.read_u32()?;
+            let demand = decoder.read_i32()?;
+            let special_price = decoder.read_i32()?;
+            offers.push(VillagerOffer {
+                id,
+                registered,
+                input_a,
+                current_input_a_count,
+                input_b,
+                result,
+                uses,
+                max_uses,
+                demand,
+                special_price,
+            });
+        }
+        validate_villager_trade_offers(&offers)?;
+        Ok(Self { offers })
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn decode_villager_offer_item(decoder: &mut Decoder<'_>) -> SjmlResult<VillagerOfferItem> {
+    let item = VillagerOfferItem {
+        item_id: decode_villager_trade_string(decoder)?,
+        count: decoder.read_u32()?,
+    };
+    validate_villager_offer_item(&item)?;
+    Ok(item)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn decode_villager_trade_string(decoder: &mut Decoder<'_>) -> SjmlResult<String> {
+    let length = decoder.read_length(MAX_VILLAGER_TRADE_ID_BYTES)?;
+    if length == 0 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "villager offer/item ID cannot be empty",
+        ));
+    }
+    String::from_utf8(decoder.read_raw(length)?.to_vec()).map_err(|_| {
+        SjmlError::new(
+            ErrorCode::InvalidUtf8,
+            "villager offer/item ID is not valid UTF-8",
+        )
+    })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_villager_trade_offers(offers: &[VillagerOffer]) -> SjmlResult<()> {
+    if offers.len() > MAX_VILLAGER_TRADE_OFFERS {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "villager offer count exceeds the 256-offer limit",
+        ));
+    }
+    for (index, offer) in offers.iter().enumerate() {
+        if offer.registered {
+            validate_registered_villager_offer_id(&offer.id)?;
+        } else if !is_live_villager_offer_id(&offer.id) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "unregistered villager offers require a synthetic live/<index> ID",
+            ));
+        }
+        if offers[..index].iter().any(|earlier| earlier.id == offer.id) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "villager offer IDs must be unique in one snapshot",
+            ));
+        }
+        validate_villager_offer_item(&offer.input_a)?;
+        if let Some(input_b) = &offer.input_b {
+            validate_villager_offer_item(input_b)?;
+        }
+        validate_villager_offer_item(&offer.result)?;
+        if offer.current_input_a_count == 0
+            || offer.current_input_a_count > MAX_VILLAGER_TRADE_ITEM_COUNT
+            || offer.max_uses == 0
+            || offer.max_uses > MAX_VILLAGER_TRADE_USES
+            || offer.uses > offer.max_uses
+            || !(-MAX_VILLAGER_TRADE_DEMAND..=MAX_VILLAGER_TRADE_DEMAND).contains(&offer.demand)
+            || !(-MAX_VILLAGER_TRADE_SPECIAL_PRICE..=MAX_VILLAGER_TRADE_SPECIAL_PRICE)
+                .contains(&offer.special_price)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "villager offer stock or price values are outside the supported bounds",
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_villager_offer_item(item: &VillagerOfferItem) -> SjmlResult<()> {
+    if !is_canonical_villager_resource_id(&item.item_id)
+        || item.item_id.len() > MAX_VILLAGER_TRADE_ID_BYTES
+        || item.count == 0
+        || item.count > MAX_VILLAGER_TRADE_ITEM_COUNT
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "villager offer item ID/count is invalid or outside its bound",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_registered_villager_offer_id(id: &str) -> SjmlResult<()> {
+    if id.len() > MAX_VILLAGER_TRADE_ID_BYTES || !is_canonical_villager_resource_id(id) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "registered villager offer ID must be a bounded canonical namespace:path value",
+        ));
+    }
+    Ok(())
+}
+
+fn is_canonical_villager_resource_id(id: &str) -> bool {
+    let Some((namespace, path)) = id.split_once(':') else {
+        return false;
+    };
+    if namespace.is_empty()
+        || path.is_empty()
+        || id.matches(':').count() != 1
+        || !namespace.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+        })
+        || !path.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/._-".contains(&byte)
+        })
+        || path.starts_with('/')
+        || path.ends_with('/')
+        || path.contains("//")
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return false;
+    }
+    true
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn is_live_villager_offer_id(id: &str) -> bool {
+    let Some(index) = id.strip_prefix("live/") else {
+        return false;
+    };
+    if index.is_empty()
+        || index.len() > 3
+        || (index != "0" && index.starts_with('0'))
+        || !index.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return false;
+    }
+    index
+        .parse::<usize>()
+        .map(|value| value < MAX_VILLAGER_TRADE_OFFERS)
+        .unwrap_or(false)
+}
+
 impl EntityVelocity {
     /// Constructs a velocity after checking that every component is finite and bounded.
     pub fn new(x: f64, y: f64, z: f64) -> SjmlResult<Self> {
@@ -754,12 +1086,53 @@ extern "C" {
     #[link_name = "set_equipment"]
     fn imported_set_equipment(request: i32, request_length: i32, output: i32, capacity: i32)
         -> i32;
+    #[link_name = "clear_equipment"]
+    fn imported_clear_equipment(
+        request: i32,
+        request_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "equipment_drop_chance"]
+    fn imported_equipment_drop_chance(
+        request: i32,
+        request_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "set_equipment_drop_chance"]
+    fn imported_set_equipment_drop_chance(request: i32, request_length: i32) -> i32;
     #[link_name = "riding_snapshot"]
     fn imported_riding_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "target"]
     fn imported_target(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "target_snapshot"]
     fn imported_target_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "villager_offers"]
+    fn imported_villager_offers(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_villager_offer_uses"]
+    fn imported_set_villager_offer_uses(
+        handle: i32,
+        handle_length: i32,
+        offer_id: i32,
+        offer_id_length: i32,
+        uses: i32,
+    ) -> i32;
+    #[link_name = "set_villager_offer_special_price"]
+    fn imported_set_villager_offer_special_price(
+        handle: i32,
+        handle_length: i32,
+        offer_id: i32,
+        offer_id_length: i32,
+        special_price: i32,
+    ) -> i32;
+    #[link_name = "update_villager_offer_demand"]
+    fn imported_update_villager_offer_demand(
+        handle: i32,
+        handle_length: i32,
+        offer_id: i32,
+        offer_id_length: i32,
+    ) -> i32;
     #[link_name = "set_target"]
     fn imported_set_target(mob: i32, mob_length: i32, target: i32, target_length: i32) -> i32;
     #[link_name = "clear_target"]
@@ -805,6 +1178,24 @@ extern "C" {
     fn imported_is_ai_enabled(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_ai_enabled"]
     fn imported_set_ai_enabled(handle: i32, handle_length: i32, enabled: i32) -> i32;
+    #[link_name = "is_persistence_required"]
+    fn imported_is_persistence_required(
+        handle: i32,
+        handle_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "set_persistence_required"]
+    fn imported_set_persistence_required(handle: i32, handle_length: i32) -> i32;
+    #[link_name = "can_pick_up_loot"]
+    fn imported_can_pick_up_loot(
+        handle: i32,
+        handle_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+    #[link_name = "set_can_pick_up_loot"]
+    fn imported_set_can_pick_up_loot(handle: i32, handle_length: i32, enabled: i32) -> i32;
     #[link_name = "navigate_to"]
     fn imported_navigate_to(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "is_glowing"]
@@ -848,6 +1239,8 @@ extern "C" {
     ) -> i32;
     #[link_name = "rotation"]
     fn imported_rotation(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "orientation"]
+    fn imported_orientation(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "vitals"]
     fn imported_vitals(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "air_supply"]
@@ -860,6 +1253,13 @@ extern "C" {
         handle_length: i32,
         rotation: i32,
         rotation_length: i32,
+    ) -> i32;
+    #[link_name = "set_orientation"]
+    fn imported_set_orientation(
+        handle: i32,
+        handle_length: i32,
+        orientation: i32,
+        orientation_length: i32,
     ) -> i32;
     #[link_name = "teleport"]
     fn imported_teleport(request: i32, request_length: i32) -> i32;
@@ -1207,6 +1607,148 @@ pub fn snapshot(handle: EntityHandle) -> SjmlResult<EntitySnapshot> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the bounded current offers on a loaded villager or wandering trader.
+///
+/// Requires `entity.read` and runs synchronously on the owning logical server thread. The host
+/// does not load chunks and returns detached item IDs/counts and vanilla offer fields only; item
+/// components are omitted. Registered offers created by this SJML module have stable owner-scoped
+/// IDs. Vanilla and other mods' offers have read-only synthetic `live/<index>` IDs.
+pub fn villager_offers(merchant: EntityHandle) -> SjmlResult<Vec<VillagerOffer>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&merchant)?;
+        let response = read_output::<VillagerOffersResponse>(
+            MAX_VILLAGER_TRADE_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: handle bytes and bounded output allocation live for this server import.
+                unsafe {
+                    imported_villager_offers(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        Ok(response.offers)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = merchant;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets uses for one offer registered by this module on a live merchant.
+///
+/// Requires `entity.read` and [`VILLAGER_TRADE_WRITE_CAPABILITY`]. `uses` must be within
+/// `0..=1,000` and no greater than that offer's immutable `max_uses`; the host enforces the
+/// offer-specific limit. Setting uses to the maximum marks it out of stock. The operation only
+/// targets an existing same-module registered offer and never creates or replaces item stacks.
+pub fn set_villager_offer_uses(
+    merchant: EntityHandle,
+    offer_id: &str,
+    uses: u32,
+) -> SjmlResult<()> {
+    validate_registered_villager_offer_id(offer_id)?;
+    if uses > MAX_VILLAGER_TRADE_USES {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "villager offer uses must be within 0..=1,000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&merchant)?;
+        // SAFETY: handle and UTF-8 ID buffers remain live through this synchronous import.
+        let status = unsafe {
+            imported_set_villager_offer_uses(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                offer_id.as_ptr() as usize as u32 as i32,
+                offer_id.len() as i32,
+                uses as i32,
+            )
+        };
+        status_result(status, "host rejected the villager offer stock update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = merchant;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets Minecraft's `specialPriceDiff` for one same-module registered live offer.
+///
+/// Requires `entity.read` and [`VILLAGER_TRADE_WRITE_CAPABILITY`]. The value is bounded to
+/// ±10,000. This changes the current price modifier; it does not change the base inputs, output,
+/// demand, max uses, or registration and does not create an `ItemStack`.
+pub fn set_villager_offer_special_price(
+    merchant: EntityHandle,
+    offer_id: &str,
+    special_price: i32,
+) -> SjmlResult<()> {
+    validate_registered_villager_offer_id(offer_id)?;
+    if !(-MAX_VILLAGER_TRADE_SPECIAL_PRICE..=MAX_VILLAGER_TRADE_SPECIAL_PRICE)
+        .contains(&special_price)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "villager offer special price must be within ±10,000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&merchant)?;
+        // SAFETY: handle and UTF-8 ID buffers remain live through this synchronous import.
+        let status = unsafe {
+            imported_set_villager_offer_special_price(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                offer_id.as_ptr() as usize as u32 as i32,
+                offer_id.len() as i32,
+                special_price,
+            )
+        };
+        status_result(status, "host rejected the villager offer price update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = merchant;
+        Err(unsupported_target())
+    }
+}
+
+/// Applies `MerchantOffer.updateDemand()` to one same-module registered live offer.
+///
+/// Requires `entity.read` and [`VILLAGER_TRADE_WRITE_CAPABILITY`]. Minecraft updates demand by
+/// `demand += uses - (maxUses - uses)`; the host checks the resulting value remains within
+/// ±1,000,000. This is the vanilla operation, not an arbitrary demand setter.
+pub fn update_villager_offer_demand(merchant: EntityHandle, offer_id: &str) -> SjmlResult<()> {
+    validate_registered_villager_offer_id(offer_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&merchant)?;
+        // SAFETY: handle and UTF-8 ID buffers remain live through this synchronous import.
+        let status = unsafe {
+            imported_update_villager_offer_demand(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                offer_id.as_ptr() as usize as u32 as i32,
+                offer_id.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the villager offer demand update")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = merchant;
         Err(unsupported_target())
     }
 }
@@ -1695,6 +2237,37 @@ pub fn rotation(handle: EntityHandle) -> SjmlResult<EntityRotation> {
     }
 }
 
+/// Reads detached yaw, pitch, and head yaw of one loaded non-player entity.
+///
+/// The module must request `entity.read`. All angles are returned in degrees and checked for
+/// finite values; yaw and head yaw are limited to ±36,000 degrees, while pitch is limited to
+/// -90..=90 degrees. The host revalidates the module-owned live handle and server thread and
+/// only reads entities in already-loaded chunks.
+pub fn orientation(handle: EntityHandle) -> SjmlResult<EntityOrientation> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let orientation = read_output::<EntityOrientation>(16, |output, capacity| {
+            // SAFETY: read_output owns the destination allocation for this synchronous import.
+            unsafe {
+                imported_orientation(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        orientation.validate()?;
+        Ok(orientation)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
 /// Reads current health, effective maximum health, and absorption for one loaded living entity.
 ///
 /// The module must request `entity.read`. The host returns exactly one schema-v1 snapshot and
@@ -1825,14 +2398,14 @@ pub fn equipment(handle: EntityHandle) -> SjmlResult<EntityEquipment> {
     }
 }
 
-/// Adds one registered item's default stack to an empty slot of a loaded living non-player entity.
+/// Adds one owned item's default stack to an empty slot of a loaded living non-player entity.
 ///
 /// The module must request and receive `entity.read` and `entity.equipment.write`. Only the six
-/// vanilla slots in [`EntityEquipmentSlot`] are supported. `item_id` must be a canonical ID for an
-/// item already present in Minecraft's item registry. The host creates exactly one default stack,
-/// with no guest-supplied NBT or data components. Returns `true` after inserting it, or `false`
-/// when the slot is occupied; occupied stacks are never replaced or discarded. The operation runs
-/// on the owning logical-server thread and never loads chunks.
+/// vanilla slots in [`EntityEquipmentSlot`] are supported. `item_id` must identify an item
+/// registered by this exact package and module. The host creates exactly one default stack, with no
+/// guest-supplied NBT or data components. Returns `true` after inserting it, or `false` when the slot
+/// is occupied; occupied stacks are never replaced or discarded. The operation runs on the owning
+/// logical-server thread and never loads chunks.
 pub fn try_equip_default(
     handle: EntityHandle,
     slot: EntityEquipmentSlot,
@@ -1870,6 +2443,134 @@ pub fn try_equip_default(
     }
 }
 
+/// Clears one fixed equipment slot of a loaded living non-player entity.
+///
+/// The module must request and receive `entity.read` and `entity.equipment.write`. Only the six
+/// vanilla slots in [`EntityEquipmentSlot`] are supported. Returns `true` if a stack was removed or
+/// `false` if the slot was already empty. Minecraft's normal `LivingEntity.setItemSlot` path is
+/// used, so vanilla equipment synchronization runs on the owning logical-server thread. Players,
+/// stale handles, client contexts, and static registration are rejected; the call never loads chunks.
+pub fn clear_equipment(handle: EntityHandle, slot: EntityEquipmentSlot) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let mut request = Vec::with_capacity(4 + encoded_handle.len() + 4);
+        request.extend_from_slice(&1_u32.to_le_bytes());
+        request.extend_from_slice(&encoded_handle);
+        request.extend_from_slice(&slot.code().to_le_bytes());
+        let result: EntityEquipmentClearResult = read_output(5, |output, capacity| {
+            // SAFETY: the fixed-size request and destination remain live for the synchronous host call.
+            unsafe {
+                imported_clear_equipment(
+                    request.as_ptr() as usize as u32 as i32,
+                    request.len() as u32 as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        Ok(result.cleared)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, slot);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the vanilla equipment drop chance for one fixed slot of a loaded non-player Mob.
+///
+/// Requires `entity.read` and a live Mob handle on the owning logical-server thread. The supported
+/// slots are exactly [`EntityEquipmentSlot`]. Values are finite and within `0.0..=1.0`; a vanilla
+/// Mob configured with a guaranteed-drop value above `1.0` returns `InvalidArgument` because that
+/// value is outside this API's normalized range. No chunks are loaded.
+pub fn equipment_drop_chance(handle: EntityHandle, slot: EntityEquipmentSlot) -> SjmlResult<f32> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let mut request = Vec::with_capacity(4 + encoded_handle.len() + 4);
+        request.extend_from_slice(&1_u32.to_le_bytes());
+        request.extend_from_slice(&encoded_handle);
+        request.extend_from_slice(&slot.code().to_le_bytes());
+        let result: EntityEquipmentDropChanceResult = read_output(
+            MAX_ENTITY_EQUIPMENT_DROP_CHANCE_RESPONSE_BYTES,
+            |output, capacity| {
+                // SAFETY: the versioned request and destination remain live through this synchronous call.
+                unsafe {
+                    imported_equipment_drop_chance(
+                        request.as_ptr() as usize as u32 as i32,
+                        request.len() as u32 as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        validate_entity_equipment_drop_chance(result.chance)?;
+        Ok(result.chance)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, slot);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the vanilla equipment drop chance for one fixed slot of a loaded non-player Mob.
+///
+/// The module must request and receive `entity.read` and
+/// [`EQUIPMENT_DROP_CHANCE_WRITE_CAPABILITY`]. The finite chance must be within `0.0..=1.0`.
+/// This uses Minecraft's `Mob#setDropChance` on the owning logical-server thread and never loads
+/// chunks. Players, non-Mob entities, stale handles, client contexts, and static registration are
+/// rejected.
+pub fn set_equipment_drop_chance(
+    handle: EntityHandle,
+    slot: EntityEquipmentSlot,
+    chance: f32,
+) -> SjmlResult<()> {
+    validate_entity_equipment_drop_chance(chance)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let mut request = Vec::with_capacity(4 + encoded_handle.len() + 8);
+        request.extend_from_slice(&1_u32.to_le_bytes());
+        request.extend_from_slice(&encoded_handle);
+        request.extend_from_slice(&slot.code().to_le_bytes());
+        request.extend_from_slice(&chance.to_bits().to_le_bytes());
+        status_result(
+            unsafe {
+                imported_set_equipment_drop_chance(
+                    request.as_ptr() as usize as u32 as i32,
+                    request.len() as u32 as i32,
+                )
+            },
+            "host rejected the entity equipment drop-chance change",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, slot);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_entity_equipment_drop_chance(chance: f32) -> SjmlResult<()> {
+    if !chance.is_finite() || !(0.0..=1.0).contains(&chance) || chance.to_bits() == 0x8000_0000 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity equipment drop chance must be finite and within 0.0..=1.0",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct EntityEquipmentDropChanceResult {
+    chance: f32,
+}
+
 /// Sets yaw and pitch on one loaded non-player entity.
 ///
 /// The module must request and receive both `entity.read` and
@@ -1892,6 +2593,36 @@ pub fn set_rotation(handle: EntityHandle, rotation: EntityRotation) -> SjmlResul
             )
         };
         status_result(status, "host rejected the entity rotation mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets yaw, pitch, and head yaw on one loaded non-player entity.
+///
+/// The module must request and receive both `entity.read` and `entity.rotation.write`. Yaw and
+/// head yaw must be finite within ±36,000 degrees; pitch must be finite within -90..=90 degrees.
+/// The host revalidates the module-owned live handle and owning server thread before changing the
+/// entity. The target must already be loaded; this operation never loads a chunk.
+pub fn set_orientation(handle: EntityHandle, orientation: EntityOrientation) -> SjmlResult<()> {
+    orientation.validate()?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded_handle = to_bytes(&handle)?;
+        let encoded_orientation = to_bytes(&orientation)?;
+        // SAFETY: both bounded stable values remain live during the synchronous host call.
+        let status = unsafe {
+            imported_set_orientation(
+                encoded_handle.as_ptr() as usize as u32 as i32,
+                encoded_handle.len() as u32 as i32,
+                encoded_orientation.as_ptr() as usize as u32 as i32,
+                encoded_orientation.len() as u32 as i32,
+            )
+        };
+        status_result(status, "host rejected the entity orientation mutation")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -2109,6 +2840,129 @@ pub fn set_ai_enabled(handle: EntityHandle, enabled: bool) -> SjmlResult<()> {
             )
         };
         status_result(status, "host rejected the entity AI control request")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, enabled);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads whether a loaded non-player Mob is marked against natural despawn.
+///
+/// Requires `entity.read`. Minecraft 1.21.1 exposes a public one-way setter for this flag, so SJML
+/// does not provide a way to clear persistence after it has been enabled.
+pub fn is_persistence_required(handle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let value = read_output::<u32>(4, |output, capacity| {
+            // SAFETY: read_output owns the destination for this synchronous import.
+            unsafe {
+                imported_is_persistence_required(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid Mob persistence flag",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Marks a loaded non-player Mob as persistent against vanilla natural despawn.
+///
+/// Requires `entity.read` and [`PERSISTENCE_WRITE_CAPABILITY`]. This operation is one-way on
+/// Minecraft 1.21.1: `Mob#setPersistenceRequired()` only sets the flag, and no public API clears it.
+pub fn set_persistence_required(handle: EntityHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains valid during this synchronous import.
+        status_result(
+            unsafe {
+                imported_set_persistence_required(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                )
+            },
+            "host rejected the Mob persistence request",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads whether a loaded non-player Mob may pick up item entities as equipment.
+///
+/// Requires `entity.read`. This reports Minecraft's `Mob.canPickUpLoot` flag and does not change
+/// the Mob's loot table or generate drops.
+pub fn can_pick_up_loot(handle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let value = read_output::<u32>(4, |output, capacity| {
+            // SAFETY: read_output owns the destination for this synchronous import.
+            unsafe {
+                imported_can_pick_up_loot(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid Mob item-pickup flag",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables item pickup for a loaded non-player Mob.
+///
+/// Requires `entity.read` and [`LOOT_PICKUP_WRITE_CAPABILITY`]. This changes only
+/// `Mob.setCanPickUpLoot`; it does not expose arbitrary inventory or item-stack mutation.
+pub fn set_can_pick_up_loot(handle: EntityHandle, enabled: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains valid during this synchronous import.
+        status_result(
+            unsafe {
+                imported_set_can_pick_up_loot(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    i32::from(enabled),
+                )
+            },
+            "host rejected the Mob item-pickup request",
+        )
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -2722,16 +3576,17 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, air_supply, apply_effect, clear_custom_name, clear_target, custom_name,
-        damage, fire_ticks, navigate_to, raycast, remove_effect, set_air_supply, set_custom_name,
-        set_fire_ticks, set_target, set_velocity, target, target_snapshot, teleport,
-        validate_active_effects, validate_custom_name, validate_entity_raycast,
-        validate_navigation_target, validate_spatial_query, validate_teleport_target, within,
-        ActiveEffect, ActiveEffectsResponse, EntityAirSupply, EntityBounds,
-        EntityCustomNameResponse, EntityNavigationRequest, EntityNavigationResult,
+        active_effects, air_supply, apply_effect, can_pick_up_loot, clear_custom_name,
+        clear_target, custom_name, damage, fire_ticks, is_persistence_required, navigate_to,
+        raycast, remove_effect, set_air_supply, set_can_pick_up_loot, set_custom_name,
+        set_fire_ticks, set_persistence_required, set_target, set_velocity, target,
+        target_snapshot, teleport, validate_active_effects, validate_custom_name,
+        validate_entity_raycast, validate_navigation_target, validate_spatial_query,
+        validate_teleport_target, within, ActiveEffect, ActiveEffectsResponse, EntityAirSupply,
+        EntityBounds, EntityCustomNameResponse, EntityNavigationRequest, EntityNavigationResult,
         EntityRaycastQuery, EntityRaycastResult, EntityStateSnapshot, EntityTargetResult,
         EntityTargetSnapshot, EntityTargetSnapshotResult, EntityTeleportRequest, EntityVelocity,
-        SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
+        SpatialQuery, SpatialResults, LOOT_PICKUP_WRITE_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
         MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_AIR_SUPPLY,
         MAX_ENTITY_AIR_SUPPLY_RESPONSE_BYTES, MAX_ENTITY_BOUNDS_COORDINATE,
         MAX_ENTITY_BOUNDS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
@@ -2742,11 +3597,204 @@ mod tests {
         MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES,
         MAX_ENTITY_TARGET_UUID_BYTES, MAX_ENTITY_TELEPORT_COORDINATE,
         MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
-        NAVIGATION_WRITE_CAPABILITY,
+        NAVIGATION_WRITE_CAPABILITY, PERSISTENCE_WRITE_CAPABILITY,
     };
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
     };
+
+    use super::{
+        set_villager_offer_special_price, set_villager_offer_uses, update_villager_offer_demand,
+        validate_villager_trade_offers, villager_offers, VillagerOffer, VillagerOfferItem,
+        VillagerOffersResponse, MAX_VILLAGER_TRADE_DEMAND, MAX_VILLAGER_TRADE_OFFERS,
+        MAX_VILLAGER_TRADE_RESPONSE_BYTES, MAX_VILLAGER_TRADE_SPECIAL_PRICE,
+        MAX_VILLAGER_TRADE_USES, VILLAGER_TRADE_WRITE_CAPABILITY,
+    };
+
+    fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_i32(bytes: &mut Vec<u8>, value: i32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_trade_string(bytes: &mut Vec<u8>, value: &str) {
+        push_u32(bytes, value.len() as u32);
+        bytes.extend_from_slice(value.as_bytes());
+    }
+
+    fn push_trade_item(bytes: &mut Vec<u8>, id: &str, count: u32) {
+        push_trade_string(bytes, id);
+        push_u32(bytes, count);
+    }
+
+    fn push_offer(bytes: &mut Vec<u8>, id: &str, registered: u8, uses: u32, demand: i32) {
+        push_trade_string(bytes, id);
+        bytes.push(registered);
+        push_trade_item(bytes, "minecraft:emerald", 2);
+        push_i32(bytes, 4);
+        bytes.push(0);
+        push_trade_item(bytes, "minecraft:diamond", 1);
+        push_u32(bytes, uses);
+        push_u32(bytes, 12);
+        push_i32(bytes, demand);
+        push_i32(bytes, -2);
+    }
+
+    fn one_offer_response(id: &str, registered: u8, uses: u32, demand: i32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 1);
+        push_offer(&mut bytes, id, registered, uses, demand);
+        bytes
+    }
+
+    #[test]
+    fn villager_offer_wire_snapshot_matches_host_fields_and_bounds() {
+        assert_eq!(VILLAGER_TRADE_WRITE_CAPABILITY, "villager.trade.write");
+        assert_eq!(MAX_VILLAGER_TRADE_OFFERS, 256);
+        assert_eq!(MAX_VILLAGER_TRADE_RESPONSE_BYTES, 274_952);
+
+        let bytes = one_offer_response("sjml_game_test:content/gametest_librarian_trade", 1, 3, 14);
+        let response = crate::from_bytes::<VillagerOffersResponse>(&bytes).unwrap();
+        assert_eq!(response.offers.len(), 1);
+        assert_eq!(
+            response.offers[0].id,
+            "sjml_game_test:content/gametest_librarian_trade"
+        );
+        assert!(response.offers[0].registered);
+        assert_eq!(response.offers[0].input_a.item_id, "minecraft:emerald");
+        assert_eq!(response.offers[0].input_a.count, 2);
+        assert_eq!(response.offers[0].current_input_a_count, 4);
+        assert_eq!(response.offers[0].input_b, None);
+        assert_eq!(response.offers[0].result.item_id, "minecraft:diamond");
+        assert_eq!(response.offers[0].uses, 3);
+        assert_eq!(response.offers[0].max_uses, 12);
+        assert_eq!(response.offers[0].demand, 14);
+        assert_eq!(response.offers[0].special_price, -2);
+    }
+
+    #[test]
+    fn villager_offer_snapshot_rejects_bad_schema_counts_ids_and_modifiers() {
+        let mut wrong_schema = one_offer_response("example:module/trade", 1, 0, 0);
+        wrong_schema[..4].copy_from_slice(&2_u32.to_le_bytes());
+        assert_eq!(
+            crate::from_bytes::<VillagerOffersResponse>(&wrong_schema)
+                .unwrap_err()
+                .code(),
+            ErrorCode::IncompatibleAbiVersion
+        );
+
+        let mut oversized_count = Vec::new();
+        push_u32(&mut oversized_count, 1);
+        push_u32(&mut oversized_count, MAX_VILLAGER_TRADE_OFFERS as u32 + 1);
+        assert_eq!(
+            crate::from_bytes::<VillagerOffersResponse>(&oversized_count)
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+
+        for response in [
+            one_offer_response("live/256", 0, 0, 0),
+            one_offer_response("example:module/trade", 2, 0, 0),
+            one_offer_response("example:module/trade", 1, 13, 0),
+            one_offer_response("example:module/trade", 1, 0, MAX_VILLAGER_TRADE_DEMAND + 1),
+        ] {
+            assert_eq!(
+                crate::from_bytes::<VillagerOffersResponse>(&response)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+
+        let mut duplicate = Vec::new();
+        push_u32(&mut duplicate, 1);
+        push_u32(&mut duplicate, 2);
+        push_offer(&mut duplicate, "example:module/trade", 1, 0, 0);
+        push_offer(&mut duplicate, "example:module/trade", 1, 0, 0);
+        assert_eq!(
+            crate::from_bytes::<VillagerOffersResponse>(&duplicate)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let mut too_long_id = Vec::new();
+        push_u32(&mut too_long_id, 1);
+        push_u32(&mut too_long_id, 1);
+        push_trade_string(&mut too_long_id, &"x".repeat(257));
+        assert_eq!(
+            crate::from_bytes::<VillagerOffersResponse>(&too_long_id)
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn villager_trade_mutations_validate_before_import_and_are_wasm_only() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(MAX_VILLAGER_TRADE_USES, 1_000);
+        assert_eq!(MAX_VILLAGER_TRADE_SPECIAL_PRICE, 10_000);
+        let invalid_id = "live/0";
+        assert_eq!(
+            set_villager_offer_uses(handle, invalid_id, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_villager_offer_special_price(handle, "Example:module/trade", 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_villager_offer_uses(handle, "example:module/trade", MAX_VILLAGER_TRADE_USES + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_villager_offer_special_price(handle, "example:module/trade", i32::MIN)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert!(validate_villager_trade_offers(&[VillagerOffer {
+            id: "live/0".into(),
+            registered: false,
+            input_a: VillagerOfferItem {
+                item_id: "minecraft:emerald".into(),
+                count: 1
+            },
+            current_input_a_count: 1,
+            input_b: None,
+            result: VillagerOfferItem {
+                item_id: "minecraft:diamond".into(),
+                count: 1
+            },
+            uses: 0,
+            max_uses: 1,
+            demand: 0,
+            special_price: 0,
+        }])
+        .is_ok());
+        assert_eq!(
+            villager_offers(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "native SDK tests must not attempt a host import"
+        );
+        assert_eq!(
+            update_villager_offer_demand(handle, "example:module/trade")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
 
     #[test]
     fn air_supply_response_matches_schema_and_rejects_out_of_range_values() {
@@ -2805,6 +3853,30 @@ mod tests {
             set_air_supply(handle, 1).unwrap_err().code(),
             ErrorCode::UnknownErrorCode
         );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn mob_lifecycle_calls_are_unavailable_on_native_targets_and_use_separate_grants() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            is_persistence_required(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_persistence_required(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            can_pick_up_loot(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_can_pick_up_loot(handle, true).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(PERSISTENCE_WRITE_CAPABILITY, "entity.persistence.write");
+        assert_eq!(LOOT_PICKUP_WRITE_CAPABILITY, "entity.loot_pickup.write");
     }
 
     #[test]

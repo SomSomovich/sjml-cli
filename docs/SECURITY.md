@@ -42,6 +42,12 @@ synchronously veto a key press delivered to an active screen. The older
 a mouse-button press can be consumed only through its documented hook. Input
 subscriptions are module-owned and removed when their runtime closes.
 
+Raw cursor motion is a separate opt-in through `client.input.cursor_motion`.
+It exposes detached physical-window coordinates and movement deltas from native
+cursor callbacks, with a 16-event per-module tick cap. It cannot consume or
+rewrite input, and its synchronous callback should return quickly. The sampled
+`client.input.observe` cursor API remains GUI-scaled and once per tick.
+
 The physical-client `client.action_attempt` callback runs before vanilla attack,
 use-item, or pick-block keymapping handling. It requires
 `events.subscribe`, `events.cancel`, and `client.input.action_cancel`. Callbacks

@@ -12,6 +12,8 @@ struct SetBlockOptionsCheck {
     update_neighbors: bool,
     update_clients: bool,
     known_shape: bool,
+    suppress_drops: bool,
+    replace_with_air: bool,
     expect_unloaded: bool,
 }
 
@@ -26,7 +28,9 @@ fn check_block_update_options(arguments: SetBlockOptionsCheck) -> SjmlResult<Str
             y: arguments.y,
             z: arguments.z,
         },
-        if arguments.redstone {
+        if arguments.replace_with_air {
+            "minecraft:air"
+        } else if arguments.redstone {
             "minecraft:redstone_block"
         } else {
             "minecraft:stone"
@@ -35,6 +39,7 @@ fn check_block_update_options(arguments: SetBlockOptionsCheck) -> SjmlResult<Str
             update_neighbors: arguments.update_neighbors,
             update_clients: arguments.update_clients,
             known_shape: arguments.known_shape,
+            suppress_drops: arguments.suppress_drops,
         },
     );
     if arguments.expect_unloaded {

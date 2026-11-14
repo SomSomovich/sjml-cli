@@ -27,7 +27,7 @@ out-of-height positions, and unloaded chunks. It checks chunk residency without 
 Minecraft receives a fixed `Block.UPDATE_ALL` update flag for this property-only operation. Guests
 cannot choose its neighbor or client notification behavior. The separate
 [`world::set_block_with_options`](WORLD_BLOCK_UPDATE_OPTIONS.md) API controls a block replacement's
-safe neighbor/client/known-shape flags. `INVALID_ARGUMENT` indicates rejected input or a stale
+safe neighbor/client/known-shape/suppress-drops options. `INVALID_ARGUMENT` indicates rejected input or a stale
 expected block and leaves the block unchanged.
 
 The stable-v1 request is a versioned record containing the world handle, versioned block position,

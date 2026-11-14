@@ -54,3 +54,7 @@ items fit and never drops the remainder.
 
 To move an exact count between two existing player slots while preserving all stack components,
 use [`player_inventory::move_stack`](PLAYER_INVENTORY_MOVE.md).
+
+For a per-stack glint change, use [`set_item_glint_override` and
+`clear_item_glint_override`](PLAYER_INVENTORY_GLINT.md). This controls only the
+chosen live stack and is separate from an item's registered default glint.

@@ -23,5 +23,5 @@ hook. Minecraft 1.21.1 does not offer equivalent state-aware hooks for speed and
 Guests cannot run during friction queries: values are resolved into immutable, bounded tables
 before block registration.
 
-The schema-v2 behavior payload adds an optional friction field. The host continues to accept schema-v1
-payloads for existing guests.
+The behavior payload schema has since grown additively through v5. The host continues to accept
+schema-v1 through v4 payloads for existing guests.

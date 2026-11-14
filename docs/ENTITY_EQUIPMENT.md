@@ -43,26 +43,34 @@ The `sjml_entity_v1.equipment` import accepts the 24-byte entity handle and a wr
 
 ## Adding one default item to an empty slot
 
-`entity::try_equip_default(handle, slot, item_id)` creates one default stack from an item already
-registered in Minecraft and places it into a fixed slot. The module must request and receive both
-`entity.read` and `entity.equipment.write`. The target must still be a loaded living non-player
-entity on the owning server thread. IDs must be canonical `namespace:path` values; unknown IDs and
-`minecraft:air` are rejected. The guest cannot provide a count, NBT, or custom data components.
+`entity::try_equip_default(handle, slot, item_id)` creates one default stack from an item registered
+by that exact package and module, then places it into one fixed slot. The module must request and
+receive both `entity.read` and `entity.equipment.write`. The target must still be a loaded living
+non-player entity on the owning server thread. IDs must be canonical `namespace:path` values owned
+by the module; vanilla items and items registered by other modules are rejected. The guest cannot
+provide a count, NBT, or custom data components.
 
 The call returns `true` when it equips the stack and `false` when that slot already contains an
-item. An occupied stack is never replaced or discarded. This keeps the operation bounded and avoids
-losing equipment; a mod that needs swaps must first implement its own explicit item-return policy.
+item. An occupied stack is never replaced or discarded. `entity::clear_equipment(handle, slot)`
+clears a slot through Minecraft's `LivingEntity.setItemSlot` path and returns `true` when a stack was
+removed or `false` when it was already empty. Both calls use the same permission and six-slot enum.
+The clear call triggers vanilla equipment synchronization; no arbitrary stack or item data crosses
+the ABI.
 
 ```rust
 use sjml::{entity, EntityEquipmentSlot, SjmlResult};
 
 fn equip_zombie(mob: sjml::EntityHandle) -> SjmlResult<bool> {
-    entity::try_equip_default(mob, EntityEquipmentSlot::MainHand, "minecraft:iron_sword")
+    entity::try_equip_default(mob, EntityEquipmentSlot::MainHand, "my_package:my_module/iron_sword")
 }
 ```
 
 `sjml_entity_v1.set_equipment` requires `entity.read` and `entity.equipment.write` and accepts a schema-v1 request containing the 24-byte entity handle,
 slot code (`1` main hand, `2` offhand, `3` head, `4` chest, `5` legs, `6` feet), and a canonical item
-ID capped at 256 UTF-8 bytes. Its exact five-byte result is schema `u32(1)` followed by a `0` or `1`
-boolean tag. The host checks the output span before reaching the entity provider. Static registration
-links the bounded import but denies live mutation.
+ID capped at 256 UTF-8 bytes and owned by the calling package/module. `clear_equipment` accepts the
+same schema version, handle, and slot code with no item ID. Both return exactly five bytes: schema
+`u32(1)` followed by a `0` or `1` boolean tag. The host checks the output span before reaching the
+entity provider. Static registration links the bounded imports but denies live mutation.
+
+For the separate Mob-only per-slot drop-chance API and its capability, see
+[`ENTITY_EQUIPMENT_DROP_CHANCES.md`](ENTITY_EQUIPMENT_DROP_CHANCES.md).

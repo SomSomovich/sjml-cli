@@ -1,7 +1,7 @@
 //! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, movement-state, active-effect, team, and game-mode reads require
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
-//! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
+//! `player.vitals.write`, velocity changes require `player.motion.write`, and ability changes require
 //! `player.abilities.write`; item cooldown changes require `player.cooldown.write`; action-bar messages require `player.ui.actionbar`, system chat messages require `player.chat.system_message`, and title packets
 //! require `player.ui.title`; module-owned tab-list header/footer changes require
 //! `player.ui.tab_list`; advancement changes require `player.advancement.write`; vanilla custom-stat
@@ -777,6 +777,10 @@ pub const MAX_TELEPORT_COORDINATE: f64 = 29_999_984.0;
 pub const MAX_TELEPORT_YAW: f32 = 36_000.0;
 /// Maximum absolute velocity component accepted by the player motion API, in blocks per tick.
 pub const MAX_PLAYER_VELOCITY_COMPONENT: f64 = 64.0;
+/// Minimum flight and walking speed accepted by the player ability write API.
+pub const MIN_PLAYER_ABILITY_SPEED: f32 = 0.0;
+/// Maximum flight and walking speed accepted by the player ability write API.
+pub const MAX_PLAYER_ABILITY_SPEED: f32 = 0.5;
 /// Maximum UTF-8 size accepted for one literal player action-bar message.
 pub const MAX_ACTION_BAR_TEXT_BYTES: usize = 1024;
 /// Maximum Unicode scalar values accepted for one literal player action-bar message.
@@ -1030,6 +1034,18 @@ extern "C" {
     fn imported_abilities(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_flying"]
     fn imported_set_flying(handle: i32, length: i32, flying: i32) -> i32;
+    #[link_name = "set_may_fly"]
+    fn imported_set_may_fly(handle: i32, length: i32, enabled: i32) -> i32;
+    #[link_name = "set_instabuild"]
+    fn imported_set_instabuild(handle: i32, length: i32, enabled: i32) -> i32;
+    #[link_name = "set_invulnerable"]
+    fn imported_set_invulnerable(handle: i32, length: i32, enabled: i32) -> i32;
+    #[link_name = "set_may_build"]
+    fn imported_set_may_build(handle: i32, length: i32, enabled: i32) -> i32;
+    #[link_name = "set_flying_speed"]
+    fn imported_set_flying_speed(handle: i32, length: i32, speed_bits: i32) -> i32;
+    #[link_name = "set_walking_speed"]
+    fn imported_set_walking_speed(handle: i32, length: i32, speed_bits: i32) -> i32;
     #[link_name = "vitals"]
     fn imported_vitals(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "air_supply"]
@@ -3038,10 +3054,9 @@ pub fn equipment(handle: PlayerHandle) -> SjmlResult<PlayerEquipment> {
 
 /// Reads the four built-in abilities of the current live server-player session.
 ///
-/// Requires `entity.read`. The snapshot is read-only: game-mode/admin-owned
-/// fields such as `may_fly`, `invulnerable`, and `may_build` are never writable
-/// through this API. The host validates the active session and logical-server
-/// thread for each call; client and static-registration calls fail closed.
+/// The snapshot itself is read-only. Separate `set_*` functions below change individual fields
+/// under `player.abilities.write`. The host validates the active session and logical-server thread
+/// for each call; client and static-registration calls fail closed.
 pub fn abilities(handle: PlayerHandle) -> SjmlResult<PlayerAbilities> {
     #[cfg(target_arch = "wasm32")]
     {
@@ -3092,6 +3107,148 @@ pub fn set_flying(handle: PlayerHandle, flying: bool) -> SjmlResult<()> {
         let _ = (handle, flying);
         Err(unsupported_target())
     }
+}
+
+/// Enables or disables flight permission for a live server player.
+///
+/// Requires `entity.read` and `player.abilities.write`. Disabling `may_fly` also clears current
+/// flight in the same server-thread update. Use [`set_flying`] to change only current flight.
+pub fn set_may_fly(handle: PlayerHandle, enabled: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        set_player_ability_flag(handle, enabled, imported_set_may_fly)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, enabled);
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables instant-build ability for a live server player.
+///
+/// Requires `entity.read` and `player.abilities.write`.
+pub fn set_instabuild(handle: PlayerHandle, enabled: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        set_player_ability_flag(handle, enabled, imported_set_instabuild)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, enabled);
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables invulnerability for a live server player.
+///
+/// Requires `entity.read` and `player.abilities.write`.
+pub fn set_invulnerable(handle: PlayerHandle, enabled: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        set_player_ability_flag(handle, enabled, imported_set_invulnerable)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, enabled);
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables the player's permission to build and interact with blocks.
+///
+/// Requires `entity.read` and `player.abilities.write`.
+pub fn set_may_build(handle: PlayerHandle, enabled: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        set_player_ability_flag(handle, enabled, imported_set_may_build)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, enabled);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets flight speed to a finite value in [`MIN_PLAYER_ABILITY_SPEED`]..=[`MAX_PLAYER_ABILITY_SPEED`].
+///
+/// Minecraft's ordinary default is approximately `0.05`. Requires `entity.read` and
+/// `player.abilities.write`.
+pub fn set_flying_speed(handle: PlayerHandle, speed: f32) -> SjmlResult<()> {
+    validate_player_ability_speed(speed)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        set_player_ability_speed(handle, speed, imported_set_flying_speed)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, speed);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets walking speed to a finite value in [`MIN_PLAYER_ABILITY_SPEED`]..=[`MAX_PLAYER_ABILITY_SPEED`].
+///
+/// Minecraft's ordinary default is approximately `0.1`. Requires `entity.read` and
+/// `player.abilities.write`.
+pub fn set_walking_speed(handle: PlayerHandle, speed: f32) -> SjmlResult<()> {
+    validate_player_ability_speed(speed)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        set_player_ability_speed(handle, speed, imported_set_walking_speed)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, speed);
+        Err(unsupported_target())
+    }
+}
+
+fn validate_player_ability_speed(speed: f32) -> SjmlResult<()> {
+    if !speed.is_finite() || !(MIN_PLAYER_ABILITY_SPEED..=MAX_PLAYER_ABILITY_SPEED).contains(&speed)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player ability speed must be finite and between 0 and 0.5",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_player_ability_flag(
+    handle: PlayerHandle,
+    enabled: bool,
+    imported_setter: unsafe extern "C" fn(i32, i32, i32) -> i32,
+) -> SjmlResult<()> {
+    let encoded = to_bytes(&handle)?;
+    // SAFETY: the encoded handle and boolean scalar stay valid through this synchronous host import.
+    let status = unsafe {
+        imported_setter(
+            encoded.as_ptr() as usize as u32 as i32,
+            encoded.len() as i32,
+            i32::from(enabled),
+        )
+    };
+    status_result(status, "host rejected the player ability change")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_player_ability_speed(
+    handle: PlayerHandle,
+    speed: f32,
+    imported_setter: unsafe extern "C" fn(i32, i32, i32) -> i32,
+) -> SjmlResult<()> {
+    let encoded = to_bytes(&handle)?;
+    // SAFETY: the encoded handle and float bits stay valid through this synchronous host import.
+    let status = unsafe {
+        imported_setter(
+            encoded.as_ptr() as usize as u32 as i32,
+            encoded.len() as i32,
+            speed.to_bits() as i32,
+        )
+    };
+    status_result(status, "host rejected the player ability speed change")
 }
 
 /// Replaces all velocity components for a live server player.
@@ -3204,17 +3361,34 @@ mod tests {
     use super::{
         active_effects, air_supply, apply_effect, clear_team, movement_state, reset_fall_distance,
         send_system_message, set_air_supply, set_rotation, set_team, team, teleport,
-        teleport_to_world, validate_player_tab_list_pair, validate_player_tab_list_text,
-        validate_player_team_name, validate_player_title_text, validate_system_message_text,
-        vitals, PlayerAirSupply, PlayerMotion, PlayerMovementState, PlayerTeamResponse,
-        PlayerTeleport, PlayerTitleTimings, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
+        teleport_to_world, validate_player_ability_speed, validate_player_tab_list_pair,
+        validate_player_tab_list_text, validate_player_team_name, validate_player_title_text,
+        validate_system_message_text, vitals, PlayerAirSupply, PlayerMotion, PlayerMovementState,
+        PlayerTeamResponse, PlayerTeleport, PlayerTitleTimings, PlayerVitals,
+        MAX_PLAYER_ABILITY_SPEED, MAX_PLAYER_ACTIVE_EFFECTS,
         MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_FALL_DISTANCE,
         MAX_PLAYER_ROTATION_YAW, MAX_PLAYER_STATISTIC_VALUE, MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES,
         MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS, MAX_PLAYER_TAB_LIST_TEXT_BYTES,
         MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS, MAX_PLAYER_TEAM_NAME_BYTES,
         MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
+        MIN_PLAYER_ABILITY_SPEED,
     };
     use crate::{ActiveEffect, ErrorCode, PlayerHandle, StableDecode, WorldHandle};
+
+    #[test]
+    fn player_ability_speeds_are_finite_and_bounded() {
+        assert_eq!(MIN_PLAYER_ABILITY_SPEED, 0.0);
+        assert_eq!(MAX_PLAYER_ABILITY_SPEED, 0.5);
+        assert!(validate_player_ability_speed(MIN_PLAYER_ABILITY_SPEED).is_ok());
+        assert!(validate_player_ability_speed(0.05).is_ok());
+        assert!(validate_player_ability_speed(MAX_PLAYER_ABILITY_SPEED).is_ok());
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.001, 0.501] {
+            assert_eq!(
+                validate_player_ability_speed(invalid).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+            );
+        }
+    }
 
     #[test]
     fn player_active_effects_reuse_the_bounded_entity_effect_schema() {

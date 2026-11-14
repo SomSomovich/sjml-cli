@@ -83,7 +83,7 @@ struct EntityEquipmentWriteArguments {
 }
 
 #[command(name = "entity.equipment.write")]
-fn equips_only_an_empty_slot_and_preserves_the_existing_stack(
+fn equips_reads_and_clears_a_registered_default_stack(
     arguments: EntityEquipmentWriteArguments,
 ) -> SjmlResult<String> {
     let handle = entity::loaded()?
@@ -104,7 +104,7 @@ fn equips_only_an_empty_slot_and_preserves_the_existing_stack(
     if !entity::try_equip_default(
         handle,
         EntityEquipmentSlot::MainHand,
-        "minecraft:iron_sword",
+        "sjml_game_test:content/gametest_ruby",
     )? {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
@@ -118,16 +118,19 @@ fn equips_only_an_empty_slot_and_preserves_the_existing_stack(
             "the main-hand item was not visible after insertion",
         )
     })?;
-    if sword.item_id != "minecraft:iron_sword" || sword.count != 1 || sword.damage != 0 {
+    if sword.item_id != "sjml_game_test:content/gametest_ruby"
+        || sword.count != 1
+        || sword.damage != 0
+    {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "entity equipment readback did not match the default iron sword",
+            "entity equipment readback did not match the module-owned default item",
         ));
     }
     if entity::try_equip_default(
         handle,
         EntityEquipmentSlot::MainHand,
-        "minecraft:diamond_sword",
+        "sjml_game_test:content/gametest_food",
     )? {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
@@ -139,12 +142,45 @@ fn equips_only_an_empty_slot_and_preserves_the_existing_stack(
         .main_hand
         .as_ref()
         .map(|stack| stack.item_id.as_str())
-        != Some("minecraft:iron_sword")
+        != Some("sjml_game_test:content/gametest_ruby")
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "refusing a replacement must leave the original equipment unchanged",
         ));
     }
-    Ok("guest equipped one default item into an empty slot and rejected replacement".to_owned())
+    if !entity::clear_equipment(handle, EntityEquipmentSlot::MainHand)? {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the occupied equipment slot was not cleared",
+        ));
+    }
+    if entity::equipment(handle)?.main_hand.is_some() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "clearing equipment did not expose an empty slot on readback",
+        ));
+    }
+    if entity::clear_equipment(handle, EntityEquipmentSlot::MainHand)? {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "clearing an already empty slot reported a removal",
+        ));
+    }
+    let initial_chance = entity::equipment_drop_chance(handle, EntityEquipmentSlot::Feet)?;
+    if (initial_chance - 0.125).abs() > f32::EPSILON {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the guest did not read the vanilla feet-slot drop chance",
+        ));
+    }
+    entity::set_equipment_drop_chance(handle, EntityEquipmentSlot::MainHand, 0.625)?;
+    let updated_chance = entity::equipment_drop_chance(handle, EntityEquipmentSlot::MainHand)?;
+    if (updated_chance - 0.625).abs() > f32::EPSILON {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the guest did not read back the changed main-hand drop chance",
+        ));
+    }
+    Ok("guest equipped and cleared a stack and read/changed bounded vanilla equipment drop chances".to_owned())
 }

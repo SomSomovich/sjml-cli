@@ -144,6 +144,18 @@ extern "C" {
     #[link_name = "clear_player_item_custom_name"]
     fn imported_clear_player_item_custom_name(player: i32, player_length: i32, slot: i32) -> i32;
 
+    #[link_name = "set_player_item_glint_override"]
+    fn imported_set_player_item_glint_override(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        enabled: i32,
+    ) -> i32;
+
+    #[link_name = "clear_player_item_glint_override"]
+    fn imported_clear_player_item_glint_override(player: i32, player_length: i32, slot: i32)
+        -> i32;
+
     #[link_name = "read_player_lore"]
     fn imported_read_player_lore(
         player: i32,
@@ -855,6 +867,72 @@ pub fn clear_item_custom_name(player: PlayerHandle, slot: u32) -> SjmlResult<()>
     }
 }
 
+/// Forces or suppresses Minecraft's foil effect on an existing live player-inventory stack.
+///
+/// This writes only vanilla `DataComponents.ENCHANTMENT_GLINT_OVERRIDE`: `true` forces foil and
+/// `false` suppresses foil even when enchantments would normally show it. It preserves the item,
+/// count, durability, custom name, and every other component. Slot indices use the same layout as
+/// [`read`]. The slot must contain a non-empty stack.
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`; it runs only
+/// on the logical-server thread, resolves the current live session, and synchronizes the active
+/// player menu.
+pub fn set_item_glint_override(player: PlayerHandle, slot: u32, enabled: bool) -> SjmlResult<()> {
+    validate_glint_override_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle bytes remain live for this synchronous import.
+        let status = unsafe {
+            imported_set_player_item_glint_override(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                i32::from(enabled),
+            )
+        };
+        status_result(status, "host rejected the player inventory glint override")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, enabled);
+        Err(unsupported_target())
+    }
+}
+
+/// Clears the explicit foil override and restores the item's normal vanilla glint behavior.
+///
+/// This removes only `DataComponents.ENCHANTMENT_GLINT_OVERRIDE`, preserving the item, count,
+/// durability, and every other component. Slot indices use the same layout as [`read`]; empty
+/// slots are rejected. The update is synchronized through the active player menu.
+///
+/// Requires declared and administrator-granted `entity.read` and `inventory.write`; it runs only
+/// on the logical-server thread and fails if the player handle is stale.
+pub fn clear_item_glint_override(player: PlayerHandle, slot: u32) -> SjmlResult<()> {
+    validate_glint_override_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle bytes remain live for this synchronous import.
+        let status = unsafe {
+            imported_clear_player_item_glint_override(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory glint override clear",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot);
+        Err(unsupported_target())
+    }
+}
+
 /// Reads the detached plain-text lore lines from an existing player inventory stack.
 ///
 /// Components are flattened to literal text. Styles, click/hover events, and JSON structure are
@@ -1209,6 +1287,16 @@ fn validate_custom_name_slot(slot: u32) -> SjmlResult<()> {
     Ok(())
 }
 
+fn validate_glint_override_slot(slot: u32) -> SjmlResult<()> {
+    if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player inventory slot must be between 0 and 40",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_damage(slot: u32, damage: u32) -> SjmlResult<()> {
     if slot > MAX_PLAYER_INVENTORY_SLOT_INDEX || damage > MAX_PLAYER_INVENTORY_DAMAGE {
         return Err(SjmlError::new(
@@ -1344,18 +1432,19 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_item_custom_name, clear_lore, give_item, read_enchantment_level, read_lore,
-        remove_enchantment, set_damage, set_enchantment_level, set_item_custom_name, set_lore,
-        set_slot, validate_count, validate_custom_name, validate_damage,
-        validate_enchantment_access, validate_give_item, validate_inventory, validate_lore_line,
-        validate_lore_lines, validate_move_stack, PlayerInventoryLorePayload,
-        PlayerInventorySlotUpdate, MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES,
-        MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS,
-        MAX_PLAYER_INVENTORY_DAMAGE, MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES,
-        MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL, MAX_PLAYER_INVENTORY_GIVE_COUNT,
-        MAX_PLAYER_INVENTORY_LORE_LINE_BYTES, MAX_PLAYER_INVENTORY_LORE_LINE_CODE_POINTS,
-        MAX_PLAYER_INVENTORY_MOVE_COUNT, MAX_PLAYER_INVENTORY_SLOTS,
-        MAX_PLAYER_INVENTORY_SLOT_COUNT, MAX_PLAYER_INVENTORY_SLOT_INDEX,
+        clear_item_custom_name, clear_item_glint_override, clear_lore, give_item,
+        read_enchantment_level, read_lore, remove_enchantment, set_damage, set_enchantment_level,
+        set_item_custom_name, set_item_glint_override, set_lore, set_slot, validate_count,
+        validate_custom_name, validate_damage, validate_enchantment_access, validate_give_item,
+        validate_glint_override_slot, validate_inventory, validate_lore_line, validate_lore_lines,
+        validate_move_stack, PlayerInventoryLorePayload, PlayerInventorySlotUpdate,
+        MAX_PLAYER_INVENTORY_COMPONENT_PATH_BYTES, MAX_PLAYER_INVENTORY_CUSTOM_NAME_BYTES,
+        MAX_PLAYER_INVENTORY_CUSTOM_NAME_CODE_POINTS, MAX_PLAYER_INVENTORY_DAMAGE,
+        MAX_PLAYER_INVENTORY_ENCHANTMENT_ID_BYTES, MAX_PLAYER_INVENTORY_ENCHANTMENT_LEVEL,
+        MAX_PLAYER_INVENTORY_GIVE_COUNT, MAX_PLAYER_INVENTORY_LORE_LINE_BYTES,
+        MAX_PLAYER_INVENTORY_LORE_LINE_CODE_POINTS, MAX_PLAYER_INVENTORY_MOVE_COUNT,
+        MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
+        MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use super::{
@@ -1646,6 +1735,43 @@ mod tests {
             .code(),
             ErrorCode::PayloadTooLarge
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn player_inventory_glint_override_uses_only_valid_slots() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert!(validate_glint_override_slot(0).is_ok());
+        assert!(validate_glint_override_slot(40).is_ok());
+        assert_eq!(
+            set_item_glint_override(player, 0, true).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid force call reaches the wasm-only host on native builds"
+        );
+        assert_eq!(
+            set_item_glint_override(player, 40, false)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid suppress call reaches the wasm-only host on native builds"
+        );
+        assert_eq!(
+            clear_item_glint_override(player, 40).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid clear call reaches the wasm-only host on native builds"
+        );
+        for slot in [41, u32::MAX] {
+            assert_eq!(
+                set_item_glint_override(player, slot, true)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                clear_item_glint_override(player, slot).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
     }
 
     #[test]

@@ -5,6 +5,9 @@ Client-side Rust modules can play a sound resource at the local listener through
 sound is present in the currently loaded sound resources before queuing it. Use `play_tracked`
 when that particular one-shot must be stopped early.
 
+For passive observations of sounds that start playing, use `client.sound_started` under the separate
+`client.audio.observe` grant. It cannot control playback; see [CLIENT_SOUND_STARTED.md](CLIENT_SOUND_STARTED.md).
+
 ```rust
 use sjml::client_audio::{play, SoundCategory};
 

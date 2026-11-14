@@ -13,6 +13,18 @@ fn native_equipment_read_reports_unsupported_import() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn native_equipment_clear_reports_unsupported_import() {
+    let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+    assert_eq!(
+        entity::clear_equipment(handle, EntityEquipmentSlot::Feet)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn native_equipment_write_validates_item_id_before_unsupported_import() {
     let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
     assert_eq!(entity::EQUIPMENT_WRITE_CAPABILITY, "entity.equipment.write");
@@ -20,7 +32,7 @@ fn native_equipment_write_validates_item_id_before_unsupported_import() {
         entity::try_equip_default(
             handle,
             EntityEquipmentSlot::MainHand,
-            "minecraft:iron_sword"
+            "sjml:anonymous/iron_sword"
         )
         .unwrap_err()
         .code(),
@@ -33,6 +45,47 @@ fn native_equipment_write_validates_item_id_before_unsupported_import() {
                 .code(),
             ErrorCode::InvalidArgument,
             "accepted invalid item ID {invalid_id}"
+        );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_drop_chance_api_validates_normalized_values_and_exposes_its_capability() {
+    let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+    assert_eq!(
+        entity::EQUIPMENT_DROP_CHANCE_WRITE_CAPABILITY,
+        "entity.equipment.drop_chance.write"
+    );
+    assert_eq!(
+        entity::equipment_drop_chance(handle, EntityEquipmentSlot::MainHand)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    for chance in [
+        -0.1,
+        -0.0,
+        1.0001,
+        f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    ] {
+        assert_eq!(
+            entity::set_equipment_drop_chance(handle, EntityEquipmentSlot::Feet, chance)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument,
+            "accepted invalid drop chance {chance}"
+        );
+    }
+    for chance in [0.0, 0.25, 1.0] {
+        assert_eq!(
+            entity::set_equipment_drop_chance(handle, EntityEquipmentSlot::Feet, chance)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "native API should validate then report its unsupported import for {chance}"
         );
     }
 }

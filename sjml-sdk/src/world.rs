@@ -36,7 +36,7 @@ pub const MAX_WORLD_BLOCK_COLLISION_BOXES: usize = 64;
 pub const MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES: usize =
     9 + MAX_WORLD_BLOCK_COLLISION_BOXES * (4 + 6 * 8);
 /// Allowed raw update-bit mask for [`set_block_with_options`].
-pub const WORLD_BLOCK_UPDATE_ALLOWED_MASK: i32 = 0b1_0011;
+pub const WORLD_BLOCK_UPDATE_ALLOWED_MASK: i32 = 0b11_0011;
 /// Maximum output bytes reserved for one fluid-state snapshot.
 pub const MAX_WORLD_FLUID_STATE_RESPONSE_BYTES: usize = 275;
 /// Maximum encoded response bytes reserved for [`fluid_flow_at`].
@@ -3772,9 +3772,9 @@ pub fn set_block(world: WorldHandle, position: BlockPos, block_id: &str) -> Sjml
 
 /// Controls the safe update behavior when [`set_block_with_options`] replaces a block.
 ///
-/// This deliberately exposes only neighbor notifications, client updates, and the
-/// `UPDATE_KNOWN_SHAPE` optimization. Flags that suppress drops, request immediate updates,
-/// or bypass normal movement handling are unavailable.
+/// This deliberately exposes only neighbor notifications, client updates, the
+/// `UPDATE_KNOWN_SHAPE` optimization, and vanilla's `UPDATE_SUPPRESS_DROPS` behavior.
+/// Immediate updates and piston movement flags are unavailable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockUpdateOptions {
     /// Send normal block-neighbor notifications after the replacement.
@@ -3784,6 +3784,10 @@ pub struct BlockUpdateOptions {
     /// Assert that the replacement's neighbor shape is already known to be consistent.
     /// Use this only when the caller has already established the surrounding shape state.
     pub known_shape: bool,
+    /// Prevent nested `Level.destroyBlock(..., drop = true, ...)` calls caused by synchronous neighbor
+    /// reactions during this update from spawning their drops. This is scoped to this call and does not
+    /// suppress explicit destruction performed outside its synchronous update chain.
+    pub suppress_drops: bool,
 }
 
 impl Default for BlockUpdateOptions {
@@ -3792,6 +3796,7 @@ impl Default for BlockUpdateOptions {
             update_neighbors: true,
             update_clients: true,
             known_shape: false,
+            suppress_drops: false,
         }
     }
 }
@@ -3802,6 +3807,7 @@ impl BlockUpdateOptions {
         (if self.update_neighbors { 1 } else { 0 })
             | (if self.update_clients { 1 << 1 } else { 0 })
             | (if self.known_shape { 1 << 4 } else { 0 })
+            | (if self.suppress_drops { 1 << 5 } else { 0 })
     }
 }
 
@@ -3811,8 +3817,10 @@ impl BlockUpdateOptions {
 /// and does not load chunks. Disabling neighbor updates can leave dependent blocks in their current
 /// state until another update reaches them. Disabling client updates leaves connected clients stale
 /// until a later packet refreshes the position. `known_shape` is an opt-in assertion for callers
-/// that already established the surrounding shape state. [`set_block`] keeps the default behavior
-/// of enabling both neighbor and client updates with `known_shape` disabled.
+/// that already established the surrounding shape state. `suppress_drops` maps to
+/// `UPDATE_SUPPRESS_DROPS` and suppresses drops from nested block destructions caused by this
+/// update's synchronous neighbor reactions. [`set_block`] keeps the default behavior
+/// of enabling both neighbor and client updates with the other options disabled.
 pub fn set_block_with_options(
     world: WorldHandle,
     position: BlockPos,
@@ -5476,13 +5484,14 @@ mod tests {
 
     #[test]
     fn block_update_options_map_only_to_safe_vanilla_update_flags() {
-        assert_eq!(WORLD_BLOCK_UPDATE_ALLOWED_MASK, 0b1_0011);
+        assert_eq!(WORLD_BLOCK_UPDATE_ALLOWED_MASK, 0b11_0011);
         assert_eq!(BlockUpdateOptions::default().abi_flags(), 0b0_0011);
         assert_eq!(
             BlockUpdateOptions {
                 update_neighbors: true,
                 update_clients: false,
                 known_shape: false,
+                suppress_drops: false,
             }
             .abi_flags(),
             0b0_0001
@@ -5492,15 +5501,27 @@ mod tests {
                 update_neighbors: false,
                 update_clients: true,
                 known_shape: true,
+                suppress_drops: false,
             }
             .abi_flags(),
             0b1_0010
         );
         assert_eq!(
             BlockUpdateOptions {
+                update_neighbors: false,
+                update_clients: false,
+                known_shape: false,
+                suppress_drops: true,
+            }
+            .abi_flags(),
+            0b10_0000
+        );
+        assert_eq!(
+            BlockUpdateOptions {
                 update_neighbors: true,
                 update_clients: true,
                 known_shape: true,
+                suppress_drops: true,
             }
             .abi_flags(),
             WORLD_BLOCK_UPDATE_ALLOWED_MASK

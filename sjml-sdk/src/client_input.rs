@@ -31,6 +31,16 @@ pub const MAX_CURSOR_MOVED_DELTA: f64 = 4_096.0;
 pub const MAX_CURSOR_MOVED_SUBSCRIPTIONS: usize = 256;
 /// Maximum number of cursor movement listeners a single module can keep active.
 pub const MAX_CURSOR_MOVED_SUBSCRIPTIONS_PER_MODULE: usize = 1;
+/// Maximum number of raw cursor-motion listeners across the physical client.
+pub const MAX_CURSOR_MOTION_SUBSCRIPTIONS: usize = 64;
+/// Maximum raw cursor callbacks delivered to one module during a client tick.
+pub const MAX_CURSOR_MOTION_CALLBACKS_PER_MODULE_PER_TICK: usize = 16;
+/// Largest raw cursor coordinate in physical window pixels.
+pub const MAX_CURSOR_MOTION_COORDINATE: f64 = 1_000_000.0;
+/// Largest accepted native cursor delta in one callback.
+pub const MAX_CURSOR_MOTION_DELTA: f64 = 4_096.0;
+/// Maximum number of raw cursor-motion listeners a single module can keep active.
+pub const MAX_CURSOR_MOTION_SUBSCRIPTIONS_PER_MODULE: usize = 1;
 
 /// Current physical-client mouse position in Minecraft's scaled GUI coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -71,6 +81,9 @@ pub type MouseScrollSubscriptionHandle = EventSubscriptionHandle;
 
 /// Module-owned subscription handle for sampled cursor movement.
 pub type CursorMovedSubscriptionHandle = EventSubscriptionHandle;
+
+/// Module-owned subscription handle for raw physical-client cursor motion.
+pub type CursorMotionSubscriptionHandle = EventSubscriptionHandle;
 
 /// Bounded horizontal and vertical scroll movement reported outside screens on the client.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -144,6 +157,54 @@ impl ClientCursorMovedEvent {
             return Err(SjmlError::new(
                 ErrorCode::InvalidArgument,
                 "cursor movement coordinates and non-zero deltas must be finite and bounded",
+            ));
+        }
+        Ok(self)
+    }
+}
+
+/// One native cursor-position event in physical window pixels, distinct from tick-sampled GUI motion.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClientCursorMotionEvent {
+    /// Current horizontal position from the physical window's left edge, in window pixels.
+    pub x: f64,
+    /// Current vertical position from the physical window's top edge, in window pixels.
+    pub y: f64,
+    /// Horizontal movement since the previous GLFW cursor callback.
+    pub delta_x: f64,
+    /// Vertical movement since the previous GLFW cursor callback.
+    pub delta_y: f64,
+}
+
+impl ClientCursorMotionEvent {
+    pub const MAX_DELTA: f64 = MAX_CURSOR_MOTION_DELTA;
+
+    pub fn new(x: f64, y: f64, delta_x: f64, delta_y: f64) -> SjmlResult<Self> {
+        Self {
+            x,
+            y,
+            delta_x,
+            delta_y,
+        }
+        .validate()
+    }
+
+    fn validate(self) -> SjmlResult<Self> {
+        if !self.x.is_finite()
+            || !self.y.is_finite()
+            || self.x < 0.0
+            || self.y < 0.0
+            || self.x > MAX_CURSOR_MOTION_COORDINATE
+            || self.y > MAX_CURSOR_MOTION_COORDINATE
+            || !self.delta_x.is_finite()
+            || !self.delta_y.is_finite()
+            || self.delta_x.abs() > Self::MAX_DELTA
+            || self.delta_y.abs() > Self::MAX_DELTA
+            || (self.delta_x == 0.0 && self.delta_y == 0.0)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "raw cursor motion coordinates and non-zero deltas must be finite and bounded",
             ));
         }
         Ok(self)
@@ -301,6 +362,10 @@ extern "C" {
     fn imported_subscribe_cursor_moved(callback_id: i64, handle_output_pointer: i32) -> i32;
     #[link_name = "unsubscribe_cursor_moved"]
     fn imported_unsubscribe_cursor_moved(handle_pointer: i32, handle_length: i32) -> i32;
+    #[link_name = "subscribe_cursor_motion"]
+    fn imported_subscribe_cursor_motion(callback_id: i64, handle_output_pointer: i32) -> i32;
+    #[link_name = "unsubscribe_cursor_motion"]
+    fn imported_unsubscribe_cursor_motion(handle_pointer: i32, handle_length: i32) -> i32;
     #[link_name = "cursor_position"]
     fn imported_cursor_position(output_pointer: i32) -> i32;
     #[link_name = "is_key_down"]
@@ -474,12 +539,68 @@ impl CursorMovedCallbacks {
 }
 
 #[cfg(target_arch = "wasm32")]
+type CursorMotionCallback =
+    std::rc::Rc<std::cell::RefCell<Box<dyn FnMut(ClientCursorMotionEvent) -> SjmlResult<()>>>>;
+
+#[cfg(target_arch = "wasm32")]
+struct CursorMotionCallbackEntry {
+    callback: CursorMotionCallback,
+    handle: Option<CursorMotionSubscriptionHandle>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct CursorMotionCallbacks {
+    next: Option<u64>,
+    entries: std::collections::BTreeMap<u64, CursorMotionCallbackEntry>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl CursorMotionCallbacks {
+    fn insert<F>(&mut self, callback: F) -> SjmlResult<u64>
+    where
+        F: FnMut(ClientCursorMotionEvent) -> SjmlResult<()> + 'static,
+    {
+        if self.entries.len() >= MAX_CURSOR_MOTION_SUBSCRIPTIONS_PER_MODULE {
+            return Err(SjmlError::new(
+                ErrorCode::RegistrationLimitReached,
+                "a module can have only one raw cursor-motion listener",
+            ));
+        }
+        let id = self.next.unwrap_or(1);
+        self.next = id.checked_add(1);
+        self.entries.insert(
+            id,
+            CursorMotionCallbackEntry {
+                callback: std::rc::Rc::new(std::cell::RefCell::new(Box::new(callback))),
+                handle: None,
+            },
+        );
+        Ok(id)
+    }
+
+    fn get(&self, id: u64) -> SjmlResult<CursorMotionCallback> {
+        self.entries
+            .get(&id)
+            .map(|entry| entry.callback.clone())
+            .ok_or_else(|| {
+                SjmlError::new(
+                    ErrorCode::StaleHandle,
+                    "cursor motion callback is not subscribed",
+                )
+            })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
     static CALLBACKS: std::cell::RefCell<Callbacks> = std::cell::RefCell::new(Callbacks::default());
     static MOUSE_SCROLL_CALLBACKS: std::cell::RefCell<MouseScrollCallbacks> =
         std::cell::RefCell::new(MouseScrollCallbacks::default());
     static CURSOR_MOVED_CALLBACKS: std::cell::RefCell<CursorMovedCallbacks> =
         std::cell::RefCell::new(CursorMovedCallbacks::default());
+    static CURSOR_MOTION_CALLBACKS: std::cell::RefCell<CursorMotionCallbacks> =
+        std::cell::RefCell::new(CursorMotionCallbacks::default());
     static DISPATCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -846,6 +967,110 @@ pub fn unsubscribe_cursor_moved(handle: CursorMovedSubscriptionHandle) -> SjmlRe
             ));
         }
         CURSOR_MOVED_CALLBACKS.with(|registry| {
+            registry.borrow_mut().entries.remove(&callback_id);
+        });
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported())
+    }
+}
+
+/// Subscribes to each raw native cursor-position callback on the physical client.
+///
+/// Positions and deltas use physical window pixels. This is independent of
+/// [`subscribe_cursor_moved`], which reports at most one scaled GUI-coordinate sample per tick.
+/// At most 16 events per module are dispatched in one client tick. Requires the explicit
+/// `client.input.cursor_motion` capability; callbacks run synchronously on the client main thread.
+pub fn subscribe_cursor_motion<F>(callback: F) -> SjmlResult<CursorMotionSubscriptionHandle>
+where
+    F: FnMut(ClientCursorMotionEvent) -> SjmlResult<()> + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let callback_id =
+            CURSOR_MOTION_CALLBACKS.with(|registry| registry.borrow_mut().insert(callback))?;
+        let output = allocate_host_input(HANDLE_BYTES);
+        if output == 0 {
+            CURSOR_MOTION_CALLBACKS
+                .with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate raw cursor-motion subscription output",
+            ));
+        }
+        // SAFETY: initialize the complete live output allocation before the host writes the handle.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, HANDLE_BYTES as usize) };
+        // SAFETY: the exact output allocation remains live during the synchronous host import.
+        let status = unsafe { imported_subscribe_cursor_motion(callback_id as i64, output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful host call initialized the complete handle allocation.
+            from_bytes::<CursorMotionSubscriptionHandle>(unsafe {
+                core::slice::from_raw_parts(output as *const u8, HANDLE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected raw cursor-motion subscription",
+            ))
+        };
+        // SAFETY: release the exact allocation passed to the host import.
+        unsafe { deallocate_host_input(output, HANDLE_BYTES) };
+        match result {
+            Ok(handle) => {
+                CURSOR_MOTION_CALLBACKS.with(|registry| {
+                    if let Some(entry) = registry.borrow_mut().entries.get_mut(&callback_id) {
+                        entry.handle = Some(handle);
+                    }
+                });
+                Ok(handle)
+            }
+            Err(error) => {
+                CURSOR_MOTION_CALLBACKS
+                    .with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+                Err(error)
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = callback;
+        Err(unsupported())
+    }
+}
+
+/// Unsubscribes a raw physical-client cursor-motion listener.
+pub fn unsubscribe_cursor_motion(handle: CursorMotionSubscriptionHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let callback_id = CURSOR_MOTION_CALLBACKS
+            .with(|registry| {
+                registry
+                    .borrow()
+                    .entries
+                    .iter()
+                    .find_map(|(&id, entry)| (entry.handle == Some(handle)).then_some(id))
+            })
+            .ok_or_else(|| {
+                SjmlError::new(
+                    ErrorCode::StaleHandle,
+                    "raw cursor-motion subscription is not active in this module",
+                )
+            })?;
+        let bytes = to_bytes(&handle)?;
+        // SAFETY: the stable handle bytes live for the complete synchronous host call.
+        let status = unsafe {
+            imported_unsubscribe_cursor_motion(bytes.as_ptr() as i32, bytes.len() as i32)
+        };
+        if status != 0 {
+            return Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected raw cursor-motion unsubscription",
+            ));
+        }
+        CURSOR_MOTION_CALLBACKS.with(|registry| {
             registry.borrow_mut().entries.remove(&callback_id);
         });
         Ok(())
@@ -1251,6 +1476,82 @@ pub unsafe extern "C" fn dispatch_cursor_moved(pointer: u32, length: u32) -> u64
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+struct CursorMotionDelivery {
+    callback_id: u64,
+    event: ClientCursorMotionEvent,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl StableDecode for CursorMotionDelivery {
+    fn decode(decoder: &mut crate::Decoder<'_>) -> SjmlResult<Self> {
+        if decoder.read_u32()? != CLIENT_INPUT_SCHEMA_VERSION {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported raw cursor-motion dispatch schema",
+            ));
+        }
+        let callback_id = decoder.read_u64()?;
+        if callback_id == 0 {
+            return Err(invalid("raw cursor-motion callback identity is zero"));
+        }
+        let event = ClientCursorMotionEvent::new(
+            decoder.read_f64()?,
+            decoder.read_f64()?,
+            decoder.read_f64()?,
+            decoder.read_f64()?,
+        )?;
+        Ok(Self { callback_id, event })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl crate::StableEncode for CursorMotionDelivery {
+    fn encode(&self, encoder: &mut crate::Encoder) -> SjmlResult<()> {
+        encoder.write_u32(CLIENT_INPUT_SCHEMA_VERSION)?;
+        encoder.write_u64(self.callback_id)?;
+        encoder.write_f64(self.event.x)?;
+        encoder.write_f64(self.event.y)?;
+        encoder.write_f64(self.event.delta_x)?;
+        encoder.write_f64(self.event.delta_y)
+    }
+}
+
+/// Dispatches one raw, observational native cursor-motion callback.
+///
+/// # Safety
+/// The host must pass a live initialized guest allocation and keep it alive until return, then
+/// release the input and response with the paired ABI dealloc exports.
+#[cfg(target_arch = "wasm32")]
+#[export_name = "sjml_v1_client_cursor_motion_dispatch"]
+pub unsafe extern "C" fn dispatch_cursor_motion(pointer: u32, length: u32) -> u64 {
+    // SAFETY: the host guarantees the input allocation's initialized live span.
+    unsafe {
+        crate::abi::dispatch_payload(pointer, length, |delivery: CursorMotionDelivery| {
+            if DISPATCHING.with(|active| active.replace(true)) {
+                return Err(SjmlError::new(
+                    ErrorCode::ServiceBusy,
+                    "reentrant client input dispatch is forbidden",
+                ));
+            }
+            let result = (|| {
+                let callback = CURSOR_MOTION_CALLBACKS
+                    .with(|registry| registry.borrow().get(delivery.callback_id))?;
+                let mut callback = callback.try_borrow_mut().map_err(|_| {
+                    SjmlError::new(
+                        ErrorCode::ServiceBusy,
+                        "raw cursor-motion callback is already active",
+                    )
+                })?;
+                callback(delivery.event)?;
+                Ok(false)
+            })();
+            DISPATCHING.with(|active| active.set(false));
+            result
+        })
+    }
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn invalid(message: &'static str) -> SjmlError {
     SjmlError::new(ErrorCode::InvalidArgument, message)
@@ -1276,8 +1577,11 @@ fn unsupported() -> SjmlError {
 mod tests {
     use super::{
         decode_cursor_position, decode_input_state, is_key_down, is_mouse_button_down,
-        ClientCursorMovedEvent, ClientInputAction, ClientInputEvent, CursorPosition,
-        GlobalKeyObservation, MouseScrollEvent, MAX_CURSOR_COORDINATE, MAX_CURSOR_MOVED_DELTA,
+        ClientCursorMotionEvent, ClientCursorMovedEvent, ClientInputAction, ClientInputEvent,
+        CursorPosition, GlobalKeyObservation, MouseScrollEvent, MAX_CURSOR_COORDINATE,
+        MAX_CURSOR_MOTION_CALLBACKS_PER_MODULE_PER_TICK, MAX_CURSOR_MOTION_COORDINATE,
+        MAX_CURSOR_MOTION_DELTA, MAX_CURSOR_MOTION_SUBSCRIPTIONS,
+        MAX_CURSOR_MOTION_SUBSCRIPTIONS_PER_MODULE, MAX_CURSOR_MOVED_DELTA,
         MAX_CURSOR_MOVED_SUBSCRIPTIONS, MAX_CURSOR_MOVED_SUBSCRIPTIONS_PER_MODULE,
         MAX_GLFW_KEY_CODE, MAX_MOUSE_BUTTON,
     };
@@ -1391,6 +1695,31 @@ mod tests {
             (0.0, 0.0, MAX_CURSOR_MOVED_DELTA + 1.0, 0.0),
         ] {
             assert!(ClientCursorMovedEvent::new(x, y, dx, dy).is_err());
+        }
+    }
+
+    #[test]
+    fn raw_cursor_motion_is_physical_pixel_bounded_and_has_separate_subscription_limits() {
+        assert_eq!(MAX_CURSOR_MOTION_SUBSCRIPTIONS, 64);
+        assert_eq!(MAX_CURSOR_MOTION_SUBSCRIPTIONS_PER_MODULE, 1);
+        assert_eq!(MAX_CURSOR_MOTION_CALLBACKS_PER_MODULE_PER_TICK, 16);
+        let event = ClientCursorMotionEvent::new(1920.0, 1080.0, -8.5, 1.25).unwrap();
+        assert_eq!(event.x, 1920.0);
+        assert_eq!(event.y, 1080.0);
+        assert_eq!(event.delta_x, -8.5);
+        assert_eq!(event.delta_y, 1.25);
+
+        for (x, y, dx, dy) in [
+            (f64::NAN, 0.0, 1.0, 0.0),
+            (0.0, f64::INFINITY, 1.0, 0.0),
+            (-1.0, 0.0, 1.0, 0.0),
+            (MAX_CURSOR_MOTION_COORDINATE + 1.0, 0.0, 1.0, 0.0),
+            (0.0, 0.0, f64::NAN, 0.0),
+            (0.0, 0.0, f64::INFINITY, 0.0),
+            (0.0, 0.0, 0.0, 0.0),
+            (0.0, 0.0, MAX_CURSOR_MOTION_DELTA + 1.0, 0.0),
+        ] {
+            assert!(ClientCursorMotionEvent::new(x, y, dx, dy).is_err());
         }
     }
 

@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.101.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.103.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.93.0"
+abi = "^1.95.0"
 minecraft = "~1.21.1"
-sjml = "^0.103.0"
+sjml = "^0.105.0"
 
 [[modules]]
 id = "main"
@@ -208,7 +208,7 @@ capabilities = ["entity.read", "entity.glowing.write"]
 | `player.break_speed.modify` | Returning `PlayerBreakSpeedAction::SetSpeed` from the synchronous server `player.break_speed` event; also requires `events.subscribe` and `events.cancel`. |
 | `world.read`, `world.write` | Reading loaded server-world state, including biome climate and block destroy speed; writes include blocks and properties, scheduled block ticks, time, weather, difficulty, Overworld spawn point, allowlisted boolean/integer game rules, and world-border settings, and require both. |
 | `entity.read`, `entity.spawn`, `entity.effect.apply`, `entity.effect.remove` | Reading player/entity snapshots including bounded living-entity equipment, spawning registered entities, or applying/removing registered effects; effect mutation also requires `entity.read`. |
-| `entity.equipment.write` | Adding one registered item's default stack to an empty slot of a loaded living non-player entity; also requires `entity.read`. Occupied slots are left unchanged. |
+| `entity.equipment.write` | Equipping a default stack from an item registered by the same package/module, or clearing a fixed equipment slot on a loaded living non-player entity; also requires `entity.read`. Occupied stacks are never replaced. |
 | `entity.mount.write` | Starting or stopping a non-forced ride between two loaded non-player entities; also requires `entity.read` and same-world live handles. |
 | `entity.glowing.write` | Changing the glowing flag on a loaded non-player entity; also requires `entity.read`. |
 | `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write`, `entity.custom_name.write`, `entity.ai.control`, `entity.navigation.write` | Removing loaded non-player entities, changing bounded velocity, fire duration, silent/no-gravity state, literal custom names, or the enabled-AI flag on loaded Mob entities, starting a bounded path for a loaded Mob, and reading/writing allowlisted living-entity and server-player attribute base values; entity writes also require `entity.read`. Navigation also requires a loaded target corridor and server execution. |
@@ -228,6 +228,7 @@ capabilities = ["entity.read", "entity.glowing.write"]
 | `menu.transfer` | Moving 1–64 existing items between declared editable-menu slots and the player inventory; also requires `entity.read` and `menu.open`, with at most 32 transfers per module per server tick. |
 | `client.input` | Receiving bounded client screen/global input events, named keybindings, and scaled cursor coordinates. |
 | `client.input.observe` | Receiving observe-only global keyboard notices after Minecraft processes the key and polling bounded held key/mouse-button state. |
+| `client.input.cursor_motion` | Receiving raw physical-client cursor positions and deltas on the client main thread, capped at 16 events per module per tick; callbacks cannot consume input. |
 | `client.input.screen_cancel` | Vetoing supported key presses, mouse releases, and mouse drags delivered to the active screen; does not cancel global gameplay keys or global mouse releases. |
 | `client.input.action_cancel` | Vetoing vanilla attack, use-item, or pick-block mappings through synchronous `client.action_attempt` callbacks on the physical-client thread; also requires `events.subscribe` and `events.cancel`. |
 | `client.input.screen_scroll` | Receiving/consuming active-screen scroll callbacks; requires `client.input`. |
@@ -239,6 +240,7 @@ capabilities = ["entity.read", "entity.glowing.write"]
 | `client.audio.play` | Playing a registered sound locally through Minecraft's sound manager and stopping a tracked one-shot owned by the module runtime. |
 | `client.audio.loop` | Starting/stopping bounded module-owned local loops; cleanup stops only that module's sounds. |
 | `client.audio.music` | Subscribing on a physical client to bounded situational music-selection callbacks; replacement tracks must be registered by that exact module. |
+| `client.audio.observe` | Receiving detached `client.sound_started` observations for streaming and non-streaming sounds; also requires `events.subscribe`, and does not control playback. |
 | `client.render` | Subscribing to HUD, screen, or world-render callbacks. |
 | `client.render.gui_layer.suppress` | Suppressing an exact vanilla GUI-layer ID on the physical client; requires a matching active client module, and does not provide arbitrary screen or render-state access. |
 | `client.render.opengl` | Using typed OpenGL resources and GUI textures. Most drawing also needs `client.render`. |

@@ -56,6 +56,8 @@ mod entity_health;
 mod entity_join_attempt;
 #[path = "gametest/entity_knockback_attempt.rs"]
 mod entity_knockback_attempt;
+#[path = "gametest/entity_left_level.rs"]
+mod entity_left_level;
 #[path = "gametest/entity_mount_attempt.rs"]
 mod entity_mount_attempt;
 #[path = "gametest/entity_navigation.rs"]
@@ -128,6 +130,8 @@ mod scoreboard_objectives;
 mod scoreboard_teams;
 #[path = "gametest/world_block_tag.rs"]
 mod world_block_tag;
+#[path = "gametest/world_chunk_lifecycle.rs"]
+mod world_chunk_lifecycle;
 #[path = "gametest/world_difficulty.rs"]
 mod world_difficulty;
 #[path = "gametest/world_fluid_state.rs"]
@@ -144,6 +148,8 @@ mod world_light_at;
 mod world_neighbor_update;
 #[path = "gametest/world_redstone_signal.rs"]
 mod world_redstone_signal;
+#[path = "gametest/world_save_events.rs"]
+mod world_save_events;
 #[path = "gametest/world_set_block_options.rs"]
 mod world_set_block_options;
 #[path = "gametest/world_spawn_point.rs"]
@@ -261,6 +267,9 @@ fn register_test_content() -> SjmlResult<()> {
             .redstone_signal(9)?
             .direct_redstone_signal(13)?
             .comparator_signal(7)?
+            .push_reaction(BlockPushReaction::Destroy)
+            .flammability(71)?
+            .fire_spread_speed(32)?
             .suffocating(false)
             .view_blocking(true)
             .emissive_rendering(true)
@@ -394,6 +403,15 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::set_item_max_damage("gametest_no_repair", 256)?;
     registry::set_item_no_repair("gametest_no_repair")?;
+    registry::register_item(
+        "gametest_repair_tag",
+        ItemDefinition {
+            max_stack_size: 1,
+            fire_resistant: false,
+        },
+    )?;
+    registry::set_item_max_damage("gametest_repair_tag", 256)?;
+    registry::set_item_repair_tag("gametest_repair_tag", "minecraft:planks")?;
     registry::register_integer_component(
         "player_charge",
         IntegerComponentDefinition::new(-10, 10)?,
@@ -641,7 +659,7 @@ fn register_test_content() -> SjmlResult<()> {
         "gametest_librarian_trade",
         VillagerTradeOffer::new(
             "minecraft:librarian",
-            1,
+            2,
             VillagerTradeItem::new("minecraft:emerald", 2)?,
             VillagerTradeItem::new("minecraft:diamond", 1)?,
         )?
@@ -702,6 +720,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     gameplay_events::initialize()?;
     player_tick::initialize()?;
     player_equipment_changed::initialize()?;
+    player_statistics::initialize()?;
     player_item_use_attempt::initialize()?;
     player_potion_use_attempt::initialize()?;
     player_totem_use_attempt::initialize()?;
@@ -724,6 +743,9 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     block_fertilize_attempt::initialize()?;
     block_farmland_trample_attempt::initialize()?;
     block_fluid_place_attempt::initialize()?;
+    world_chunk_lifecycle::initialize()?;
+    world_save_events::initialize()?;
+    entity_left_level::initialize()?;
     entity_tick::initialize()?;
     Ok(())
 }
@@ -2374,15 +2396,10 @@ fn inspect_player_controls(arguments: PlayerArguments) -> SjmlResult<String> {
             "player abilities GameTest must grant may_fly before the guest callback",
         ));
     }
-    let temporary_flying = !original_abilities.flying;
-    let temporary_abilities = (|| {
-        player::set_flying(target_player, temporary_flying)?;
-        player::abilities(target_player)
-    })();
-    let restore_flying = player::set_flying(target_player, original_abilities.flying);
-    let temporary_abilities = temporary_abilities?;
-    restore_flying?;
-    let restored_abilities = player::abilities(target_player)?;
+    player::set_flying(target_player, true)?;
+    player::set_may_fly(target_player, false)?;
+    let flight_cleared_with_may_fly = player::abilities(target_player)?;
+    let enabling_flight_without_may_fly = player::set_flying(target_player, true);
 
     let original_game_mode = player::game_mode(target_player)?;
     let temporary_game_mode = if original_game_mode == sjml::PlayerGameMode::Creative {
@@ -2429,11 +2446,26 @@ fn inspect_player_controls(arguments: PlayerArguments) -> SjmlResult<String> {
     restore_rotation?;
     let restored_motion = player::motion(target_player)?;
 
-    if temporary_abilities.flying != temporary_flying
-        || temporary_abilities.may_fly != original_abilities.may_fly
-        || temporary_abilities.invulnerable != original_abilities.invulnerable
-        || temporary_abilities.may_build != original_abilities.may_build
-        || restored_abilities != original_abilities
+    // Keep the final ability state after the earlier game-mode round-trip, which may reset it.
+    player::set_may_fly(target_player, true)?;
+    player::set_instabuild(target_player, true)?;
+    player::set_invulnerable(target_player, true)?;
+    player::set_may_build(target_player, false)?;
+    player::set_flying_speed(target_player, 0.25)?;
+    player::set_walking_speed(target_player, 0.2)?;
+    let changed_abilities = player::abilities(target_player)?;
+
+    if flight_cleared_with_may_fly.may_fly
+        || flight_cleared_with_may_fly.flying
+        || enabling_flight_without_may_fly.is_ok()
+        || !matches!(
+            enabling_flight_without_may_fly,
+            Err(ref failure) if failure.code() == ErrorCode::PermissionDenied
+        )
+        || !changed_abilities.may_fly
+        || changed_abilities.flying
+        || !changed_abilities.invulnerable
+        || changed_abilities.may_build
         || (changed_attack_damage.base_value - temporary_attack_damage).abs() > 0.0001
         || (restored_attack_damage.base_value - original_attack_damage.base_value).abs() > 0.0001
         || (changed_interaction_range.base_value - temporary_interaction_range).abs() > 0.0001
@@ -2457,7 +2489,7 @@ fn inspect_player_controls(arguments: PlayerArguments) -> SjmlResult<String> {
             "player control write contract failed",
         ));
     }
-    Ok("player control read/write/restore succeeded".to_owned())
+    Ok("player control ability writes and invariants succeeded".to_owned())
 }
 
 #[command(name = "player.inspect.vitals")]
@@ -3082,6 +3114,32 @@ fn inspect_entities(arguments: EntityArguments) -> SjmlResult<String> {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "entity air-supply write changed the wrong value or altered the maximum",
+        ));
+    }
+    let original_pickup = entity::can_pick_up_loot(pig_handle)?;
+    entity::set_persistence_required(pig_handle)?;
+    if !entity::is_persistence_required(pig_handle)? {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity persistence flag was not enabled",
+        ));
+    }
+    let pickup_probe = !original_pickup;
+    let changed_pickup = (|| {
+        entity::set_can_pick_up_loot(pig_handle, pickup_probe)?;
+        entity::can_pick_up_loot(pig_handle)
+    })();
+    let restored_pickup = entity::set_can_pick_up_loot(pig_handle, original_pickup);
+    let changed_pickup = changed_pickup?;
+    restored_pickup?;
+    let restored_pickup = entity::can_pick_up_loot(pig_handle)?;
+    if changed_pickup != pickup_probe
+        || restored_pickup != original_pickup
+        || !entity::is_persistence_required(pig_handle)?
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "Mob persistence or loot-pickup state did not follow its bounded lifecycle contract",
         ));
     }
     Ok(format!(

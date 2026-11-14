@@ -50,6 +50,16 @@ pub const CLIENT_ACTION_CANCEL_CAPABILITY: &str = "client.input.action_cancel";
 pub const PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY: &str = "player.advancement.observe";
 /// Separate grant required to observe player equipment changes.
 pub const PLAYER_EQUIPMENT_OBSERVE_CAPABILITY: &str = "player.equipment.observe";
+/// Separate grant required to observe committed changes to vanilla player statistics.
+pub const PLAYER_STATISTIC_OBSERVE_CAPABILITY: &str = "player.statistics.observe";
+/// Maximum callbacks invoked for one committed player statistic change.
+pub const MAX_PLAYER_STATISTIC_CHANGED_CALLBACKS: usize = 64;
+/// Event name for committed vanilla player statistic value changes.
+pub const PLAYER_STATISTIC_CHANGED_EVENT_NAME: &str = "player.statistic_changed";
+/// Maximum UTF-8 bytes for a statistic type or target ID in one statistic change event.
+pub const MAX_PLAYER_STATISTIC_ID_BYTES: usize = 256;
+/// Maximum schema-v1 payload bytes for a detached player statistic change event.
+pub const MAX_PLAYER_STATISTIC_CHANGED_PAYLOAD_BYTES: usize = 572;
 /// Maximum count represented by one detached `player.equipment_changed` item snapshot.
 pub const MAX_PLAYER_EQUIPMENT_ITEM_COUNT: u32 = 1_000_000;
 /// Maximum callbacks invoked for one physical-client action attempt.
@@ -349,6 +359,93 @@ impl StableDecode for PlayerEquipmentChanged {
         validate_player_equipment_changed(&event)?;
         Ok(event)
     }
+}
+
+/// Non-cancellable notification for one committed vanilla statistic value change.
+///
+/// The host delivers it after the server's statistic write path completes. Multiple writes during
+/// one server tick may be delivered separately, and canceled or redirected NeoForge award events
+/// are omitted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerStatisticChanged {
+    /// Canonical UUID string of the player whose statistic changed.
+    pub player_id: String,
+    /// Registry ID of the statistic family, such as `minecraft:custom` or `minecraft:mined`.
+    pub statistic_type_id: String,
+    /// Registry ID of the statistic target, such as `minecraft:play_time` or `minecraft:stone`.
+    pub statistic_id: String,
+    /// Signed counter value immediately before the accepted write.
+    pub previous_value: i32,
+    /// Signed counter value after the accepted write.
+    pub current_value: i32,
+}
+
+impl StableEncode for PlayerStatisticChanged {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_statistic_changed(self)?;
+        encoder.write_u32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encode_bounded_event_string(&self.statistic_type_id, encoder)?;
+        encode_bounded_event_string(&self.statistic_id, encoder)?;
+        encoder.write_i32(self.previous_value)?;
+        encoder.write_i32(self.current_value)
+    }
+}
+
+impl StableDecode for PlayerStatisticChanged {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let version = decoder.read_u32()?;
+        if version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!("PlayerStatisticChanged schema version {version} is unsupported"),
+            ));
+        }
+        let event = Self {
+            player_id: decode_player_statistic_string(decoder)?,
+            statistic_type_id: decode_player_statistic_string(decoder)?,
+            statistic_id: decode_player_statistic_string(decoder)?,
+            previous_value: decoder.read_i32()?,
+            current_value: decoder.read_i32()?,
+        };
+        validate_player_statistic_changed(&event)?;
+        Ok(event)
+    }
+}
+
+fn validate_player_statistic_changed(event: &PlayerStatisticChanged) -> SjmlResult<()> {
+    let invalid = || {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player statistic change contains an invalid UUID, registry ID, or unchanged value",
+        )
+    };
+    if !canonical_uuid(&event.player_id)
+        || !canonical_resource_location(&event.statistic_type_id)
+        || !canonical_resource_location(&event.statistic_id)
+        || event.previous_value == event.current_value
+    {
+        return Err(invalid());
+    }
+    if event.statistic_type_id.len() > MAX_PLAYER_STATISTIC_ID_BYTES
+        || event.statistic_id.len() > MAX_PLAYER_STATISTIC_ID_BYTES
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player statistic registry ID exceeds the 256-byte limit",
+        ));
+    }
+    Ok(())
+}
+
+fn decode_player_statistic_string(decoder: &mut Decoder<'_>) -> SjmlResult<String> {
+    let length = decoder.read_length(MAX_PLAYER_STATISTIC_ID_BYTES)?;
+    String::from_utf8(decoder.read_raw(length)?.to_vec()).map_err(|_| {
+        SjmlError::new(
+            ErrorCode::InvalidUtf8,
+            "player statistic event contains invalid UTF-8",
+        )
+    })
 }
 
 fn encode_equipment_item_option(

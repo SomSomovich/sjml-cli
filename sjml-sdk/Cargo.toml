@@ -38,6 +38,10 @@ name = "client_cursor_moved"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "client_cursor_motion"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "screen_mouse_released"
 crate-type = ["cdylib"]
 
@@ -79,6 +83,22 @@ crate-type = ["cdylib"]
 
 [[example]]
 name = "entity_teleport_attempt"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "world_chunk_lifecycle"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "entity_left_level"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "entity_orientation"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "player_statistic_changed"
 crate-type = ["cdylib"]
 
 [dependencies]

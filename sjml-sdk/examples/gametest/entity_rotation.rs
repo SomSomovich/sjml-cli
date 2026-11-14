@@ -22,19 +22,19 @@ fn reads_changes_and_restores_rotation(arguments: EntityRotationArguments) -> Sj
             )
         })?;
 
-    let original = entity::rotation(handle)?;
-    let replacement = entity::EntityRotation::new(123.25, -22.5)?;
-    entity::set_rotation(handle, replacement)?;
-    let observed = entity::rotation(handle);
-    let restored = entity::set_rotation(handle, original);
+    let original = entity::orientation(handle)?;
+    let replacement = entity::EntityOrientation::new(123.25, -22.5, 81.75)?;
+    entity::set_orientation(handle, replacement)?;
+    let observed = entity::orientation(handle);
+    let restored = entity::set_orientation(handle, original);
     let observed = observed?;
     restored?;
 
     if observed != replacement {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "the guest did not observe the temporary entity rotation",
+            "the guest did not observe the temporary yaw, pitch, and head yaw",
         ));
     }
-    Ok("guest read, changed, reread, and restored the pig rotation".to_owned())
+    Ok("guest read, changed, reread, and restored the pig yaw, pitch, and head yaw".to_owned())
 }

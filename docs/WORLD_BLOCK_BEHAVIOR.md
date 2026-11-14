@@ -30,7 +30,9 @@ finite and limited to `0.0..=4.0`; light is `0..=15`. The piston reactions are
 `Normal`, `Destroy`, `Block`, `Ignore`, and `PushOnly`. Sound is selected from
 the bounded `BlockSound` list: stone, wood, gravel, grass, metal, glass, sand,
 wool, snow, slime, honey, netherite, or amethyst. `ignited_by_lava` enables the
-vanilla lava-ignition property.
+vanilla lava-ignition property. To vary piston behavior by state, declare Boolean or bounded
+integer state properties and use `BlockStateBehavior::push_reaction` with
+`registry::set_block_state_behavior`; see [exact-state behavior](BLOCK_STATE_BEHAVIOR.md).
 
 `register_block` retains its existing import and defaults. Call
 `registry::set_block_behavior` after it during the same registration callback

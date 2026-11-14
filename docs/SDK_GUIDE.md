@@ -25,11 +25,12 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.101.0
-and core ABI 1.93.0. Live
+unverified. This guide describes the private SDK workspace target 0.103.0
+and core ABI 1.95.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
-SDK 0.101.0 adds loaded-only collision-box and fluid-flow queries, entity bounds and air supply, player movement and air snapshots, guarded air-supply writes, fall-distance resets, entity state setters, and item fire-resistance/no-repair defaults.
+SDK 0.103.0 adds exact-state piston/fire behavior for registered blocks, bounded drop suppression during block updates, item repair tags and player-stack glint controls, non-player entity orientation/equipment/drop-chance APIs, raw client cursor motion, and observational sound-start callbacks.
+SDK 0.102.0 adds player ability writes, mob persistence and loot-pickup controls, chunk lifecycle notifications, client resource-reload and chat-history APIs, world-save and entity-left-level events, live villager trade access, and player statistic-change notifications.
 SDK 0.100.0 adds loaded-only biome climate and block destroy-speed reads, a
 seven-flag entity snapshot, synchronous player break-speed actions, vanilla
 sign text access, static redstone output declarations, item glint defaults,
@@ -374,9 +375,12 @@ global key press/release/repeat and mouse-button press/release events. Use
 `client_input::subscribe_scroll` for observational global mouse-wheel events.
 The subscription also requires `client.input` and runs on the client main thread.
 Use `client_input::subscribe_cursor_moved` for sampled GUI-coordinate changes
-under `client.input.observe`; NeoForge has no raw global mouse-move hook, so it
-reports at most one bounded non-zero delta after each client tick. See
-[sampled cursor movement](CLIENT_CURSOR_MOVED.md) for baseline reset behavior.
+under `client.input.observe`; it reports at most one bounded non-zero delta
+after each client tick. For each native cursor event in physical window pixels,
+use `client_input::subscribe_cursor_motion` with the separate
+`client.input.cursor_motion` capability. Raw handlers run synchronously and
+receive at most 16 events per module per client tick. See [sampled cursor
+movement](CLIENT_CURSOR_MOVED.md) and [raw cursor motion](CLIENT_CURSOR_MOTION.md).
 NeoForge exposes global key input as observational only; only a mouse-button
 press can be consumed by returning `true`. Releases can be observed but are
 never consumed. These detached input values include GLFW codes and modifier
@@ -487,7 +491,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.101.0"
+sjml-sdk = "0.103.0"
 ```
 
 For development against this checkout, use
@@ -512,7 +516,7 @@ workspace adds the entity AI goals and event types described above.
 | [`client_camera`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_camera/) | Module-owned local FOV multipliers applied to Minecraft's computed modifier. |
 | [`client_localization`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_localization/) | Bounded physical-client lookup through the active Minecraft language resources. |
 | [`client_music`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_music/) | Owner-scoped callbacks that keep, stop, or select same-module registered situational music. |
-| [`client_input`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_input/) | Observe-only global key notices, mouse-button and wheel events, bounded cursor position and sampled cursor-movement callbacks, held key/mouse polling, and key subscription handles. |
+| [`client_input`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_input/) | Observe-only global key notices, mouse-button and wheel events, bounded cursor position, sampled GUI cursor callbacks, raw physical-window cursor callbacks, held key/mouse polling, and key subscription handles. |
 | [`client_keybindings`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_keybindings/) | Named client key mappings with bounded callbacks and Controls-screen rebinding. |
 | [`chat_messages`](https://docs.rs/sjml-sdk/0.92.0/sjml/chat_messages/) | Local chat-message snapshots, separately capability-gated filtering, and rich local replacements. |
 | [`client_notifications`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
@@ -527,7 +531,7 @@ workspace adds the entity AI goals and event types described above.
 | [`gl`](https://docs.rs/sjml-sdk/0.92.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
 | [`host`](https://docs.rs/sjml-sdk/0.92.0/sjml/host/) | ABI version query and host logging. |
 | [`inventory`](https://docs.rs/sjml-sdk/0.92.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, integer/boolean component updates, and slot transfers. Block inventories support custom names, bounded count and durability writes, preflighted moves, and enchantment reads/writes/removal on loaded stacks. |
-| [`player_inventory`](https://docs.rs/sjml-sdk/0.92.0/sjml/player_inventory/) | Detached snapshots, bounded slot set/clear, stack-count changes, transactional component-preserving slot moves, registered-item grants with returned overflow, durability, custom names, plain-text lore, same-module integer/boolean components, and enchantment reads/writes/removal. See [player inventory writes](PLAYER_INVENTORY_WRITES.md) and [lore](PLAYER_INVENTORY_LORE.md). |
+| [`player_inventory`](https://docs.rs/sjml-sdk/0.92.0/sjml/player_inventory/) | Detached snapshots, bounded slot set/clear, stack-count changes, transactional component-preserving slot moves, registered-item grants with returned overflow, durability, custom names, per-stack glint override, plain-text lore, same-module integer/boolean components, and enchantment reads/writes/removal. See [player inventory writes](PLAYER_INVENTORY_WRITES.md), [per-stack glint](PLAYER_INVENTORY_GLINT.md), and [lore](PLAYER_INVENTORY_LORE.md). |
 | [`menu`](https://docs.rs/sjml-sdk/0.92.0/sjml/menu/) | Bounded read-only menus with owner-scoped replacement and action callbacks, plus editable menus with allowlisted slots and bounded transfers of existing items. |
 | [`network`](https://docs.rs/sjml-sdk/0.92.0/sjml/network/) | Declared network channels, subscriptions, sends, authenticated context, and replies. |
 | [`scoreboard`](https://docs.rs/sjml-sdk/0.92.0/sjml/scoreboard/) | Bounded reads and writes to existing vanilla objectives; module-owned dummy objective creation, display-name updates, scores and fixed-slot assignment; and owner-scoped teams, display options, prefixes/suffixes, and online-player membership. |
@@ -2290,11 +2294,13 @@ durability for main hand, offhand, and the four armor slots. It requires only
 components, or mutable stacks. See [player equipment](PLAYER_EQUIPMENT.md).
 
 `player::abilities(handle)` reads the current `may_fly`, `flying`,
-`invulnerable`, and `may_build` flags under `entity.read`. The host exposes no
-setter for those administrative/game-mode-owned values. `player::set_flying`
-changes only the flying flag and requires `player.abilities.write`; enabling
-flight is denied unless `may_fly` is already true. See
-[player abilities](PLAYER_ABILITIES.md).
+`invulnerable`, and `may_build` flags under `entity.read`. `player::set_flying`
+changes only the flying flag; `set_may_fly`, `set_instabuild`, `set_invulnerable`,
+`set_may_build`, `set_flying_speed`, and `set_walking_speed` change the other
+vanilla ability values. All writes require `player.abilities.write`; enabling
+flight is denied unless `may_fly` is already true, and disabling `may_fly` also
+clears current flight. Ability speeds are bounded to `0.0..=0.5`. See
+[player abilities](PLAYER_ABILITIES.md) and [player ability writes](PLAYER_ABILITY_WRITES.md).
 
 `player::teleport(handle: PlayerHandle, destination: player::PlayerTeleport) ->
 SjmlResult<()>` sends an authoritative same-dimension move. Create the
@@ -2332,7 +2338,7 @@ postcondition fails. See [player inventory stack moves](PLAYER_INVENTORY_MOVE.md
 
 ## Loaded entity snapshots and effect application
 
-Use [`entity::equipment`](ENTITY_EQUIPMENT.md) to read the six fixed vanilla equipment slots of a loaded living non-player entity. It requires `entity.read` and returns detached item IDs, counts, and durability only. `entity::try_equip_default` can put one existing item's default stack into an empty fixed slot; it also requires `entity.equipment.write` and never replaces an occupied stack. See [loaded entity equipment](ENTITY_EQUIPMENT.md).
+Use [`entity::equipment`](ENTITY_EQUIPMENT.md) to read the six fixed vanilla equipment slots of a loaded living non-player entity. It requires `entity.read` and returns detached item IDs, counts, and durability only. `entity::try_equip_default` can put one default stack from an item registered by this package/module into an empty fixed slot; `entity::clear_equipment` clears a selected slot through Minecraft's synchronized equipment path. Both writes also require `entity.equipment.write` and never accept guest-created stacks or components. See [loaded entity equipment](ENTITY_EQUIPMENT.md).
 
 Request `entity.read` in the module manifest and grant it to the same
 package/module in `config/sjml-permissions.toml`. This is a global read-only
@@ -2411,7 +2417,7 @@ never loads chunks and returns whether Minecraft accepted the path. It does not
 expose path nodes or custom pathfinding callbacks. See
 [bounded entity navigation](ENTITY_NAVIGATION.md).
 
-Loaded non-player entities also expose bounded yaw/pitch reads and writes with `entity::rotation` and `entity::set_rotation`; writes require `entity.read` plus `entity.rotation.write`. See [entity rotation](ENTITY_ROTATION.md). They also expose a bounded `entity::vitals` snapshot and normal-path `entity::heal` request; healing requires `entity.read` plus `entity.health.write`, while reads require `entity.read`. See [entity vitals and healing](ENTITY_HEALTH.md).
+Loaded non-player entities expose bounded yaw/pitch reads and writes with `entity::rotation` and `entity::set_rotation`, plus yaw/pitch/head-yaw snapshots and writes with `entity::orientation` and `entity::set_orientation`; writes require `entity.read` plus `entity.rotation.write`. See [entity rotation](ENTITY_ROTATION.md). They also expose a bounded `entity::vitals` snapshot and normal-path `entity::heal` request; healing requires `entity.read` plus `entity.health.write`, while reads require `entity.read`. See [entity vitals and healing](ENTITY_HEALTH.md).
 
 Loaded, unmounted non-player entities can be moved within their current dimension with `entity::teleport(handle, x, y, z)`. It requires `entity.read` plus `entity.teleport`, validates the full destination bounding box against build height and the world border, and requires every touched chunk to be loaded already. It runs on the server thread and never loads chunks; mounted entities and stale handles are rejected. See [entity teleport](ENTITY_TELEPORT.md).
 

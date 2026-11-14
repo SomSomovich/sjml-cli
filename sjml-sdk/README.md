@@ -5,7 +5,7 @@ crate name is `sjml`; guest projects normally depend on it like this:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.101.0"
+sjml-sdk = "0.103.0"
 ```
 
 SJML guests target `wasm32-unknown-unknown`. The SDK also builds natively so
@@ -246,7 +246,7 @@ SDK 0.79.0 adds an owner-scoped synchronous `item.use_on_entity` callback for re
 SDK 0.83.0 adds owner-scoped player boss bars, detached non-player living-entity vitals with bounded healing, and exact-state emitted-light overrides for registered blocks. See `docs/PLAYER_BOSS_BARS.md`, `docs/ENTITY_HEALTH.md`, and `docs/BLOCK_STATE_LIGHT.md` in the workspace.
 
 SDK 0.82.0 adds static geometry overrides for exact Boolean/integer block-state combinations; see `docs/BLOCK_STATE_SHAPES.md` in the workspace.
-The state-aware block API also supports exact-state sound, redstone conductor, suffocation, view-blocking, emissive-rendering, and post-process overrides through `registry::set_block_state_behavior`; see `docs/BLOCK_STATE_BEHAVIOR.md` in the workspace. Minecraft 1.21.1 exposes friction, movement factors, lava ignition, piston reaction, and destroy speed as block-wide behavior, so these remain configured by `BlockBehavior`.
+The state-aware block API also supports exact-state sound, redstone conductor, suffocation, view-blocking, emissive-rendering, post-process, friction, flammability, fire-spread speed, and piston-reaction overrides through `registry::set_block_state_behavior`; see `docs/BLOCK_STATE_BEHAVIOR.md` and `docs/BLOCK_STATE_FIRE_BEHAVIOR.md` in the workspace. Minecraft 1.21.1 keeps movement factors, lava ignition, and destroy speed block-wide, so these remain configured or observed through block-wide APIs.
 SDK 0.81.0 adds bounded Boolean and integer state properties for registered blocks; see `docs/BLOCK_STATE_PROPERTIES.md` in the workspace.
 SDK 0.80.0 adds bounded static vanilla and modded attribute modifiers for registered items, including operation and equipment-slot selection. See `docs/ITEM_ATTRIBUTE_MODIFIERS.md` in the workspace.
 The block-entity API also supports a bounded typed persistent key/value store for block entities registered by the calling module. It requires separate data read/write grants; see `docs/BLOCK_ENTITY_PERSISTENT_DATA.md` in the workspace.

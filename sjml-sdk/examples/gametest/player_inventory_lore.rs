@@ -6,6 +6,7 @@ use sjml::{
 #[sjml(version = 1)]
 struct PlayerInventoryLoreArguments {
     player_uuid: String,
+    action: String,
 }
 
 fn find_player(uuid: &str) -> SjmlResult<PlayerHandle> {
@@ -20,10 +21,7 @@ fn find_player(uuid: &str) -> SjmlResult<PlayerHandle> {
     ))
 }
 
-#[command(name = "player.inventory.lore.set")]
-fn check_and_set_player_inventory_lore(
-    arguments: PlayerInventoryLoreArguments,
-) -> SjmlResult<String> {
+fn set_player_inventory_lore(arguments: &PlayerInventoryLoreArguments) -> SjmlResult<String> {
     let player = find_player(&arguments.player_uuid)?;
     let slot = 1;
     let initial = player_inventory::read_lore(player, slot)?;
@@ -101,8 +99,7 @@ fn check_and_set_player_inventory_lore(
     Ok("player inventory lore read, set, and validation succeeded".to_owned())
 }
 
-#[command(name = "player.inventory.lore.clear")]
-fn clear_player_inventory_lore(arguments: PlayerInventoryLoreArguments) -> SjmlResult<String> {
+fn clear_player_inventory_lore(arguments: &PlayerInventoryLoreArguments) -> SjmlResult<String> {
     let player = find_player(&arguments.player_uuid)?;
     let slot = 1;
     player_inventory::clear_lore(player, slot)?;
@@ -113,4 +110,16 @@ fn clear_player_inventory_lore(arguments: PlayerInventoryLoreArguments) -> SjmlR
         ));
     }
     Ok("player inventory lore clear succeeded".to_owned())
+}
+
+#[command(name = "player.inventory.lore")]
+fn update_player_inventory_lore(arguments: PlayerInventoryLoreArguments) -> SjmlResult<String> {
+    match arguments.action.as_str() {
+        "set" => set_player_inventory_lore(&arguments),
+        "clear" => clear_player_inventory_lore(&arguments),
+        _ => Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "lore action must be set or clear",
+        )),
+    }
 }

@@ -66,11 +66,53 @@ fn native_entity_api_reports_unsupported_imports() {
         ErrorCode::UnknownErrorCode
     );
     assert_eq!(
+        entity::orientation(handle).unwrap_err().code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::set_orientation(
+            handle,
+            entity::EntityOrientation::new(180.0, -35.0, 125.0).unwrap(),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::try_equip_default(
+            handle,
+            entity::EntityEquipmentSlot::MainHand,
+            "sjml_game_test:content/gametest_ruby",
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
+        entity::clear_equipment(handle, entity::EntityEquipmentSlot::MainHand)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UnknownErrorCode
+    );
+    assert_eq!(
         entity::set_rotation(
             handle,
             entity::EntityRotation {
                 yaw: f32::INFINITY,
                 pitch: 0.0,
+            },
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        entity::set_orientation(
+            handle,
+            entity::EntityOrientation {
+                yaw: 0.0,
+                pitch: 0.0,
+                head_yaw: f32::NAN,
             },
         )
         .unwrap_err()
@@ -346,6 +388,47 @@ fn entity_rotation_uses_schema_v1_yaw_then_pitch_and_checks_finite_bounds() {
         entity::EntityRotation::new(0.0, 90.01).unwrap_err().code(),
         ErrorCode::InvalidArgument
     );
+}
+
+#[test]
+fn entity_orientation_uses_schema_v1_yaw_pitch_head_yaw_and_checks_bounds() {
+    let orientation = entity::EntityOrientation {
+        yaw: -270.0,
+        pitch: 45.5,
+        head_yaw: 315.25,
+    };
+    let mut expected = 1_u32.to_le_bytes().to_vec();
+    expected.extend_from_slice(&orientation.yaw.to_le_bytes());
+    expected.extend_from_slice(&orientation.pitch.to_le_bytes());
+    expected.extend_from_slice(&orientation.head_yaw.to_le_bytes());
+    assert_eq!(expected.len(), 16);
+    assert_eq!(to_bytes(&orientation).unwrap(), expected);
+    assert_eq!(
+        from_bytes::<entity::EntityOrientation>(&expected).unwrap(),
+        orientation
+    );
+
+    assert_eq!(
+        entity::EntityOrientation::new(36_000.0, -90.0, -36_000.0)
+            .unwrap()
+            .head_yaw,
+        -36_000.0
+    );
+    for (yaw, pitch, head_yaw) in [
+        (f32::INFINITY, 0.0, 0.0),
+        (0.0, f32::NAN, 0.0),
+        (0.0, 91.0, 0.0),
+        (36_000.1, 0.0, 0.0),
+        (0.0, 0.0, f32::NEG_INFINITY),
+        (0.0, 0.0, 36_000.1),
+    ] {
+        assert_eq!(
+            entity::EntityOrientation::new(yaw, pitch, head_yaw)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
 }
 
 #[test]

@@ -20,7 +20,8 @@ const MAX_BLOCK_SHAPE_BOXES_PAYLOAD_BYTES: usize =
     BLOCK_SHAPE_BOXES_HEADER_BYTES + MAX_BLOCK_SHAPE_BOXES * BLOCK_SHAPE_BOX_BYTES;
 const BLOCK_STATE_LIGHT_LEVEL_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES: usize = 512;
-const BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION: u32 = 3;
+const BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION: u32 = 5;
+const MAX_BLOCK_STATE_FIRE_VALUE: u32 = 300;
 const MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES: usize = 512;
 const BLOCK_STATE_BEHAVIOR_SOUND: u32 = 1;
 const BLOCK_STATE_BEHAVIOR_REDSTONE_CONDUCTOR: u32 = 1 << 1;
@@ -32,6 +33,9 @@ const BLOCK_STATE_BEHAVIOR_FRICTION: u32 = 1 << 6;
 const BLOCK_STATE_BEHAVIOR_REDSTONE_SIGNAL: u32 = 1 << 7;
 const BLOCK_STATE_BEHAVIOR_DIRECT_REDSTONE_SIGNAL: u32 = 1 << 8;
 const BLOCK_STATE_BEHAVIOR_COMPARATOR_SIGNAL: u32 = 1 << 9;
+const BLOCK_STATE_BEHAVIOR_PUSH_REACTION: u32 = 1 << 10;
+const BLOCK_STATE_BEHAVIOR_FLAMMABILITY: u32 = 1 << 11;
+const BLOCK_STATE_BEHAVIOR_FIRE_SPREAD_SPEED: u32 = 1 << 12;
 /// Maximum number of vanilla status effects on one registered food item.
 pub const MAX_ITEM_FOOD_EFFECTS: usize = 8;
 /// Maximum UTF-8 size of one fully qualified vanilla or modded effect ID.
@@ -46,6 +50,8 @@ pub const MAX_ITEM_MAX_STACK_SIZE: u32 = 99;
 pub const MAX_ITEM_USE_DURATION_TICKS: u32 = 72_000;
 /// Maximum UTF-8 size of one fully qualified static item crafting remainder ID.
 pub const MAX_ITEM_CRAFTING_REMAINDER_ID_BYTES: usize = 256;
+/// Maximum UTF-8 size of one fully qualified item repair-tag ID.
+pub const MAX_ITEM_REPAIR_TAG_ID_BYTES: usize = 256;
 /// Maximum number of vanilla attribute modifiers on one registered item.
 pub const MAX_ITEM_ATTRIBUTE_MODIFIERS: usize = 16;
 /// Maximum absolute static modifier amount on one registered item.
@@ -639,8 +645,8 @@ pub struct BlockBehavior {
 ///
 /// Fields left unset retain the registered block's existing behavior. These overrides are static
 /// and are selected from the immutable state properties; they never call guest code at runtime.
-/// Friction uses NeoForge's state-aware block extension. Speed and jump factors are only
-/// block-wide in Minecraft 1.21.1 and belong on [`BlockBehavior`].
+/// Friction, flammability, and fire spread speed use NeoForge's state-aware block extension.
+/// Speed and jump factors are only block-wide in Minecraft 1.21.1 and belong on [`BlockBehavior`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BlockStateBehavior {
     friction: Option<f32>,
@@ -653,6 +659,9 @@ pub struct BlockStateBehavior {
     redstone_signal: Option<u32>,
     direct_redstone_signal: Option<u32>,
     comparator_signal: Option<u32>,
+    push_reaction: Option<BlockPushReaction>,
+    flammability: Option<u32>,
+    fire_spread_speed: Option<u32>,
 }
 
 impl BlockStateBehavior {
@@ -669,6 +678,9 @@ impl BlockStateBehavior {
             redstone_signal: None,
             direct_redstone_signal: None,
             comparator_signal: None,
+            push_reaction: None,
+            flammability: None,
+            fire_spread_speed: None,
         }
     }
 
@@ -738,6 +750,43 @@ impl BlockStateBehavior {
         Ok(self)
     }
 
+    /// Sets the flammability of this exact block state, from 0 through 300.
+    ///
+    /// Minecraft uses this value when fire checks whether to consume the block. If unset, the
+    /// state's existing NeoForge flammability behavior is preserved.
+    pub fn flammability(mut self, value: u32) -> SjmlResult<Self> {
+        if value > MAX_BLOCK_STATE_FIRE_VALUE {
+            return Err(invalid_argument(
+                "block-state flammability must be between 0 and 300",
+            ));
+        }
+        self.flammability = Some(value);
+        Ok(self)
+    }
+
+    /// Sets the fire spread speed for this exact block state, from 0 through 300.
+    ///
+    /// Minecraft uses this value to determine how quickly nearby fire grows. If unset, the
+    /// state's existing NeoForge fire-spread behavior is preserved.
+    pub fn fire_spread_speed(mut self, value: u32) -> SjmlResult<Self> {
+        if value > MAX_BLOCK_STATE_FIRE_VALUE {
+            return Err(invalid_argument(
+                "block-state fire spread speed must be between 0 and 300",
+            ));
+        }
+        self.fire_spread_speed = Some(value);
+        Ok(self)
+    }
+
+    /// Sets the piston reaction for this exact block state.
+    ///
+    /// NeoForge's state-aware `IBlockExtension#getPistonPushReaction` hook is used. If unset,
+    /// the state keeps the block-wide reaction from [`BlockBehavior`].
+    pub const fn push_reaction(mut self, reaction: BlockPushReaction) -> Self {
+        self.push_reaction = Some(reaction);
+        self
+    }
+
     /// Overrides whether this state blocks entity suffocation checks.
     pub const fn suffocating(mut self, value: bool) -> Self {
         self.suffocating = Some(value);
@@ -773,6 +822,9 @@ impl BlockStateBehavior {
             && self.redstone_signal.is_none()
             && self.direct_redstone_signal.is_none()
             && self.comparator_signal.is_none()
+            && self.push_reaction.is_none()
+            && self.flammability.is_none()
+            && self.fire_spread_speed.is_none()
         {
             return Err(invalid_argument(
                 "block-state behavior must set at least one property",
@@ -781,7 +833,7 @@ impl BlockStateBehavior {
         Ok(())
     }
 
-    fn abi_values(self) -> (u32, i32, u32, u32, u32, u32, u32) {
+    fn abi_values(self) -> (u32, i32, u32, u32, u32, u32, u32, u32, u32, u32) {
         let mut mask = 0;
         let mut values = 0;
         if self.friction.is_some() {
@@ -798,6 +850,15 @@ impl BlockStateBehavior {
         }
         if self.comparator_signal.is_some() {
             mask |= BLOCK_STATE_BEHAVIOR_COMPARATOR_SIGNAL;
+        }
+        if self.push_reaction.is_some() {
+            mask |= BLOCK_STATE_BEHAVIOR_PUSH_REACTION;
+        }
+        if self.flammability.is_some() {
+            mask |= BLOCK_STATE_BEHAVIOR_FLAMMABILITY;
+        }
+        if self.fire_spread_speed.is_some() {
+            mask |= BLOCK_STATE_BEHAVIOR_FIRE_SPREAD_SPEED;
         }
         for (field, value) in [
             (
@@ -827,6 +888,9 @@ impl BlockStateBehavior {
             self.redstone_signal.unwrap_or(0),
             self.direct_redstone_signal.unwrap_or(0),
             self.comparator_signal.unwrap_or(0),
+            self.push_reaction.map_or(0, |reaction| reaction as u32),
+            self.flammability.unwrap_or(0),
+            self.fire_spread_speed.unwrap_or(0),
         )
     }
 }
@@ -1838,6 +1902,13 @@ extern "C" {
     fn imported_set_item_fire_resistant(path_pointer: i32, path_length: i32, enabled: i32) -> i32;
     #[link_name = "set_item_no_repair"]
     fn imported_set_item_no_repair(path_pointer: i32, path_length: i32) -> i32;
+    #[link_name = "set_item_repair_tag"]
+    fn imported_set_item_repair_tag(
+        item_path_pointer: i32,
+        item_path_length: i32,
+        tag_id_pointer: i32,
+        tag_id_length: i32,
+    ) -> i32;
     #[link_name = "set_item_enchantment_value"]
     fn imported_set_item_enchantment_value(path_pointer: i32, path_length: i32, value: i32) -> i32;
     #[link_name = "set_item_attribute_modifier"]
@@ -2447,6 +2518,37 @@ pub fn set_item_no_repair(item_path: &str) -> SjmlResult<()> {
     }
 }
 
+/// Configures the vanilla anvil repair ingredient tag for a damageable standalone item.
+///
+/// Call this from `#[mod_register]` after [`register_item`] and [`set_item_max_damage`] for the
+/// same module-owned item. `tag_id` must be a canonical, fully qualified item tag ID of at most
+/// [`MAX_ITEM_REPAIR_TAG_ID_BYTES`] UTF-8 bytes, such as `minecraft:planks`. The tag is evaluated
+/// by Minecraft's `Item.isValidRepairItem` hook when the item is used as the first anvil input;
+/// members of the tag are accepted as repair ingredients. The API does not create stacks or
+/// change existing items. Each standalone item accepts one repair tag, and it cannot be combined
+/// with [`set_item_no_repair`].
+pub fn set_item_repair_tag(item_path: &str, tag_id: &str) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    validate_registry_id(tag_id, "item repair tag ID", MAX_ITEM_REPAIR_TAG_ID_BYTES)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: both bounded UTF-8 slices remain live while the synchronous host copies them.
+        let status = unsafe {
+            imported_set_item_repair_tag(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as i32,
+                tag_id.as_ptr() as usize as u32 as i32,
+                tag_id.len() as i32,
+            )
+        };
+        return status_result(status, "host rejected the item repair-tag declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported_target())
+    }
+}
+
 /// Sets vanilla enchantability for an item declared earlier by this module.
 ///
 /// Use a value from `0..=255` during `#[mod_register]`, after `register_item` or registration of a
@@ -3012,6 +3114,9 @@ fn encode_block_state_behavior(
         redstone_signal,
         direct_redstone_signal,
         comparator_signal,
+        push_reaction,
+        flammability,
+        fire_spread_speed,
     ) = behavior.abi_values();
     payload.extend_from_slice(&mask.to_le_bytes());
     payload.extend_from_slice(&sound.to_le_bytes());
@@ -3020,6 +3125,9 @@ fn encode_block_state_behavior(
     payload.extend_from_slice(&redstone_signal.to_le_bytes());
     payload.extend_from_slice(&direct_redstone_signal.to_le_bytes());
     payload.extend_from_slice(&comparator_signal.to_le_bytes());
+    payload.extend_from_slice(&push_reaction.to_le_bytes());
+    payload.extend_from_slice(&flammability.to_le_bytes());
+    payload.extend_from_slice(&fire_spread_speed.to_le_bytes());
     if payload.len() > MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES {
         return Err(invalid_argument(
             "block-state behavior payload exceeds its supported byte limit",
@@ -5642,12 +5750,17 @@ mod tests {
             .unwrap()
             .comparator_signal(7)
             .unwrap()
+            .push_reaction(BlockPushReaction::PushOnly)
+            .flammability(71)
+            .unwrap()
+            .fire_spread_speed(32)
+            .unwrap()
             .suffocating(false)
             .view_blocking(true)
             .emissive_rendering(true)
             .post_process(false);
         let encoded = encode_block_state_behavior(&[("powered", "true")], behavior).unwrap();
-        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 3);
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 5);
         assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 1);
         assert_eq!(
             u32::from_le_bytes(encoded[27..31].try_into().unwrap()),
@@ -5661,6 +5774,9 @@ mod tests {
                 | BLOCK_STATE_BEHAVIOR_REDSTONE_SIGNAL
                 | BLOCK_STATE_BEHAVIOR_DIRECT_REDSTONE_SIGNAL
                 | BLOCK_STATE_BEHAVIOR_COMPARATOR_SIGNAL
+                | BLOCK_STATE_BEHAVIOR_PUSH_REACTION
+                | BLOCK_STATE_BEHAVIOR_FLAMMABILITY
+                | BLOCK_STATE_BEHAVIOR_FIRE_SPREAD_SPEED
         );
         assert_eq!(i32::from_le_bytes(encoded[31..35].try_into().unwrap()), 12);
         assert_eq!(
@@ -5674,6 +5790,12 @@ mod tests {
         assert_eq!(u32::from_le_bytes(encoded[43..47].try_into().unwrap()), 9);
         assert_eq!(u32::from_le_bytes(encoded[47..51].try_into().unwrap()), 13);
         assert_eq!(u32::from_le_bytes(encoded[51..55].try_into().unwrap()), 7);
+        assert_eq!(
+            u32::from_le_bytes(encoded[55..59].try_into().unwrap()),
+            BlockPushReaction::PushOnly as u32
+        );
+        assert_eq!(u32::from_le_bytes(encoded[59..63].try_into().unwrap()), 71);
+        assert_eq!(u32::from_le_bytes(encoded[63..67].try_into().unwrap()), 32);
         assert!(encoded.len() <= MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES);
 
         let friction_only = encode_block_state_behavior(
@@ -5693,6 +5815,27 @@ mod tests {
             u32::from_le_bytes(friction_only[43..47].try_into().unwrap()),
             0
         );
+        assert!(BlockStateBehavior::new()
+            .flammability(0)
+            .and_then(|behavior| behavior.fire_spread_speed(300))
+            .is_ok());
+        for invalid in [301, u32::MAX] {
+            assert_eq!(
+                BlockStateBehavior::new()
+                    .flammability(invalid)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                BlockStateBehavior::new()
+                    .fire_spread_speed(invalid)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+
         for invalid in [16, u32::MAX] {
             assert_eq!(
                 BlockStateBehavior::new()
@@ -7393,6 +7536,42 @@ mod tests {
         );
         assert_eq!(
             set_item_no_repair("../tool").unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_repair_tag_validates_bounded_canonical_ids_before_import() {
+        assert_eq!(MAX_ITEM_REPAIR_TAG_ID_BYTES, 256);
+        assert_eq!(
+            set_item_repair_tag("tool", "minecraft:planks")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native declarations must stop only at the unavailable wasm import"
+        );
+        for tag in [
+            "planks",
+            "Minecraft:planks",
+            "minecraft:",
+            "minecraft:bad tag",
+            "minecraft:planks:extra",
+        ] {
+            assert_eq!(
+                set_item_repair_tag("tool", tag).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_item_repair_tag("../tool", "minecraft:planks")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_repair_tag("tool", &format!("test:{}", "x".repeat(252)))
+                .unwrap_err()
+                .code(),
             ErrorCode::InvalidArgument
         );
     }

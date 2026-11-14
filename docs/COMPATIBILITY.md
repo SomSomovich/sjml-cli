@@ -16,15 +16,37 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.103.0`, Rust SDK/macros `0.101.0`, private CLI
-`0.1.33`, and ABI `1.93.0`. ABI compatibility remains major-version based: host
-0.103.0 accepts ABI `1.0.x` through `1.93.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.93.0` and host range
-`^0.103.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.105.0`, Rust SDK/macros `0.103.0`, private CLI
+`0.1.35`, and ABI `1.95.0`. ABI compatibility remains major-version based: host
+0.105.0 accepts ABI `1.0.x` through `1.95.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.95.0` and host range
+`^0.105.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.95.0
+
+This version adds exact-state block piston reactions, fire-spread speed and
+flammability; an explicit safe `suppress_drops` block-update option; registered
+item repair tags and per-stack player-inventory glint overrides; bounded
+non-player entity orientation, equipment, and equipment-drop-chance controls;
+raw physical-client cursor motion; and observational client sound-start events.
+All mutations retain module ownership, live-handle, registration-phase,
+side/thread, and existing capability checks. See the API coverage matrix and
+focused guides for the exact contracts.
+
+### APIs added in ABI 1.94.0
+
+This version adds player ability writes and living-mob persistence/loot-pickup
+controls; loaded-only chunk lifecycle notifications; client resource-reload and
+local chat-history APIs; observed world-save and entity-left-level events;
+bounded reads and changes to live villager offers; and player statistic-change
+notifications. The client APIs stay on the physical client, world notifications
+do not load chunks, and mutating operations validate side, thread, ownership,
+capability, and live entity state. See the focused API guides and coverage
+matrix for their exact limits.
 
 ### APIs added in ABI 1.93.0
 

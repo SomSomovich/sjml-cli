@@ -1,12 +1,87 @@
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+
 use sjml::{
-    command, player, player_statistics, ErrorCode, PlayerCustomStat, PlayerStatistic, SjmlError,
-    SjmlResult, StableDecode, StatisticFamily,
+    command, event,
+    events::{self, EventPriority},
+    player, player_statistics, ErrorCode, PlayerCustomStat, PlayerStatistic,
+    PlayerStatisticChanged, SjmlError, SjmlResult, StableDecode, StatisticFamily,
 };
+
+static EXPECTED_PLAYER_HASH: AtomicU32 = AtomicU32::new(0);
+static EXPECTED_TYPE_HASH: AtomicU32 = AtomicU32::new(0);
+static EXPECTED_STAT_HASH: AtomicU32 = AtomicU32::new(0);
+static EXPECTED_PREVIOUS: AtomicI32 = AtomicI32::new(0);
+static EXPECTED_CURRENT: AtomicI32 = AtomicI32::new(0);
+static SAW_STATISTIC_CHANGE: AtomicBool = AtomicBool::new(false);
+
+pub(super) fn initialize() -> SjmlResult<()> {
+    events::subscribe("player.statistic_changed", EventPriority::Normal)?;
+    Ok(())
+}
+
+#[event(name = "player.statistic_changed")]
+fn observe_statistic_change(event: PlayerStatisticChanged) -> SjmlResult<()> {
+    if string_hash(&event.player_id) == EXPECTED_PLAYER_HASH.load(Ordering::Relaxed)
+        && string_hash(&event.statistic_type_id) == EXPECTED_TYPE_HASH.load(Ordering::Relaxed)
+        && string_hash(&event.statistic_id) == EXPECTED_STAT_HASH.load(Ordering::Relaxed)
+        && event.previous_value == EXPECTED_PREVIOUS.load(Ordering::Relaxed)
+        && event.current_value == EXPECTED_CURRENT.load(Ordering::Relaxed)
+    {
+        SAW_STATISTIC_CHANGE.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
 
 #[derive(StableDecode)]
 #[sjml(version = 1)]
 struct PlayerId {
     uuid: String,
+}
+
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct StatisticChangeTestArguments {
+    operation: String,
+    player_id: String,
+    statistic_type_id: String,
+    statistic_id: String,
+    previous_value: i32,
+    current_value: i32,
+}
+
+#[command(name = "player.statistics.observe")]
+fn observe_statistic_change_test(arguments: StatisticChangeTestArguments) -> SjmlResult<String> {
+    match arguments.operation.as_str() {
+        "arm" => {
+            EXPECTED_PLAYER_HASH.store(string_hash(&arguments.player_id), Ordering::Relaxed);
+            EXPECTED_TYPE_HASH.store(string_hash(&arguments.statistic_type_id), Ordering::Relaxed);
+            EXPECTED_STAT_HASH.store(string_hash(&arguments.statistic_id), Ordering::Relaxed);
+            EXPECTED_PREVIOUS.store(arguments.previous_value, Ordering::Relaxed);
+            EXPECTED_CURRENT.store(arguments.current_value, Ordering::Relaxed);
+            SAW_STATISTIC_CHANGE.store(false, Ordering::Relaxed);
+            Ok("player statistic change observer armed".to_owned())
+        }
+        "check" if SAW_STATISTIC_CHANGE.swap(false, Ordering::Relaxed) => {
+            Ok("guest received committed player.statistic_changed snapshot".to_owned())
+        }
+        "check" => Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "guest did not receive the expected player.statistic_changed snapshot",
+        )),
+        _ => Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "operation must be either arm or check",
+        )),
+    }
+}
+
+fn string_hash(value: &str) -> u32 {
+    value
+        .bytes()
+        .fold(2_166_136_261, |hash, byte| {
+            (hash ^ u32::from(byte)).wrapping_mul(16_777_619)
+        })
+        .max(1)
 }
 
 fn player_handle(uuid: &str) -> SjmlResult<sjml::PlayerHandle> {
