@@ -16,6 +16,8 @@ pub const CLIENT_SCREEN_SETTINGS_FORM_SCHEMA_VERSION: u32 = 4;
 pub const CLIENT_SCREEN_SLIDER_FORM_SCHEMA_VERSION: u32 = 5;
 /// Schema version used by bounded multi-select list forms.
 pub const CLIENT_SCREEN_MULTI_SELECT_FORM_SCHEMA_VERSION: u32 = 6;
+/// Schema version for the owner-scoped update envelope around one complete screen definition.
+pub const CLIENT_SCREEN_UPDATE_SCHEMA_VERSION: u32 = 7;
 /// Maximum UTF-8 length of a screen or button ID.
 pub const MAX_CLIENT_SCREEN_ID_BYTES: usize = 64;
 /// Maximum UTF-8 length of a screen title.
@@ -963,6 +965,9 @@ extern "C" {
     #[link_name = "open_screen"]
     fn imported_open_screen(payload_pointer: i32, payload_length: i32) -> i32;
 
+    #[link_name = "update_screen"]
+    fn imported_update_screen(payload_pointer: i32, payload_length: i32) -> i32;
+
     #[link_name = "close_screen"]
     fn imported_close_screen(
         screen_id_pointer: i32,
@@ -1027,6 +1032,45 @@ pub fn open_multi_select_form(
 ) -> SjmlResult<()> {
     let payload = encode_multi_select_form_definition(definition)?;
     open_payload(&payload)
+}
+
+/// Updates this module's currently open screen without closing or replacing its session.
+///
+/// The definition must use the same stable screen ID passed to [`open`]. The host only updates a
+/// screen still owned by this module; a missing, stale, or replaced screen returns an ABI error.
+pub fn update(definition: &ClientScreenDefinition) -> SjmlResult<()> {
+    update_payload(&encode_definition(definition)?)
+}
+
+/// Updates this module's active bounded text form in place. Its screen ID must match [`open_form`].
+pub fn update_form(definition: &ClientScreenFormDefinition) -> SjmlResult<()> {
+    update_payload(&encode_form_definition(definition)?)
+}
+
+/// Updates this module's active single-choice form in place. Its screen ID must match
+/// [`open_list_form`].
+pub fn update_list_form(definition: &ClientScreenListFormDefinition) -> SjmlResult<()> {
+    update_payload(&encode_list_form_definition(definition)?)
+}
+
+/// Updates this module's active settings form in place. Its screen ID must match
+/// [`open_settings_form`].
+pub fn update_settings_form(definition: &ClientScreenSettingsFormDefinition) -> SjmlResult<()> {
+    update_payload(&encode_settings_form_definition(definition)?)
+}
+
+/// Updates this module's active slider form in place. Its screen ID must match
+/// [`open_slider_form`].
+pub fn update_slider_form(definition: &ClientScreenSliderFormDefinition) -> SjmlResult<()> {
+    update_payload(&encode_slider_form_definition(definition)?)
+}
+
+/// Updates this module's active multi-select form in place. Its screen ID must match
+/// [`open_multi_select_form`].
+pub fn update_multi_select_form(
+    definition: &ClientScreenMultiSelectFormDefinition,
+) -> SjmlResult<()> {
+    update_payload(&encode_multi_select_form_definition(definition)?)
 }
 
 /// Closes this module's currently open screen when its stable ID still matches.
@@ -1131,6 +1175,55 @@ fn open_payload(payload: &[u8]) -> SjmlResult<()> {
             "interactive screens require the wasm32-unknown-unknown target",
         ))
     }
+}
+
+fn update_payload(definition_payload: &[u8]) -> SjmlResult<()> {
+    let payload = encode_update_payload(definition_payload)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the envelope remains live while the host synchronously copies and validates it.
+        let status = unsafe {
+            imported_update_screen(
+                payload.as_ptr() as usize as u32 as i32,
+                payload.len() as u32 as i32,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the client screen update",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = payload;
+        Err(SjmlError::new(
+            ErrorCode::UnknownErrorCode,
+            "interactive screens require the wasm32-unknown-unknown target",
+        ))
+    }
+}
+
+fn encode_update_payload(definition_payload: &[u8]) -> SjmlResult<Vec<u8>> {
+    let payload_length = u32::try_from(definition_payload.len()).map_err(|_| payload_overflow())?;
+    let size = 2usize
+        .checked_mul(core::mem::size_of::<u32>())
+        .and_then(|header| header.checked_add(definition_payload.len()))
+        .ok_or_else(payload_overflow)?;
+    if size > MAX_CLIENT_SCREEN_PAYLOAD_BYTES {
+        return Err(too_large(format!(
+            "encoded client screen update exceeds {MAX_CLIENT_SCREEN_PAYLOAD_BYTES} bytes"
+        )));
+    }
+    let mut payload = Vec::with_capacity(size);
+    write_u32(&mut payload, CLIENT_SCREEN_UPDATE_SCHEMA_VERSION);
+    write_u32(&mut payload, payload_length);
+    payload.extend_from_slice(definition_payload);
+    debug_assert_eq!(payload.len(), size);
+    Ok(payload)
 }
 
 fn encode_definition(definition: &ClientScreenDefinition) -> SjmlResult<Vec<u8>> {
@@ -1373,14 +1466,14 @@ mod tests {
     use super::{
         close, encode_definition, encode_form_definition, encode_list_form_definition,
         encode_multi_select_form_definition, encode_settings_form_definition,
-        encode_slider_form_definition, ClientScreenButton, ClientScreenCheckbox,
-        ClientScreenDefinition, ClientScreenFormDefinition, ClientScreenListFormDefinition,
-        ClientScreenMultiSelectFormDefinition, ClientScreenMultiSelectionList,
-        ClientScreenNumericSlider, ClientScreenSelectionList, ClientScreenSelectionOption,
-        ClientScreenSettingsFormDefinition, ClientScreenSliderFormDefinition,
-        ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES, MAX_CLIENT_SCREEN_ID_BYTES,
-        MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS, MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
-        MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
+        encode_slider_form_definition, encode_update_payload, ClientScreenButton,
+        ClientScreenCheckbox, ClientScreenDefinition, ClientScreenFormDefinition,
+        ClientScreenListFormDefinition, ClientScreenMultiSelectFormDefinition,
+        ClientScreenMultiSelectionList, ClientScreenNumericSlider, ClientScreenSelectionList,
+        ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+        ClientScreenSliderFormDefinition, ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES,
+        MAX_CLIENT_SCREEN_ID_BYTES, MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS,
+        MAX_CLIENT_SCREEN_PAYLOAD_BYTES, MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
     };
     use crate::ErrorCode;
 
@@ -1430,6 +1523,42 @@ mod tests {
         append_string(&mut expected, "No");
         assert_eq!(encoded, expected);
         assert!(encoded.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    }
+
+    #[test]
+    fn encodes_v7_update_envelope_around_a_complete_form_without_exceeding_payload_limit() {
+        let screen = ClientScreenDefinition::new(
+            "demo:live",
+            "Updated title",
+            vec!["Changed body".to_owned()],
+            vec![ClientScreenButton::new("apply", "Apply").unwrap()],
+        )
+        .unwrap();
+        let form = ClientScreenFormDefinition::new(
+            screen,
+            vec![ClientScreenTextField::new("name", "Name", "Ada", 32).unwrap()],
+        )
+        .unwrap();
+        let definition = encode_form_definition(&form).unwrap();
+        let update = encode_update_payload(&definition).unwrap();
+
+        assert_eq!(u32::from_le_bytes(update[0..4].try_into().unwrap()), 7);
+        assert_eq!(
+            u32::from_le_bytes(update[4..8].try_into().unwrap()) as usize,
+            definition.len()
+        );
+        assert_eq!(&update[8..], definition.as_slice());
+        assert_eq!(
+            u32::from_le_bytes(update[8..12].try_into().unwrap()),
+            super::CLIENT_SCREEN_FORM_SCHEMA_VERSION
+        );
+        assert!(update.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+        assert_eq!(
+            encode_update_payload(&vec![0; MAX_CLIENT_SCREEN_PAYLOAD_BYTES])
+                .unwrap_err()
+                .code(),
+            ErrorCode::PayloadTooLarge
+        );
     }
 
     #[test]

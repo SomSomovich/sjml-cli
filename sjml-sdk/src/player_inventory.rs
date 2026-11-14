@@ -216,6 +216,27 @@ extern "C" {
         value: i32,
     ) -> i32;
 
+    #[link_name = "read_player_float_component"]
+    fn imported_read_player_float_component(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "write_player_float_component"]
+    fn imported_write_player_float_component(
+        player: i32,
+        player_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        value_bits: i32,
+    ) -> i32;
+
     #[link_name = "read_player_boolean_component"]
     fn imported_read_player_boolean_component(
         player: i32,
@@ -349,6 +370,94 @@ pub fn write_integer_component(
         status_result(
             status,
             "host rejected the player inventory integer component write",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, component_path, value);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads one module-owned bounded finite float component from a nonempty player inventory stack.
+///
+/// The path must have been declared with [`crate::registry::register_float_component`]. Empty
+/// slots or stacks without the component return `Ok(None)`. The host validates the stored value
+/// against its finite inclusive range. This requires declared and granted `entity.read` and
+/// `inventory.read` and is only available to logical-server modules.
+pub fn read_float_component(
+    player: PlayerHandle,
+    slot: u32,
+    component_path: &str,
+) -> SjmlResult<Option<f32>> {
+    validate_integer_component_access(slot, component_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        let value: Option<f32> = read_output(|output, capacity| {
+            // SAFETY: borrowed handle/path and allocated output stay live for this synchronous import.
+            unsafe {
+                imported_read_player_float_component(
+                    player.as_ptr() as usize as u32 as i32,
+                    player.len() as i32,
+                    slot as i32,
+                    component_path.as_ptr() as usize as u32 as i32,
+                    component_path.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if value.is_some_and(|value| !value.is_finite()) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned a non-finite float component value",
+            ));
+        }
+        Ok(value)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (player, slot, component_path);
+        Err(unsupported_target())
+    }
+}
+
+/// Writes a finite float component to an existing player inventory stack.
+///
+/// The host checks that the value is inside the registered inclusive range before accessing the
+/// live stack, then preserves the stack and synchronizes the active menu. This requires declared
+/// and granted `entity.read` and `inventory.write` capabilities.
+pub fn write_float_component(
+    player: PlayerHandle,
+    slot: u32,
+    component_path: &str,
+    value: f32,
+) -> SjmlResult<()> {
+    validate_integer_component_access(slot, component_path)?;
+    if !value.is_finite() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "float component value must be finite",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let player = to_bytes(&player)?;
+        // SAFETY: handle/path buffers and scalar bits live through this synchronous host call.
+        let status = unsafe {
+            imported_write_player_float_component(
+                player.as_ptr() as usize as u32 as i32,
+                player.len() as i32,
+                slot as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as i32,
+                value.to_bits() as i32,
+            )
+        };
+        status_result(
+            status,
+            "host rejected the player inventory float component write",
         )
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -1250,8 +1359,8 @@ mod tests {
     };
     #[cfg(not(target_arch = "wasm32"))]
     use super::{
-        move_stack, read, read_boolean_component, read_integer_component, write_boolean_component,
-        write_integer_component,
+        move_stack, read, read_boolean_component, read_float_component, read_integer_component,
+        write_boolean_component, write_float_component, write_integer_component,
     };
     use crate::inventory::{InventorySnapshot, ItemStackDescriptor};
     use crate::ErrorCode;
@@ -1822,6 +1931,56 @@ mod tests {
             );
             assert_eq!(
                 write_boolean_component(player, 0, path, false)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn player_float_component_paths_slots_and_nonfinite_values_are_rejected_before_host_access() {
+        let player = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            read_float_component(player, 0, "heat").unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            write_float_component(player, 0, "heat", 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        for slot in [41, u32::MAX] {
+            assert_eq!(
+                read_float_component(player, slot, "heat")
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                write_float_component(player, slot, "heat", 1.0)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for path in ["", "Heat", "../heat", "nested/heat"] {
+            assert_eq!(
+                read_float_component(player, 0, path).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                write_float_component(player, 0, path, 1.0)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(
+                write_float_component(player, 0, "heat", value)
                     .unwrap_err()
                     .code(),
                 ErrorCode::InvalidArgument

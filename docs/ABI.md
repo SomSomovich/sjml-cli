@@ -6,7 +6,7 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.90.0**. Versions use SemVer. ABI 1.90.0 adds the non-cancellable server `world.tick` event after each logical-server level tick, carrying dimension ID, game time, and day time. Its schema-v1 payload is a length-prefixed canonical dimension ID followed by a non-negative little-endian 64-bit game-time value and a signed little-endian 64-bit day-time value; subscriptions support a bounded interval from 1 to 1,200 ticks. ABI 1.89.0 adds `register_entity_ai_goal_v3`, a static registration import for exact-type avoid/target goals on declared SJML mobs. It carries a canonical fully qualified entity type ID and keeps target selection within living entity types. Existing v1 and v2 entity-goal imports remain unchanged. ABI 1.88.0 adds synchronous cancellable logical-server `entity.drops_attempt`, which can veto the bounded item-drop list from a living entity's death without preventing the death. ABI 1.87.0 adds synchronous cancellable logical-server `entity.mount_attempt`, which can veto an entity mount or dismount before Minecraft changes the riding relationship. ABI 1.86.0 adds synchronous cancellable logical-server `block.farmland_trample_attempt` and `entity.fall_attempt` events. A true farmland-trample result preserves the block; a true fall result prevents fall damage from being applied. ABI 1.85.0 adds synchronous cancellable logical-server `player.totem_use_attempt`, `entity.shield_block_attempt`, and `entity.teleport_attempt` callbacks. The shield callback runs only for vanilla-eligible shield blocks and a veto lets damage continue; the totem callback can veto the saving effect; the teleport callback captures server `EntityTeleportEvent` subclasses without loading destination chunks. All require synchronous guest callbacks and `events.subscribe` plus `events.cancel`, with bounded detached payloads. ABI 1.84.0 adds bounded multi-box registered-block shapes formed from 1–8 normalized AABBs; detached `entity::target_snapshot` results while preserving the legacy `entity::target` handle API; synchronous cancellable `player.potion_use_attempt` events; and opt-in veto of mouse releases delivered to an active screen. Bounds, callback counts, ownership, registration phase, live-world access, side/thread, and capabilities remain enforced; global mouse releases remain observational. ABI 1.83.0 adds bounded count and durability writes for existing block-inventory stacks, count changes and atomic slot-to-slot moves for player inventories, loaded-only non-player entity teleportation, entity custom-name visibility control, and static vanilla spawn eggs for registered mobs. It adds the synchronous `block.drops_attempt` event, mutable/cancellable player XP-point and level-change events, and bounded rich unsigned system-chat components with safe hover and click actions. ABI 1.82.0 added bounded enchantment read/set/remove imports for existing stacks in loaded block inventories, owner-routed synchronous `item.attack_attempt` veto callbacks for registered main-hand items, and a versioned villager-trade registration import that carries bounded initial demand. Entity-scope storage now rejects nonexistent, removed, or unloaded entities with `STALE_HANDLE` without loading chunks. ABI 1.80.0 adds per-state friction for registered blocks, loaded-only fluid-tick scheduling, and sampled physical-client cursor-movement callbacks. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
+The current core ABI version is **1.91.0**. Versions use SemVer. ABI 1.91.0 adds four vertical contracts: `player.item_broken` is a schema-v1 observational server event carrying canonical player, dimension, item, and hand identifiers; `set_item_use_behavior` declares a bounded vanilla use animation and duration for an owned registered item; module-owned bounded finite-f32 data components can be declared and set as item defaults, then read or changed on existing loaded block/player inventory stacks; and schema-v7 client-screen updates replace the full definition of the active screen only when its owner and stable ID match. Each host boundary checks registration phase or live inventory ownership, bounds, permissions, side, and thread. ABI 1.90.0 adds the non-cancellable server `world.tick` event after each logical-server level tick, carrying dimension ID, game time, and day time. Its schema-v1 payload is a length-prefixed canonical dimension ID followed by a non-negative little-endian 64-bit game-time value and a signed little-endian 64-bit day-time value; subscriptions support a bounded interval from 1 to 1,200 ticks. ABI 1.89.0 adds `register_entity_ai_goal_v3`, a static registration import for exact-type avoid/target goals on declared SJML mobs. It carries a canonical fully qualified entity type ID and keeps target selection within living entity types. Existing v1 and v2 entity-goal imports remain unchanged. ABI 1.88.0 adds synchronous cancellable logical-server `entity.drops_attempt`, which can veto the bounded item-drop list from a living entity's death without preventing the death. ABI 1.87.0 adds synchronous cancellable logical-server `entity.mount_attempt`, which can veto an entity mount or dismount before Minecraft changes the riding relationship. ABI 1.86.0 adds synchronous cancellable logical-server `block.farmland_trample_attempt` and `entity.fall_attempt` events. A true farmland-trample result preserves the block; a true fall result prevents fall damage from being applied. ABI 1.85.0 adds synchronous cancellable logical-server `player.totem_use_attempt`, `entity.shield_block_attempt`, and `entity.teleport_attempt` callbacks. The shield callback runs only for vanilla-eligible shield blocks and a veto lets damage continue; the totem callback can veto the saving effect; the teleport callback captures server `EntityTeleportEvent` subclasses without loading destination chunks. All require synchronous guest callbacks and `events.subscribe` plus `events.cancel`, with bounded detached payloads. ABI 1.84.0 adds bounded multi-box registered-block shapes formed from 1–8 normalized AABBs; detached `entity::target_snapshot` results while preserving the legacy `entity::target` handle API; synchronous cancellable `player.potion_use_attempt` events; and opt-in veto of mouse releases delivered to an active screen. Bounds, callback counts, ownership, registration phase, live-world access, side/thread, and capabilities remain enforced; global mouse releases remain observational. ABI 1.83.0 adds bounded count and durability writes for existing block-inventory stacks, count changes and atomic slot-to-slot moves for player inventories, loaded-only non-player entity teleportation, entity custom-name visibility control, and static vanilla spawn eggs for registered mobs. It adds the synchronous `block.drops_attempt` event, mutable/cancellable player XP-point and level-change events, and bounded rich unsigned system-chat components with safe hover and click actions. ABI 1.82.0 added bounded enchantment read/set/remove imports for existing stacks in loaded block inventories, owner-routed synchronous `item.attack_attempt` veto callbacks for registered main-hand items, and a versioned villager-trade registration import that carries bounded initial demand. Entity-scope storage now rejects nonexistent, removed, or unloaded entities with `STALE_HANDLE` without loading chunks. ABI 1.80.0 adds per-state friction for registered blocks, loaded-only fluid-tick scheduling, and sampled physical-client cursor-movement callbacks. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
 incompatible. Build metadata does not affect version ordering. ABI 1.78.0 adds owner-scoped closing for guest screens, guarded server player rotation writes, detached six-slot equipment snapshots for loaded living non-player entities, and static crafting remainders for registered standalone items. ABI 1.76.0 adds module-owned player tab-list headers/footers and dummy scoreboard objectives, post-success villager-trade notifications, bounded ordinary item spawning, and exact-state block sound and predicate overrides. ABI 1.75.0 adds owner-scoped player boss bars, loaded non-player living-entity vitals and bounded healing, and exact-state emitted-light overrides for registered blocks. ABI 1.74.0 adds per-state bounded shape overrides for
@@ -678,11 +678,10 @@ cadence from 1 through 1,200 ticks. This callback cannot cancel or change the
 server tick.
 The `world.tick` callback receives schema-v1 `WorldTick`: version `1`, a stable
 UTF-8 canonical dimension ID, a non-negative little-endian `i64` game-time
-value, and a signed little-endian `i64` day-time value. NeoForge dispatches
-after each loaded logical-server level tick on its owning server thread. The
-default cadence is 20 level ticks; `events::subscribe_with_interval` accepts
-1–1,200 ticks. This observational event cannot cancel the level tick and
-never loads chunks.
+value, and a signed little-endian `i64` day-time value. NeoForge dispatches after each loaded logical-server level
+tick on its owning server thread. The default cadence is 20 level ticks;
+`events::subscribe_with_interval` accepts 1–1,200 ticks. This observational
+event cannot cancel or change the level tick and never loads chunks.
 The `player.tick` callback receives schema-v1 `PlayerTick`: version `1`, a
 stable UTF-8 canonical player UUID, a stable UTF-8 dimension ID, then a
 non-negative little-endian `i64` player tick count. NeoForge dispatches after a
@@ -711,6 +710,12 @@ are only reported later if that same item entity was actually added to the
 server level. Slots are `None` when the successful hook does not expose an
 exact player inventory slot. No live inventory or item stack is exposed, and
 the callback cannot alter the completed change.
+The `player.item_broken` callback receives schema-v1 `PlayerItemBroken`: a
+version `1`, canonical player UUID, dimension registry ID, broken item registry
+ID, and hand string (`main`, `off`, or empty when unavailable). It runs on the
+logical-server thread through NeoForge's `PlayerDestroyItemEvent`, requires
+`events.subscribe`, and is observation-only. See
+[player item broken](PLAYER_ITEM_BROKEN.md).
 Guest commands are described below.
 Server event subscriptions are accepted only in integrated-server and
 dedicated-server execution contexts. `client.item.tooltip`,
@@ -753,14 +758,14 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`, `player.advancement_earned`,
 `player.advancement_progress`,
-`player.sleep_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.drops_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
+`player.sleep_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
 `block.break_attempt`, `block.place`, `block.place_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.farmland_trample_attempt`, `block.fluid_place_attempt`, `player.interacted`,
 `player.interaction`, `player.drop_attempt`, `player.item_pickup_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `world.tick`, `world.explosion_attempt`, `server.tick`,
-`inventory.changed`, `resources.reloaded`, `menu.action`, `player.tick`,
+`inventory.changed`, `player.item_broken`, `resources.reloaded`, `menu.action`, `player.tick`,
 `entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`,
 `player.villager_traded`,
 `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`, `player.fished_attempt`,
@@ -770,7 +775,7 @@ Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.interaction`, `player.drop_attempt`, `player.item_pickup_attempt`, `player.sleep_attempt`,
 `player.item_use_attempt`, `player.potion_use_attempt`, `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`,
 `client.chat.send_attempt`,
-`entity.death_attempt`, `entity.drops_attempt`, `entity.damage_attempt`, `entity.fall_attempt`, `entity.mount_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,
+`entity.death_attempt`, `entity.damage_attempt`, `entity.fall_attempt`, `entity.mount_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.farmland_trample_attempt`,
 `block.fluid_place_attempt`, `player.fished_attempt`, `player.attack_attempt`, or `world.explosion_attempt` additionally
@@ -954,8 +959,11 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.set_item_string_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value_ptr: i32, value_len: i32) -> i32` | Set a static string-component default on a previously declared item or block item. |
 | `sjml_registry_v1.register_integer_component` | `(path_ptr: i32, path_len: i32, minimum: i32, maximum: i32) -> i32` | Register a module-owned integer component with inclusive bounds. |
 | `sjml_registry_v1.set_item_integer_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value: i32) -> i32` | Set an in-range static integer-component default on a previously declared item or block item. |
+| `sjml_registry_v1.register_float_component` | `(path_ptr: i32, path_len: i32, minimum_bits: i32, maximum_bits: i32) -> i32` | Register a module-owned persistent, network-synchronized float component with finite inclusive bounds encoded by IEEE-754 `f32` bits. |
+| `sjml_registry_v1.set_item_float_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value_bits: i32) -> i32` | Set a finite in-range float-component default on a previously declared item or block item. |
 | `sjml_registry_v1.register_boolean_component` | `(path_ptr: i32, path_len: i32) -> i32` | Register a module-owned persistent/network-synchronized boolean component type. |
 | `sjml_registry_v1.set_item_boolean_component` | `(item_path_ptr: i32, item_path_len: i32, component_path_ptr: i32, component_path_len: i32, value: i32) -> i32` | Set a boolean component default on a previously declared item or block item; value must be 0 or 1. |
+| `sjml_registry_v1.set_item_use_behavior` | `(item_path_ptr: i32, item_path_len: i32, animation: i32, duration_ticks: i32) -> i32` | Set an allowlisted vanilla item-use animation and a duration from 1 to 72,000 ticks on a same-module registered item. |
 
 The `set_block_state_light_level` schema-v1 payload is at most 512 bytes and
 uses little-endian `u32` fields: schema version `1`, property count (`1..=7`),
@@ -1609,6 +1617,17 @@ as `open_screen`, requires a strict UTF-8 screen ID and an exact one-byte result
 `1` when it closed the screen or `0` when the ID is stale or no owned screen is active. A no-op
 does not close a vanilla screen, another module's screen, or a later screen that replaced the
 owned instance; no button callback is emitted.
+
+ABI 1.91.0 adds `sjml_client_ui_v1.update_screen(payload_ptr, payload_len) -> i32`.
+The little-endian schema-v7 envelope contains `u32 schema_version` (`7`),
+`u32 definition_length`, and exactly one complete schema-v1 through v6 screen
+definition. Its stable screen ID must match the currently open screen owned by
+the calling runtime module. The host checks the active runtime session, owner,
+physical-client context, main thread, and `client.ui.screen` grant, then
+replaces the definition and callback route on that screen. A stale or foreign
+screen is not modified. The callback export required by the replacement must
+exist before the update is applied. Existing open-screen schemas v1 through v6
+and their callback payloads remain unchanged.
 
 The exact payload is little-endian schema-v1 data:
 
@@ -2644,6 +2663,8 @@ a non-empty stack and update only the registered component.
 | `write_player_integer_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, value) -> i32` | Requires `entity.read` and `inventory.write`; the value must fit the registered inclusive bounds. |
 | `read_player_boolean_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, out_ptr, out_capacity) -> i32` | Requires `entity.read` and `inventory.read`; writes `Option<bool>` as tag `0`, or tag `1` followed by byte `0` or `1`. |
 | `write_player_boolean_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, value) -> i32` | Requires `entity.read` and `inventory.write`; value must be `0` or `1`. |
+| `read_player_float_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, out_ptr, out_capacity) -> i32` | Requires `entity.read` and `inventory.read`; writes `Option<f32>` as tag `0`, or tag `1` followed by finite little-endian IEEE-754 bits. |
+| `write_player_float_component` | `(player_ptr, player_len, slot, component_path_ptr, component_path_len, value_bits) -> i32` | Requires `entity.read` and `inventory.write`; the finite value must fit the component's registered inclusive range. |
 
 All writes copy the existing stack, preserve unrelated data, and synchronize
 the active menu. See [player inventory components](PLAYER_INVENTORY_COMPONENTS.md)
@@ -2777,6 +2798,8 @@ exactly `0` or `1`.
 | --- | --- | --- |
 | `read_boolean_component` | `(world_ptr, world_len, position_ptr, position_len, side_ptr, side_len, slot, component_path_ptr, component_path_len, out_ptr, out_capacity) -> i32` | Requires `world.read` and `inventory.read`. Writes `Option<bool>` as byte `0`, or tag `1` followed by boolean byte `0` or `1`. |
 | `write_boolean_component` | `(world_ptr, world_len, position_ptr, position_len, slot, component_path_ptr, component_path_len, value) -> i32` | Requires `world.read` and `inventory.write`; value must be `0` or `1`. |
+| `read_float_component` | `(world_ptr, world_len, position_ptr, position_len, side_ptr, side_len, slot, component_path_ptr, component_path_len, out_ptr, out_capacity) -> i32` | Requires `world.read` and `inventory.read`; writes `Option<f32>` as tag `0`, or tag `1` followed by finite little-endian IEEE-754 bits. |
+| `write_float_component` | `(world_ptr, world_len, position_ptr, position_len, slot, component_path_ptr, component_path_len, value_bits) -> i32` | Requires `world.read` and `inventory.write`; the finite value must fit the component's registered inclusive range. |
 
 Block reads use an optional sided item handler and return `None` for an absent
 inventory, empty slot, or unset value. Writes require a non-empty slot in an
@@ -3107,28 +3130,6 @@ callback result cancels NeoForge `EntityMountEvent` before the riding relation
 changes. The callback runs on the owning logical-server thread, invokes at most
 64 synchronous guest handlers, and cannot use `#[event_async]`. See
 [entity mount attempts](ENTITY_MOUNT_ATTEMPTS.md).
-
-## Living-entity drops attempt
-
-The synchronous cancellable `sjml_v1_event_entity.drops_attempt` callback
-requires `events.subscribe` and `events.cancel`. Its schema-v1
-`EntityDropsAttempt` snapshot contains canonical entity UUID/type and dimension
-IDs, at most 32 detached item snapshots, `recently_hit`, and
-`drops_truncated`. Each item snapshot contains a canonical item ID, count, and
-optional damage/max-damage pair. Item counts and durability values are bounded
-to 1,000,000; strings are limited to 256 UTF-8 bytes; and the full payload is
-capped at 16 KiB. Components, NBT, damage-source details, and live Minecraft
-objects are omitted.
-
-The wire layout is little-endian `u32(1)`, length-prefixed entity UUID, entity
-type ID, and dimension ID, a `u32` item count, then that many nested
-`EntityDropsItemSnapshot` schema-v1 records. Each record carries a length-prefixed
-item ID, `u32` count, and optional `u32` damage and max-damage fields. Final
-bytes encode `recently_hit` and `drops_truncated` as 0 or 1. A true result
-cancels NeoForge `LivingDropsEvent` and its item-drop list; the entity's death
-is not canceled. The callback runs synchronously on the owning logical-server
-thread, invokes at most 64 handlers, and cannot use `#[event_async]`. See
-[living-entity drop attempts](ENTITY_DROPS_ATTEMPTS.md).
 
 ## Fluid block placement attempt
 

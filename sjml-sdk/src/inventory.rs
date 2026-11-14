@@ -390,6 +390,33 @@ extern "C" {
         value: i32,
     ) -> i32;
 
+    #[link_name = "read_float_component"]
+    fn imported_read_float_component(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        side: i32,
+        side_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
+
+    #[link_name = "write_float_component"]
+    fn imported_write_float_component(
+        world: i32,
+        world_length: i32,
+        position: i32,
+        position_length: i32,
+        slot: i32,
+        component_path: i32,
+        component_path_length: i32,
+        value_bits: i32,
+    ) -> i32;
+
     #[link_name = "read_boolean_component"]
     fn imported_read_boolean_component(
         world: i32,
@@ -1361,6 +1388,106 @@ pub fn read_boolean_component(
     }
 }
 
+/// Reads one module-owned bounded finite float component from a loaded block-inventory slot.
+///
+/// The path must name a component registered by this module through
+/// [`crate::registry::register_float_component`]. `None` is returned for an absent inventory,
+/// empty slot, or unset component. The optional side selects the block's item-handler capability;
+/// the call requires `world.read` and `inventory.read` and runs on the owning server thread.
+pub fn read_float_component(
+    world: WorldHandle,
+    position: BlockPos,
+    side: Option<Direction>,
+    slot: u32,
+    component_path: &str,
+) -> SjmlResult<Option<f32>> {
+    validate_component_path(component_path)?;
+    validate_slot(slot)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        let side = to_bytes(&side)?;
+        let value: Option<f32> = read_output(|output, capacity| {
+            // SAFETY: stable input buffers and the allocated output live through this sync import.
+            unsafe {
+                imported_read_float_component(
+                    world.as_ptr() as usize as u32 as i32,
+                    world.len() as i32,
+                    position.as_ptr() as usize as u32 as i32,
+                    position.len() as i32,
+                    side.as_ptr() as usize as u32 as i32,
+                    side.len() as i32,
+                    slot as i32,
+                    component_path.as_ptr() as usize as u32 as i32,
+                    component_path.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        if value.is_some_and(|value| !value.is_finite()) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned a non-finite float component value",
+            ));
+        }
+        Ok(value)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, side, component_path);
+        Err(unsupported_target())
+    }
+}
+
+/// Writes one module-owned bounded finite float component on an existing, non-empty container slot.
+///
+/// The component path must have been registered by this module. The host checks the registered
+/// inclusive range before accessing the inventory stack, then copies the stack and changes only
+/// this value. The operation is unsided because it updates a block `Container`; it requires
+/// `world.read` and `inventory.write` and runs on the server thread.
+pub fn write_float_component(
+    world: WorldHandle,
+    position: BlockPos,
+    slot: u32,
+    component_path: &str,
+    value: f32,
+) -> SjmlResult<()> {
+    validate_component_path(component_path)?;
+    validate_slot(slot)?;
+    if !value.is_finite() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "float component value must be finite",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let world = to_bytes(&world)?;
+        let position = to_bytes(&position)?;
+        // SAFETY: input buffers and the scalar bits remain live through this synchronous call.
+        let status = unsafe {
+            imported_write_float_component(
+                world.as_ptr() as usize as u32 as i32,
+                world.len() as i32,
+                position.as_ptr() as usize as u32 as i32,
+                position.len() as i32,
+                slot as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as i32,
+                value.to_bits() as i32,
+            )
+        };
+        status_result(status, "host rejected the float component write")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position, slot, component_path, value);
+        Err(unsupported_target())
+    }
+}
+
 /// Writes a module-owned boolean component on an existing, non-empty container slot.
 ///
 /// The host checks that the component belongs to this module, copies the stack before changing
@@ -1563,12 +1690,13 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         clear_custom_name, clear_lore, move_stack, read_boolean_component, read_enchantment_level,
-        read_integer_component, read_lore, remove_enchantment, set_count, set_custom_name,
-        set_damage, set_enchantment_level, set_lore, transfer, validate_block_inventory_damage,
-        validate_custom_name, validate_enchantment_id, validate_item_stack_count,
-        validate_lore_line, validate_lore_lines, validate_slot, validate_transfer_count,
-        write_boolean_component, write_integer_component, BlockPos, Direction, InventoryEndpoint,
-        ItemStackSnapshot, MAX_BLOCK_INVENTORY_DAMAGE, MAX_BLOCK_INVENTORY_ENCHANTMENT_ID_BYTES,
+        read_float_component, read_integer_component, read_lore, remove_enchantment, set_count,
+        set_custom_name, set_damage, set_enchantment_level, set_lore, transfer,
+        validate_block_inventory_damage, validate_custom_name, validate_enchantment_id,
+        validate_item_stack_count, validate_lore_line, validate_lore_lines, validate_slot,
+        validate_transfer_count, write_boolean_component, write_float_component,
+        write_integer_component, BlockPos, Direction, InventoryEndpoint, ItemStackSnapshot,
+        MAX_BLOCK_INVENTORY_DAMAGE, MAX_BLOCK_INVENTORY_ENCHANTMENT_ID_BYTES,
         MAX_BLOCK_INVENTORY_ENCHANTMENT_LEVEL, MAX_BLOCK_INVENTORY_LORE_BYTES,
         MAX_BLOCK_INVENTORY_LORE_LINES, MAX_BLOCK_INVENTORY_LORE_LINE_BYTES,
         MAX_CUSTOM_ITEM_NAME_BYTES, MAX_CUSTOM_ITEM_NAME_CHARS, MAX_INVENTORY_COORDINATE,
@@ -1902,6 +2030,54 @@ mod tests {
     }
 
     #[test]
+    fn float_component_reads_and_writes_validate_local_inputs_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos { x: 0, y: 64, z: 0 };
+        assert_eq!(
+            read_float_component(world, position, None, MAX_INVENTORY_SLOTS as u32, "heat")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            read_float_component(world, position, None, 0, "../heat")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            read_float_component(world, position, None, 0, "heat")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            write_float_component(world, position, 0, "heat", f32::NAN)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            write_float_component(world, position, 0, "heat", f32::INFINITY)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            write_float_component(world, position, 0, "../heat", 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            write_float_component(world, position, 0, "heat", 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
     fn custom_item_names_are_bounded_plain_values_before_host_access() {
         assert_eq!(validate_custom_name("Café 🪨"), Ok(()));
         assert_eq!(
@@ -2039,6 +2215,17 @@ mod tests {
         assert_eq!(
             crate::from_bytes::<Option<i32>>(&[1, 0xf4, 0xff, 0xff, 0xff]).unwrap(),
             Some(-12)
+        );
+    }
+
+    #[test]
+    fn float_component_optional_values_use_tag_then_little_endian_f32() {
+        assert_eq!(crate::to_bytes(&None::<f32>).unwrap(), [0]);
+        let encoded = crate::to_bytes(&Some(1.5_f32)).unwrap();
+        assert_eq!(encoded, [1, 0, 0, 0xc0, 0x3f]);
+        assert_eq!(
+            crate::from_bytes::<Option<f32>>(&encoded).unwrap(),
+            Some(1.5)
         );
     }
 

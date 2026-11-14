@@ -1763,6 +1763,75 @@ pub struct PlayerItemCrafted {
     pub count: i32,
 }
 
+/// Synchronous, non-cancellable notification emitted when NeoForge destroys a server player's item.
+/// The hand is `main` or `off` when the hook identifies a held hand, or empty when it does not.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerItemBroken {
+    /// Canonical UUID string of the player whose item was destroyed.
+    pub player_id: String,
+    /// Resource location of the level where the item was destroyed.
+    pub dimension_id: String,
+    /// Registry ID of the destroyed item.
+    pub item_id: String,
+    /// `main`, `off`, or empty when NeoForge did not expose a hand.
+    pub hand: String,
+}
+
+impl StableEncode for PlayerItemBroken {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_item_broken(self)?;
+        encoder.write_u32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encode_bounded_event_string(&self.dimension_id, encoder)?;
+        encode_bounded_event_string(&self.item_id, encoder)?;
+        encode_bounded_event_string(&self.hand, encoder)
+    }
+}
+
+impl StableDecode for PlayerItemBroken {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let version = decoder.read_u32()?;
+        if version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!("PlayerItemBroken schema version {version} is unsupported"),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            dimension_id: decode_bounded_event_string(decoder)?,
+            item_id: decode_bounded_event_string(decoder)?,
+            hand: decode_bounded_event_string(decoder)?,
+        };
+        validate_player_item_broken(&event)?;
+        Ok(event)
+    }
+}
+
+fn validate_player_item_broken(event: &PlayerItemBroken) -> SjmlResult<()> {
+    if !canonical_uuid(&event.player_id)
+        || !canonical_resource_location(&event.dimension_id)
+        || !canonical_resource_location(&event.item_id)
+        || !(event.hand.is_empty() || event.hand == "main" || event.hand == "off")
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player item-broken event contains invalid player, dimension, item, or hand data",
+        ));
+    }
+    if event.player_id.len() > 256
+        || event.dimension_id.len() > 256
+        || event.item_id.len() > 256
+        || event.hand.len() > 256
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player item-broken event string exceeds the 256-byte limit",
+        ));
+    }
+    Ok(())
+}
+
 /// Synchronous, non-cancellable snapshot emitted after a player completes a trade with a villager
 /// or wandering trader. The NeoForge event runs after the merchant accepted the inputs and updated
 /// the offer use count. IDs and stack counts are detached; item components and mutable Minecraft
@@ -2759,11 +2828,11 @@ mod tests {
         PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
         PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
         PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt,
-        PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned,
-        PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
-        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        WorldLifecycle, WorldTick, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
+        PlayerInteractionAttempt, PlayerItemBroken, PlayerItemCrafted, PlayerItemPickupAttempt,
+        PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction,
+        PlayerRespawned, PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt,
+        PlayerTotemUseAttemptAction, PlayerVillagerTraded, ProjectileImpactAttempt,
+        ResourcesReloaded, ServerTick, WorldLifecycle, WorldTick, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
         MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
         MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
         MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
@@ -5110,6 +5179,54 @@ mod tests {
         };
         let encoded = to_bytes(&event).unwrap();
         assert_eq!(from_bytes::<PlayerItemCrafted>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn player_item_broken_snapshot_matches_host_schema_and_bounds_fields() {
+        let event = PlayerItemBroken {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:the_nether".to_owned(),
+            item_id: "minecraft:diamond_pickaxe".to_owned(),
+            hand: "off".to_owned(),
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.player_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        append_test_string(&mut expected, &event.item_id);
+        append_test_string(&mut expected, &event.hand);
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match the host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<PlayerItemBroken>(&encoded).unwrap(), event);
+
+        let no_hand = PlayerItemBroken {
+            hand: String::new(),
+            ..event.clone()
+        };
+        assert_eq!(
+            from_bytes::<PlayerItemBroken>(&to_bytes(&no_hand).unwrap()).unwrap(),
+            no_hand
+        );
+        assert_eq!(
+            to_bytes(&PlayerItemBroken {
+                hand: "head".to_owned(),
+                ..event.clone()
+            })
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            to_bytes(&PlayerItemBroken {
+                item_id: format!("namespace:{}", "a".repeat(247)),
+                ..event
+            })
+            .unwrap_err()
+            .code(),
+            ErrorCode::PayloadTooLarge
+        );
     }
 
     #[test]

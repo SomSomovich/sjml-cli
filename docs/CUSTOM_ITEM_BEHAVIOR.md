@@ -37,6 +37,11 @@ callback. A handled result sets NeoForge's cancellation result to success. The
 callback can call other SJML server APIs to apply effects; each such operation
 still requires its own declared and administrator-granted capability.
 
+Registered items can also declare a vanilla use animation and bounded hold
+duration through [`ITEM_USE_BEHAVIOR.md`](ITEM_USE_BEHAVIOR.md). This changes
+the registered item's `getUseAnimation` and `getUseDuration` values; it does not
+implement custom item effects or change vanilla item behavior.
+
 The callback runs on the logical server after the broad
 `player.item_use_attempt` cancellation hook, and only when vanilla has reached
 the right-click-item phase. Using an item on a block or entity continues through

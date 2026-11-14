@@ -36,10 +36,21 @@ fn update_block_inventory_custom_name(
             if original.count != 6
                 || original.custom_name.as_deref() != Some("count-preserved block name")
                 || inventory::read_lore(world, position, 2)? != ["count-preserved block lore"]
+                || inventory::read_float_component(world, position, None, 2, "gametest_heat")?
+                    .is_some()
             {
                 return Err(SjmlError::new(
                     ErrorCode::InvalidArgument,
                     "block inventory count fixture did not match its original components",
+                ));
+            }
+            inventory::write_float_component(world, position, 2, "gametest_heat", 1.5)?;
+            if inventory::read_float_component(world, position, None, 2, "gametest_heat")?
+                != Some(1.5)
+            {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "block inventory float component did not round-trip through the guest API",
                 ));
             }
             inventory::set_count(world, position, 2, 12)?;
@@ -53,6 +64,8 @@ fn update_block_inventory_custom_name(
                 || updated.count != 12
                 || updated.custom_name.as_deref() != Some("count-preserved block name")
                 || inventory::read_lore(world, position, 2)? != ["count-preserved block lore"]
+                || inventory::read_float_component(world, position, None, 2, "gametest_heat")?
+                    != Some(1.5)
             {
                 return Err(SjmlError::new(
                     ErrorCode::InvalidArgument,
@@ -66,10 +79,7 @@ fn update_block_inventory_custom_name(
                     "block inventory count must obey item and slot limits",
                 ));
             }
-            Ok(
-                "block inventory count update preserved item data and rejected invalid size"
-                    .to_owned(),
-            )
+            Ok("block inventory float component and count update preserved item data".to_owned())
         }
         "damage" => {
             let original = inventory::read_stack(world, position, None, 0)?.ok_or_else(|| {

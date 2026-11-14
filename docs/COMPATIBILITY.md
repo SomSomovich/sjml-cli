@@ -16,15 +16,28 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.100.0`, Rust SDK/macros `0.98.0`, private CLI
-`0.1.30`, and ABI `1.90.0`. ABI compatibility remains major-version based: host
-0.100.0 accepts ABI `1.0.x` through `1.90.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.90.0` and host range
-`^0.100.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.101.0`, Rust SDK/macros `0.99.0`, private CLI
+`0.1.31`, and ABI `1.91.0`. ABI compatibility remains major-version based: host
+0.101.0 accepts ABI `1.0.x` through `1.91.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.91.0` and host range
+`^0.101.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.91.0
+
+Modules can observe a broken item with `player.item_broken`, set a vanilla use
+animation and bounded hold duration on their registered items, and register
+finite bounded float data components for default item stacks and existing block
+or player inventory stacks. Client modules can replace the complete definition
+of their currently open owner-scoped screen. The screen ID and runtime owner
+must match the active session; callback exports for the replacement are checked
+before the update is applied. See [player item broken](PLAYER_ITEM_BROKEN.md),
+[item use behavior](ITEM_USE_BEHAVIOR.md),
+[float item components](FLOAT_ITEM_COMPONENTS.md), and
+[interactive client screens](CLIENT_SCREEN.md).
 
 ### APIs added in ABI 1.90.0
 
@@ -43,15 +56,6 @@ the exact registered entity type. The new registration import is restricted to
 unchanged. Unknown registry IDs are skipped with a warning when the mob's goals
 are installed. Vanilla selectors only consider living entities, so non-living
 registered types never match. See [registered entity AI goals](ENTITY_AI_GOALS.md).
-
-### APIs added in ABI 1.88.0
-
-`entity.drops_attempt` synchronously exposes bounded detached item snapshots
-before NeoForge spawns living-entity death drops. A handler returning true
-cancels the item's drop event while the entity remains dead. The event requires
-`events.subscribe` and `events.cancel`, runs on the logical-server thread, and
-cannot be asynchronous. It does not expose live objects, components, NBT, or a
-mutable experience result. See [living-entity drop attempts](ENTITY_DROPS_ATTEMPTS.md).
 
 ### APIs added in ABI 1.87.0
 

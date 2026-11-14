@@ -25,19 +25,20 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.98.0
-and core ABI 1.90.0. Live
+unverified. This guide describes the private SDK workspace target 0.99.0
+and core ABI 1.91.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
+SDK 0.99.0 adds bounded finite-f32 item components, static registered-item use
+animation/duration settings, the `player.item_broken` event, and owner-scoped
+updates for an already open client screen. See
+[float item components](FLOAT_ITEM_COMPONENTS.md),
+[item use behavior](ITEM_USE_BEHAVIOR.md),
+[player item broken](PLAYER_ITEM_BROKEN.md), and
+[interactive client screens](CLIENT_SCREEN.md).
 SDK 0.98.0 adds per-level `world.tick` notifications with bounded intervals; see [world ticks](WORLD_TICK.md). SDK 0.97.0 adds exact-type `AvoidEntityType` and `TargetEntityType` goals for
 registered SJML mobs. These goals use a canonical entity registry ID and retain
 vanilla pathfinding and target checks; see [registered entity AI goals](ENTITY_AI_GOALS.md).
-SDK 0.96.0 adds synchronous cancellable `entity.drops_attempt` for
-vetoing bounded item drops caused by a living entity's death. The callback sees
-entity identity, dimension, `recently_hit`, and up to 32 detached item
-snapshots; returning true cancels the item-drop list while the entity still
-dies. Both event capabilities are required and async handlers are rejected.
-See [living-entity drop attempts](ENTITY_DROPS_ATTEMPTS.md).
 SDK 0.95.0 adds synchronous cancellable `entity.mount_attempt` for vetoing a
 mount or dismount before Minecraft changes the riding relation. Its detached
 snapshot includes an optional target identity and action direction. Both
@@ -473,7 +474,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.98.0"
+sjml-sdk = "0.99.0"
 ```
 
 For development against this checkout, use
@@ -503,13 +504,13 @@ workspace adds the entity AI goals and event types described above.
 | [`chat_messages`](https://docs.rs/sjml-sdk/0.92.0/sjml/chat_messages/) | Local chat-message snapshots, separately capability-gated filtering, and rich local replacements. |
 | [`client_notifications`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_notifications/) | Bounded vanilla-style client toast notifications. |
 | [`command_suggestions`](https://docs.rs/sjml-sdk/0.92.0/sjml/command_suggestions/) | Typed bounded input/output for synchronous server Brigadier suggestions. |
-| [`client_screen`](CLIENT_SCREEN.md) | Client-only vanilla screens with literal text, up to four buttons, bounded text fields, one scrollable choice list, settings forms with up to eight checkboxes, schema-v5 integer sliders, schema-v6 multi-select lists with up to 32 options, and owner-checked programmatic close; callbacks go only to the owning module. |
+| [`client_screen`](CLIENT_SCREEN.md) | Client-only vanilla screens with literal text, up to four buttons, bounded text fields, one scrollable choice list, settings forms with up to eight checkboxes, schema-v5 integer sliders, schema-v6 multi-select lists with up to 32 options, owner-checked programmatic close, and schema-v7 full-definition updates of the active owner screen; callbacks go only to the owning module. |
 | [`client_audio`](https://docs.rs/sjml-sdk/0.92.0/sjml/client_audio/) | Bounded client-local one-shot playback, stoppable one-shot handles, and module-owned looping sounds through Minecraft's sound manager, bounded exact-handle fades, and owner-checked situational music selection. |
 | [`client_music`](CLIENT_MUSIC.md) | Synchronous physical-client selection or stopping of situational music, with module-owned replacement sounds and bounded delays. |
 | [`entity`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity/) | Loaded non-player entity snapshots and detached Mob target snapshots, same-dimension teleports that stay inside already-loaded chunks, custom names and their vanilla visibility flag, six-slot equipment snapshots, enumeration, spatial queries, bounded raycasts, active effects, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |
 | [`entity_attributes`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity_attributes/) | Bounded reads and base-value writes for 31 built-in vanilla living-entity and server-player attributes, plus module-owned transient modifiers on loaded non-player living entities with automatic owner cleanup. |
 | [`entity_data`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.92.0/sjml/events/) | Typed lifecycle and per-level world, player, client, and entity tick, player movement/interaction/drop/respawn/advancement/sleep, registered-block/item callbacks, cancellable `block.drops_attempt` and `entity.drops_attempt`, mutable/cancellable player XP-point and level-change attempts, cancellable potion, totem, shield-block, and entity-teleport attempts, item tooltip and outgoing-chat callbacks, and crafting/inventory/resource events. |
+| [`events`](https://docs.rs/sjml-sdk/0.92.0/sjml/events/) | Typed lifecycle and per-level world, player, client, and entity tick, player movement/interaction/drop/respawn/advancement/sleep/item-broken, registered-block/item callbacks, cancellable gameplay attempts, item tooltip and outgoing-chat callbacks, and crafting/inventory/resource events. |
 | [`gl`](https://docs.rs/sjml-sdk/0.92.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
 | [`host`](https://docs.rs/sjml-sdk/0.92.0/sjml/host/) | ABI version query and host logging. |
 | [`inventory`](https://docs.rs/sjml-sdk/0.92.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, integer/boolean component updates, and slot transfers. Block inventories support custom names, bounded count and durability writes, preflighted moves, and enchantment reads/writes/removal on loaded stacks. |
@@ -1102,10 +1103,10 @@ and signed `i64` game time. Initial server levels are reported after runtime
 activation; subsequent level loads and unloads are reported as they occur, with
 unload notification sent before world-scoped handles are revoked.
 `world.tick` accepts schema-v1 `WorldTick` with a canonical `dimension_id`,
-non-negative `game_time`, and signed `day_time`. It runs after each
-logical-server level tick, defaults to every 20 level ticks, and accepts
-intervals from 1 to 1,200 through `subscribe_with_interval`. It is
-observation-only and never loads chunks. See [world ticks](WORLD_TICK.md).
+non-negative `game_time`, and signed `day_time`. It runs after each logical-server
+level tick, defaults to every 20 level ticks, and accepts intervals from 1 to
+1,200 through `subscribe_with_interval`. It is observation-only and never loads
+chunks. See [world ticks](WORLD_TICK.md).
 `server.tick` accepts schema-v1 `ServerTick` with a non-negative `i64`
 `tick_count`; it runs after the server tick and cannot cancel it. A plain
 `events::subscribe("server.tick", priority)` delivers every 20 ticks, while
@@ -1773,6 +1774,15 @@ live player stacks. Reads preserve the distinction between an unset component
 and a stored `false`; writes change only the caller's component on an existing
 stack. See [boolean item components](BOOLEAN_ITEM_COMPONENTS.md) for ABI,
 permission, and threading details.
+
+Finite floating-point data uses `registry::register_float_component` with a
+`FloatComponentDefinition` whose inclusive bounds are finite `f32` values.
+`registry::set_item_float_component` declares a default for a module-owned
+item. Runtime reads and writes are available for existing block and live-player
+inventory stacks through `inventory::read/write_float_component` and
+`player_inventory::read/write_float_component`; writes preserve the rest of
+the stack and reject NaN, infinity, and out-of-range values. See
+[float item components](FLOAT_ITEM_COMPONENTS.md).
 
 ## Server menus with bounded action slots
 

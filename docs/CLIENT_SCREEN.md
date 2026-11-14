@@ -99,18 +99,18 @@ owning module a `ClientScreenAction` containing the screen's `screen_id` and the
 `events::subscribe`. The callback can then update module state, open another screen, or run
 another local client action. Closing a screen with Escape does not represent a button action.
 
-The owner can also close its currently displayed screen by stable ID:
+An owner can close its currently displayed screen programmatically:
 
 ```rust
 if client_screen::close("welcome")? {
-    // This module's matching screen was active and is now closed.
+    // The exact screen owned by this module was active and is now closed.
 }
 ```
 
-`close` returns `false` when the ID is stale, the screen was already replaced, or this module has
-no active screen. The host checks the runtime owner and exact screen instance on the client thread,
-so a no-op cannot close a vanilla screen or another module's screen. Closing this way uses the
-existing `client.ui.screen` grant and emits no button-action callback.
+`close` returns `false` when that screen ID is stale, the screen was already replaced, or the
+module has no active screen. The host checks both the runtime owner and exact screen ID on the
+client thread, so a stale request cannot close a vanilla screen or another module's screen. It
+uses the existing `client.ui.screen` grant and does not emit a button-action callback.
 
 ## Text-entry forms
 
@@ -438,4 +438,25 @@ Rows toggle locally when clicked and the list scrolls inside its own viewport. T
 
 Schema v6 appends its multi-select block after the schema-v1 screen prefix and schema-v2 text-field block. Schemas v1 through v5 and their callback payloads keep their existing byte layouts. The callback payload has schema version 6 and carries the screen ID, button ID, schema-v1 text values, list ID, and zero to 32 selected option IDs. All IDs remain unique within the form, and the complete request or callback is capped at 4,096 bytes.
 
-The bounded example is also available at [`sjml-sdk/examples/client_screen_multi_select.rs`](../sjml-sdk/examples/client_screen_multi_select.rs). Its visible layout and mouse interactions still need a display-backed Minecraft client check.
+The bounded example is also available at [`sjml-sdk/examples/client_screen_multi_select.rs`](../sjml-cli/sjml-sdk/examples/client_screen_multi_select.rs). Its visible layout and mouse interactions still need a display-backed Minecraft client check.
+
+## Updating an open screen
+
+An owner can replace the definition of its currently open screen with
+`client_screen::update`, `update_form`, `update_list_form`,
+`update_settings_form`, `update_slider_form`, or `update_multi_select_form`.
+The replacement must use the same screen ID. The host verifies the active
+screen session and module owner, then rebuilds the controls on the existing
+Minecraft `Screen` instance. A stale ID or another module's screen is rejected
+without changing the visible screen. Updates require the existing
+`client.ui.screen` grant and remain client-local.
+
+The replacement definition controls what the next submission returns. It may
+change the form controls and callback route; the host verifies that the owning
+module exported the matching callback before applying the update. Button
+actions and form submissions remain owner-scoped. Schema v7 carries the full
+replacement definition in a versioned update envelope; the existing v1–v6
+open and callback payloads keep their layouts. The codec and host tests cover
+length/version bounds, same-session updates, owner and screen-ID checks, and
+callback switching. Visible control updates still need a display-backed client
+check.

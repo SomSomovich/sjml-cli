@@ -3,7 +3,7 @@
 //! These functions are valid only from `#[mod_register]`. They stage bounded
 //! item, block, block-entity, generic entity and its attributes, creative-tab,
 //! fluid, shaped/shapeless/cooking/stonecutting/smithing-transform recipe, bounded villager trade, particle,
-//! sound, bounded attribute effect and its optional tick callback, and bounded string/integer data component declarations;
+//! sound, bounded attribute effect and its optional tick callback, and bounded string/integer/float data component declarations;
 //! they do not mutate world state or registries directly.
 
 use crate::{ErrorCode, SjmlError, SjmlResult};
@@ -39,6 +39,8 @@ pub const MAX_ITEM_FOOD_EFFECT_DURATION_TICKS: u32 = 72_000;
 pub const MAX_ITEM_MAX_DAMAGE: u32 = 1_000_000;
 /// Maximum static vanilla stack size for one registered item.
 pub const MAX_ITEM_MAX_STACK_SIZE: u32 = 99;
+/// Maximum static use duration for one registered item, in ticks.
+pub const MAX_ITEM_USE_DURATION_TICKS: u32 = 72_000;
 /// Maximum UTF-8 size of one fully qualified static item crafting remainder ID.
 pub const MAX_ITEM_CRAFTING_REMAINDER_ID_BYTES: usize = 256;
 /// Maximum number of vanilla attribute modifiers on one registered item.
@@ -111,6 +113,55 @@ pub enum ItemRarity {
     Uncommon = 1,
     Rare = 2,
     Epic = 3,
+}
+
+/// Vanilla item-use animation selected when a registered item is used.
+///
+/// The numeric values are stable host-import codes. `Custom` is excluded because it requires
+/// a mod-owned animation implementation rather than one of Minecraft's static vanilla animations.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ItemUseAnimation {
+    None = 0,
+    Eat = 1,
+    Drink = 2,
+    Block = 3,
+    Bow = 4,
+    Spear = 5,
+    Crossbow = 6,
+    Spyglass = 7,
+    TootHorn = 8,
+    Brush = 9,
+}
+
+/// Static vanilla use animation and hold duration for a registered item.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ItemUseBehavior {
+    animation: ItemUseAnimation,
+    duration_ticks: u32,
+}
+
+impl ItemUseBehavior {
+    /// Creates a static use behavior with a vanilla animation and duration in `1..=72_000` ticks.
+    pub fn new(animation: ItemUseAnimation, duration_ticks: u32) -> SjmlResult<Self> {
+        if !(1..=MAX_ITEM_USE_DURATION_TICKS).contains(&duration_ticks) {
+            return Err(invalid_argument(
+                "item use duration must be between 1 and 72000 ticks",
+            ));
+        }
+        Ok(Self {
+            animation,
+            duration_ticks,
+        })
+    }
+
+    pub const fn animation(self) -> ItemUseAnimation {
+        self.animation
+    }
+
+    pub const fn duration_ticks(self) -> u32 {
+        self.duration_ticks
+    }
 }
 
 /// Equipment-slot group for a static registered-item attribute modifier.
@@ -1605,6 +1656,13 @@ pub struct IntegerComponentDefinition {
     pub maximum: i32,
 }
 
+/// Inclusive finite `f32` value bounds for a persistent, network-synchronized data component.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FloatComponentDefinition {
+    pub minimum: f32,
+    pub maximum: f32,
+}
+
 impl IntegerComponentDefinition {
     /// Creates a component definition after checking that its inclusive range is ordered.
     pub fn new(minimum: i32, maximum: i32) -> SjmlResult<Self> {
@@ -1614,6 +1672,26 @@ impl IntegerComponentDefinition {
             ));
         }
         Ok(Self { minimum, maximum })
+    }
+}
+
+impl FloatComponentDefinition {
+    /// Creates a component definition after checking that both bounds are finite and ordered.
+    pub fn new(minimum: f32, maximum: f32) -> SjmlResult<Self> {
+        if !minimum.is_finite() || !maximum.is_finite() {
+            return Err(invalid_argument("float component bounds must be finite"));
+        }
+        if minimum > maximum {
+            return Err(invalid_argument(
+                "float component minimum must not exceed maximum",
+            ));
+        }
+        Ok(Self { minimum, maximum })
+    }
+
+    /// Returns whether a value is finite and inside this definition's inclusive bounds.
+    pub fn accepts(self, value: f32) -> bool {
+        value.is_finite() && value >= self.minimum && value <= self.maximum
     }
 }
 
@@ -1705,6 +1783,13 @@ extern "C" {
         path_pointer: i32,
         path_length: i32,
         max_stack_size: i32,
+    ) -> i32;
+    #[link_name = "set_item_use_behavior"]
+    fn imported_set_item_use_behavior(
+        path_pointer: i32,
+        path_length: i32,
+        animation: i32,
+        duration_ticks: i32,
     ) -> i32;
     #[link_name = "set_item_crafting_remainder"]
     fn imported_set_item_crafting_remainder(
@@ -2117,6 +2202,21 @@ extern "C" {
         minimum: i32,
         maximum: i32,
     ) -> i32;
+    #[link_name = "register_float_component"]
+    fn imported_register_float_component(
+        path_pointer: i32,
+        path_length: i32,
+        minimum_bits: i32,
+        maximum_bits: i32,
+    ) -> i32;
+    #[link_name = "set_item_float_component"]
+    fn imported_set_item_float_component(
+        item_path_pointer: i32,
+        item_path_length: i32,
+        component_path_pointer: i32,
+        component_path_length: i32,
+        value_bits: i32,
+    ) -> i32;
     #[link_name = "set_item_integer_component"]
     fn imported_set_item_integer_component(
         item_path_pointer: i32,
@@ -2319,6 +2419,34 @@ pub fn set_item_max_stack_size(item_path: &str, max_stack_size: u32) -> SjmlResu
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = max_stack_size;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets a registered item's static vanilla use animation and use duration.
+///
+/// Call this from `#[mod_register]` after declaring the item. The host preserves the selected
+/// vanilla animation and duration as immutable item properties; it does not invoke guest code
+/// while the item is being used. The duration is bounded to `1..=72_000` ticks. `ItemUseAnimation`
+/// exposes the vanilla animations supported by the host, excluding custom arm animations.
+pub fn set_item_use_behavior(item_path: &str, behavior: ItemUseBehavior) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the static animation and duration.
+        let status = unsafe {
+            imported_set_item_use_behavior(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                behavior.animation as i32,
+                behavior.duration_ticks as i32,
+            )
+        };
+        return status_result(status, "host rejected the item use behavior");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = behavior;
         Err(unsupported_target())
     }
 }
@@ -4767,6 +4895,67 @@ pub fn register_integer_component(
     }
 }
 
+/// Registers a persistent, network-synchronized finite `f32` component with inclusive bounds.
+pub fn register_float_component(
+    path: &str,
+    definition: FloatComponentDefinition,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    let definition = FloatComponentDefinition::new(definition.minimum, definition.maximum)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the bounded path and scalar bounds before returning.
+        let status = unsafe {
+            imported_register_float_component(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                definition.minimum.to_bits() as i32,
+                definition.maximum.to_bits() as i32,
+            )
+        };
+        return status_result(status, "host rejected the float component declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = definition;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets a finite float component default on an item declared by this module.
+///
+/// The host confirms that the component and item are module-owned and that the value is inside
+/// the component's inclusive registered bounds.
+pub fn set_item_float_component(
+    item_path: &str,
+    component_path: &str,
+    value: f32,
+) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    validate_path(component_path)?;
+    if !value.is_finite() {
+        return Err(invalid_argument("float component value must be finite"));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies both paths and the scalar value before returning.
+        let status = unsafe {
+            imported_set_item_float_component(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                component_path.as_ptr() as usize as u32 as i32,
+                component_path.len() as u32 as i32,
+                value.to_bits() as i32,
+            )
+        };
+        return status_result(status, "host rejected the item float component default");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err(unsupported_target())
+    }
+}
+
 /// Sets an integer component default on an item registered by this module.
 ///
 /// The host checks that the component belongs to this module and that the value falls within the
@@ -5380,6 +5569,63 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn float_component_definitions_require_finite_ordered_bounds_and_values() {
+        let definition = FloatComponentDefinition::new(-0.5, 8.25).unwrap();
+        assert_eq!(definition.minimum, -0.5);
+        assert_eq!(definition.maximum, 8.25);
+        assert!(definition.accepts(-0.5));
+        assert!(definition.accepts(8.25));
+        assert!(definition.accepts(2.0));
+        for (minimum, maximum) in [
+            (f32::NAN, 1.0),
+            (0.0, f32::INFINITY),
+            (f32::NEG_INFINITY, f32::INFINITY),
+            (1.0, 0.0),
+        ] {
+            assert_eq!(
+                FloatComponentDefinition::new(minimum, maximum)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert!(!definition.accepts(f32::NAN));
+        assert!(!definition.accepts(f32::INFINITY));
+        assert!(!definition.accepts(-0.51));
+        assert!(!definition.accepts(8.26));
+        assert_eq!(
+            register_float_component(
+                "heat",
+                FloatComponentDefinition {
+                    minimum: f32::NEG_INFINITY,
+                    maximum: 1.0,
+                }
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            register_float_component("heat", definition)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_item_float_component("ruby", "heat", f32::NAN)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_float_component("ruby", "heat", 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
         );
     }
 
@@ -7016,6 +7262,53 @@ mod tests {
         );
         assert_eq!(
             set_item_max_stack_size("../bundle", 16).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_use_behavior_is_bounded_and_paths_validate_before_import() {
+        assert_eq!(MAX_ITEM_USE_DURATION_TICKS, 72_000);
+        assert_eq!(
+            [
+                ItemUseAnimation::None as i32,
+                ItemUseAnimation::Eat as i32,
+                ItemUseAnimation::Drink as i32,
+                ItemUseAnimation::Block as i32,
+                ItemUseAnimation::Bow as i32,
+                ItemUseAnimation::Spear as i32,
+                ItemUseAnimation::Crossbow as i32,
+                ItemUseAnimation::Spyglass as i32,
+                ItemUseAnimation::TootHorn as i32,
+                ItemUseAnimation::Brush as i32,
+            ],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        );
+        let minimum = ItemUseBehavior::new(ItemUseAnimation::Eat, 1).unwrap();
+        assert_eq!(minimum.animation(), ItemUseAnimation::Eat);
+        assert_eq!(minimum.duration_ticks(), 1);
+        let maximum =
+            ItemUseBehavior::new(ItemUseAnimation::Brush, MAX_ITEM_USE_DURATION_TICKS).unwrap();
+        assert_eq!(maximum.duration_ticks(), MAX_ITEM_USE_DURATION_TICKS);
+        assert_eq!(
+            set_item_use_behavior("canteen", minimum)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        for invalid_duration in [0, MAX_ITEM_USE_DURATION_TICKS + 1] {
+            assert_eq!(
+                ItemUseBehavior::new(ItemUseAnimation::Drink, invalid_duration)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_item_use_behavior("../canteen", maximum)
+                .unwrap_err()
+                .code(),
             ErrorCode::InvalidArgument
         );
     }

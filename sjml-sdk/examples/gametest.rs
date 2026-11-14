@@ -160,6 +160,7 @@ static SAW_WORLD_LOADED: AtomicBool = AtomicBool::new(false);
 static SAW_SERVER_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_WORLD_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_INVENTORY_PICKUP: AtomicBool = AtomicBool::new(false);
+static SAW_ITEM_BROKEN: AtomicBool = AtomicBool::new(false);
 static SAW_MENU_ACTION: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_DROP_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_ALLOWED_STICK_PICKUP_ATTEMPT: AtomicBool = AtomicBool::new(false);
@@ -298,6 +299,11 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::register_item("gametest_stack_size", ItemDefinition::default())?;
     registry::set_item_max_stack_size("gametest_stack_size", 12)?;
+    registry::register_item("gametest_use_behavior", ItemDefinition::default())?;
+    registry::set_item_use_behavior(
+        "gametest_use_behavior",
+        registry::ItemUseBehavior::new(registry::ItemUseAnimation::Drink, 37)?,
+    )?;
     registry::register_item("gametest_crafting_container", ItemDefinition::default())?;
     registry::set_item_crafting_remainder("gametest_crafting_container", "minecraft:bucket")?;
     registry::register_item("gametest_epic_rarity", ItemDefinition::default())?;
@@ -343,6 +349,11 @@ fn register_test_content() -> SjmlResult<()> {
         IntegerComponentDefinition::new(-10, 10)?,
     )?;
     registry::register_boolean_component("player_enabled")?;
+    registry::register_float_component(
+        "gametest_heat",
+        registry::FloatComponentDefinition::new(-10.0, 10.0)?,
+    )?;
+    registry::set_item_float_component("gametest_use_behavior", "gametest_heat", 0.5)?;
     registry::register_entity("gametest_ai", EntityDefinition::default())?;
     registry::register_entity_spawn_egg(
         "gametest_ai",
@@ -634,6 +645,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe_with_interval("server.tick", EventPriority::Normal, 20)?;
     events::subscribe_with_interval("world.tick", EventPriority::Normal, 2)?;
     events::subscribe("inventory.changed", EventPriority::Normal)?;
+    events::subscribe("player.item_broken", EventPriority::Normal)?;
     events::subscribe("resources.reloaded", EventPriority::Normal)?;
     events::subscribe("menu.action", EventPriority::Normal)?;
     gameplay_events::initialize()?;
@@ -870,6 +882,18 @@ fn observe_inventory_changed(event: InventoryChanged) -> SjmlResult<()> {
     Ok(())
 }
 
+#[event(name = "player.item_broken")]
+fn observe_player_item_broken(event: PlayerItemBroken) -> SjmlResult<()> {
+    if event.player_id.len() == 36
+        && event.dimension_id == "minecraft:overworld"
+        && event.item_id == "minecraft:diamond_sword"
+        && event.hand == "main"
+    {
+        SAW_ITEM_BROKEN.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
 #[event(name = "resources.reloaded")]
 fn mark_successful_resource_reload(event: ResourcesReloaded) -> SjmlResult<()> {
     if event.tick_count < 0 {
@@ -1102,12 +1126,14 @@ fn check_server_tick(_: EntityDeathCheckArguments) -> SjmlResult<String> {
 
 #[command(name = "inventory.changed.check")]
 fn check_inventory_changed(_: EntityDeathCheckArguments) -> SjmlResult<String> {
-    if SAW_INVENTORY_PICKUP.swap(false, Ordering::Relaxed) {
-        Ok("successful inventory pickup callback delivered".to_owned())
+    let saw_pickup = SAW_INVENTORY_PICKUP.swap(false, Ordering::Relaxed);
+    let saw_item_broken = SAW_ITEM_BROKEN.swap(false, Ordering::Relaxed);
+    if saw_pickup && saw_item_broken {
+        Ok("successful inventory pickup and player.item_broken callbacks delivered".to_owned())
     } else {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "inventory.changed callback did not observe the successful diamond pickup",
+            format!("expected inventory pickup and player.item_broken callbacks: inventory.changed={saw_pickup}, player.item_broken={saw_item_broken}"),
         ))
     }
 }
@@ -2525,7 +2551,30 @@ fn player_inventory_integer_component(arguments: PlayerArguments) -> SjmlResult<
             "the player inventory boolean component did not round-trip through the guest API",
         ));
     }
-    Ok("player inventory integer and boolean component read/write succeeded".to_owned())
+    let float_path = "gametest_heat";
+    if sjml::player_inventory::read_float_component(target_player, 1, float_path)?.is_some() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the player inventory float fixture must start without the module component",
+        ));
+    }
+    sjml::player_inventory::write_float_component(target_player, 1, float_path, 2.5)?;
+    if sjml::player_inventory::read_float_component(target_player, 1, float_path)? != Some(2.5) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the player inventory float component did not round-trip through the guest API",
+        ));
+    }
+    let out_of_range =
+        sjml::player_inventory::write_float_component(target_player, 1, float_path, 10.5)
+            .unwrap_err();
+    if out_of_range.code() != ErrorCode::InvalidArgument {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the player inventory float component accepted an out-of-range value",
+        ));
+    }
+    Ok("player inventory integer, boolean, and float components read/write succeeded".to_owned())
 }
 
 #[derive(StableDecode)]

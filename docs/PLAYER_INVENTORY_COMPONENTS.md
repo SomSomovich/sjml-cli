@@ -25,3 +25,8 @@ as tag `0` for `None`, or tag `1` followed by byte `0` or `1`; writes accept onl
 those boolean bytes. The host changes only the registered component and
 synchronizes the active menu. Block inventory access and the shared data
 component contract are documented in [boolean item components](BOOLEAN_ITEM_COMPONENTS.md).
+
+Finite bounded `f32` components use the same module ownership, live-session,
+thread, and permission checks. See
+[`FLOAT_ITEM_COMPONENTS.md`](FLOAT_ITEM_COMPONENTS.md) for item defaults and
+block/player inventory read and write APIs.
