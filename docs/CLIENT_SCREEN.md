@@ -440,6 +440,50 @@ Schema v6 appends its multi-select block after the schema-v1 screen prefix and s
 
 The bounded example is also available at [`sjml-sdk/examples/client_screen_multi_select.rs`](../sjml-cli/sjml-sdk/examples/client_screen_multi_select.rs). Its visible layout and mouse interactions still need a display-backed Minecraft client check.
 
+## Progress bars
+
+Decorate a screen or any existing form definition with one to four passive progress bars using
+`ClientScreenWithProgressBars`. Bars show a literal label, the current numeric value, and a filled
+track. They are display-only: changing a bar never calls guest code. Rebuild the wrapper with a
+new value and call `update()` to replace the active definition in place:
+
+```rust
+use sjml::client_screen::{
+    ClientScreenButton, ClientScreenDefinition, ClientScreenFormDefinition,
+    ClientScreenProgressBar, ClientScreenTextField, ClientScreenWithProgressBars,
+};
+use sjml::SjmlResult;
+
+fn show_download(status: &str, completed: i32) -> SjmlResult<()> {
+    let form = ClientScreenFormDefinition::new(
+        ClientScreenDefinition::new(
+            "download.status",
+            "Downloading assets",
+            vec!["The transfer runs in the background.".to_owned()],
+            vec![ClientScreenButton::new("cancel", "Cancel")?],
+        )?,
+        vec![ClientScreenTextField::new("status", "Status", status, 48)?],
+    )?;
+    ClientScreenWithProgressBars::new(
+        form,
+        vec![ClientScreenProgressBar::new("Files", 0, 100, completed)?],
+    )?
+    .open()
+}
+```
+
+`ClientScreenWithProgressBars` accepts button screens and text, list, settings, slider, and
+multi-select forms. `open()` adds a schema-v8 wrapper around the existing v1–v6 definition.
+`update()` places that same v8 definition inside the owner-scoped schema-v7 update envelope; it
+keeps the existing screen ID, active session, and owner checks. The progress section reserves
+space above the form controls and reduces the scrollable body viewport when needed.
+
+Each bar has a 1–96 byte label, inclusive minimum and maximum within `-1_000_000..=1_000_000`,
+and a value inside that range. Minimum must be less than maximum. Invalid values are rejected
+rather than silently changed; the renderer clamps only its calculated fill fraction to 0–1 as a
+defensive drawing bound. The entire wrapped definition and update remain within the 4,096-byte
+screen payload limit. No display-backed client check has been run for this widget yet.
+
 ## Updating an open screen
 
 An owner can replace the definition of its currently open screen with
@@ -456,7 +500,8 @@ change the form controls and callback route; the host verifies that the owning
 module exported the matching callback before applying the update. Button
 actions and form submissions remain owner-scoped. Schema v7 carries the full
 replacement definition in a versioned update envelope; the existing v1–v6
-open and callback payloads keep their layouts. The codec and host tests cover
+open and callback payloads keep their layouts, while optional progress bars
+use the v8 definition wrapper described above. The codec and host tests cover
 length/version bounds, same-session updates, owner and screen-ID checks, and
 callback switching. Visible control updates still need a display-backed client
 check.

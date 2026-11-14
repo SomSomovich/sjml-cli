@@ -60,6 +60,12 @@ pub const MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT: i32 = -1_000_000;
 pub const MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT: i32 = 1_000_000;
 /// Maximum level represented by a detached `player.experience_change_attempt` snapshot.
 pub const MAX_PLAYER_EXPERIENCE_LEVEL: i32 = 20_000;
+/// Maximum replacement speed accepted for `player.break_speed` callbacks.
+pub const MAX_PLAYER_BREAK_SPEED: f32 = 1_024.0;
+/// Maximum callbacks invoked for one synchronous `player.break_speed` event.
+pub const MAX_PLAYER_BREAK_SPEED_CALLBACKS: usize = 64;
+/// Separate grant required when a `player.break_speed` handler returns `SetSpeed`.
+pub const PLAYER_BREAK_SPEED_MODIFY_CAPABILITY: &str = "player.break_speed.modify";
 /// Minimum level delta accepted by `PlayerExperienceLevelChangeAction::SetLevels`.
 pub const MIN_PLAYER_EXPERIENCE_LEVEL_DELTA: i32 = -20_000;
 /// Maximum level delta accepted by `PlayerExperienceLevelChangeAction::SetLevels`.
@@ -2175,6 +2181,83 @@ pub struct PlayerAttackAttempt {
     pub target_z: f64,
 }
 
+/// Detached logical-server snapshot for the synchronous `player.break_speed` callback.
+///
+/// Return a [`PlayerBreakSpeedAction`] to preserve, replace, or cancel the current speed. The
+/// callback only receives the player's UUID, registry IDs, optional block position, and finite
+/// speed values; it never receives Minecraft objects or causes chunk loads.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerBreakSpeed {
+    /// Canonical UUID string of the player whose dig speed is being calculated.
+    pub player_id: String,
+    /// Canonical resource location of the player's current dimension.
+    pub dimension_id: String,
+    /// Canonical registry ID of the block whose break speed is being calculated.
+    pub block_id: String,
+    /// Block position, when supplied by the NeoForge hook. Legacy calls may omit it.
+    pub position: Option<BlockPos>,
+    /// Speed before this event's listeners ran. May be -1 for an unbreakable block.
+    pub original_speed: f32,
+    /// Current proposed speed, including changes made by earlier listeners.
+    pub current_speed: f32,
+}
+
+/// Synchronous server-thread action returned by a `player.break_speed` callback.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlayerBreakSpeedAction {
+    /// Preserve the current proposed speed and continue to later SJML handlers.
+    Pass,
+    /// Prevent the player from breaking this block.
+    Cancel,
+    /// Replace the proposed speed with a finite value in `0.0..=1024.0`.
+    SetSpeed(f32),
+}
+
+impl StableEncode for PlayerBreakSpeedAction {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        match self {
+            Self::Pass => encoder.write_u8(0),
+            Self::Cancel => encoder.write_u8(1),
+            Self::SetSpeed(speed) => {
+                validate_player_break_speed(*speed)?;
+                encoder.write_u8(2)?;
+                encoder.write_f32(*speed)
+            }
+        }
+    }
+}
+
+impl StableDecode for PlayerBreakSpeedAction {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u8()? {
+            0 => Ok(Self::Pass),
+            1 => Ok(Self::Cancel),
+            2 => {
+                let speed = decoder.read_f32()?;
+                validate_player_break_speed(speed)?;
+                Ok(Self::SetSpeed(speed))
+            }
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("player.break_speed action code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+fn validate_player_break_speed(speed: f32) -> SjmlResult<()> {
+    if !speed.is_finite() || !(0.0..=MAX_PLAYER_BREAK_SPEED).contains(&speed) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            format!(
+                "replacement break speed must be finite and within 0..={MAX_PLAYER_BREAK_SPEED}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Synchronous cancellable snapshot of a logical-server XP change request.
 ///
 /// The callback receives only detached identity and XP values. Return a
@@ -2824,16 +2907,17 @@ mod tests {
         ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
         ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock,
         ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAdvancementProgressEvent,
-        PlayerAttackAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
-        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
-        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
-        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemBroken, PlayerItemCrafted, PlayerItemPickupAttempt,
-        PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction,
-        PlayerRespawned, PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt,
-        PlayerTotemUseAttemptAction, PlayerVillagerTraded, ProjectileImpactAttempt,
-        ResourcesReloaded, ServerTick, WorldLifecycle, WorldTick, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
-        MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+        PlayerAttackAttempt, PlayerBreakSpeed, PlayerBreakSpeedAction, PlayerDropAttempt,
+        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
+        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
+        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemCrafted,
+        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt,
+        PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
+        PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
+        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle, WorldTick,
+        MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
+        MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
         MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
         MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
         MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
@@ -3680,6 +3764,85 @@ mod tests {
             "Rust encoding must match host schema-v1 bytes"
         );
         assert_eq!(from_bytes::<PlayerAttackAttempt>(&encoded).unwrap(), event);
+    }
+
+    #[test]
+    fn player_break_speed_matches_host_schema_v1_bytes_and_bounds_actions() {
+        let event = PlayerBreakSpeed {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            block_id: "minecraft:deepslate".to_owned(),
+            position: Some(BlockPos {
+                x: -3,
+                y: -42,
+                z: 18,
+            }),
+            original_speed: 2.5,
+            current_speed: 3.25,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.player_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        append_test_string(&mut expected, &event.block_id);
+        expected.push(1);
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        expected.extend_from_slice(&event.position.unwrap().x.to_le_bytes());
+        expected.extend_from_slice(&event.position.unwrap().y.to_le_bytes());
+        expected.extend_from_slice(&event.position.unwrap().z.to_le_bytes());
+        expected.extend_from_slice(&event.original_speed.to_le_bytes());
+        expected.extend_from_slice(&event.current_speed.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<PlayerBreakSpeed>(&encoded).unwrap(), event);
+
+        let missing_position = PlayerBreakSpeed {
+            position: None,
+            ..event
+        };
+        let encoded = to_bytes(&missing_position).unwrap();
+        let position_flag = 4
+            + 4
+            + missing_position.player_id.len()
+            + 4
+            + missing_position.dimension_id.len()
+            + 4
+            + missing_position.block_id.len();
+        assert_eq!(encoded[position_flag], 0);
+        assert_eq!(
+            from_bytes::<PlayerBreakSpeed>(&encoded).unwrap(),
+            missing_position
+        );
+
+        for (action, expected) in [
+            (PlayerBreakSpeedAction::Pass, vec![0]),
+            (PlayerBreakSpeedAction::Cancel, vec![1]),
+            (
+                PlayerBreakSpeedAction::SetSpeed(17.5),
+                [vec![2], 17.5_f32.to_le_bytes().to_vec()].concat(),
+            ),
+        ] {
+            let bytes = to_bytes(&action).unwrap();
+            assert_eq!(bytes, expected);
+            assert_eq!(
+                from_bytes::<PlayerBreakSpeedAction>(&bytes).unwrap(),
+                action
+            );
+        }
+        assert!(to_bytes(&PlayerBreakSpeedAction::SetSpeed(f32::NAN)).is_err());
+        assert!(to_bytes(&PlayerBreakSpeedAction::SetSpeed(f32::INFINITY)).is_err());
+        assert!(to_bytes(&PlayerBreakSpeedAction::SetSpeed(-0.01)).is_err());
+        assert!(to_bytes(&PlayerBreakSpeedAction::SetSpeed(
+            MAX_PLAYER_BREAK_SPEED + 0.01
+        ))
+        .is_err());
+        let mut invalid = vec![2];
+        invalid.extend_from_slice(&f32::NAN.to_le_bytes());
+        assert!(from_bytes::<PlayerBreakSpeedAction>(&invalid).is_err());
+        assert!(from_bytes::<PlayerBreakSpeedAction>(&[3]).is_err());
+        assert!(from_bytes::<PlayerBreakSpeedAction>(&[0, 0]).is_err());
     }
 
     #[test]

@@ -142,8 +142,9 @@ pub use abi::{
 };
 pub use batch::{Batch, BatchValue, CallResult};
 pub use block_entity::{
-    BlockEntity, BlockEntitySnapshot, NbtValue, PersistentDataValue, MAX_PERSISTENT_DATA_KEY_BYTES,
-    MAX_PERSISTENT_DATA_STRING_BYTES,
+    BlockEntity, BlockEntitySnapshot, NbtValue, PersistentDataValue, SignSide, SignTextLines,
+    MAX_PERSISTENT_DATA_KEY_BYTES, MAX_PERSISTENT_DATA_STRING_BYTES, MAX_SIGN_TEXT_LINE_BYTES,
+    MAX_SIGN_TEXT_RESPONSE_BYTES,
 };
 pub use chat_messages::{
     ChatClickAction, ChatMessage, ChatMessageAction, ChatMessageSource,
@@ -182,9 +183,10 @@ pub use client_notifications::NotificationKind;
 pub use client_screen::{
     ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition, ClientScreenFormDefinition,
     ClientScreenListFormDefinition, ClientScreenMultiSelectFormDefinition,
-    ClientScreenMultiSelectionList, ClientScreenNumericSlider, ClientScreenSelectionList,
-    ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
-    ClientScreenSliderFormDefinition, ClientScreenTextField,
+    ClientScreenMultiSelectionList, ClientScreenNumericSlider, ClientScreenProgressBar,
+    ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+    ClientScreenSliderFormDefinition, ClientScreenTextField, ClientScreenWithProgressBars,
+    MAX_CLIENT_SCREEN_PROGRESS_BARS, MAX_CLIENT_SCREEN_PROGRESS_BAR_ABS_VALUE,
 };
 pub use command_suggestions::{
     ClientCommandSuggestionRequest, CommandSuggestionArgument, CommandSuggestionRequest,
@@ -194,17 +196,18 @@ pub use command_suggestions::{
 };
 pub use entity::{
     ActiveEffect, EntityEquipment, EntityEquipmentStack, EntityRotation, EntitySnapshot,
-    EntityTargetSnapshot, EntityVelocity, EntityVitals, AI_CONTROL_CAPABILITY,
+    EntityStateSnapshot, EntityTargetSnapshot, EntityVelocity, EntityVitals, AI_CONTROL_CAPABILITY,
     HEALTH_WRITE_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES,
     MAX_ENTITY_EFFECT_ID_BYTES, MAX_ENTITY_EQUIPMENT_DAMAGE, MAX_ENTITY_EQUIPMENT_ITEM_ID_BYTES,
     MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES, MAX_ENTITY_EQUIPMENT_STACK_COUNT, MAX_ENTITY_HEAL_AMOUNT,
     MAX_ENTITY_NAVIGATION_RANGE, MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_PITCH_DEGREES,
-    MAX_ENTITY_TARGET_COORDINATE, MAX_ENTITY_TARGET_ID_BYTES, MAX_ENTITY_TARGET_RANGE,
-    MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES,
-    MAX_ENTITY_TARGET_UUID_BYTES, MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT,
-    MAX_ENTITY_VITALS_VALUE, MAX_ENTITY_YAW_DEGREES, MAX_SPATIAL_QUERY_RADIUS,
-    MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY, ROTATION_WRITE_CAPABILITY,
-    TARGET_WRITE_CAPABILITY, TELEPORT_CAPABILITY,
+    MAX_ENTITY_STATE_RESPONSE_BYTES, MAX_ENTITY_TARGET_COORDINATE, MAX_ENTITY_TARGET_ID_BYTES,
+    MAX_ENTITY_TARGET_RANGE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
+    MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES, MAX_ENTITY_TARGET_UUID_BYTES,
+    MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_ENTITY_VITALS_VALUE,
+    MAX_ENTITY_YAW_DEGREES, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
+    NAVIGATION_WRITE_CAPABILITY, ROTATION_WRITE_CAPABILITY, TARGET_WRITE_CAPABILITY,
+    TELEPORT_CAPABILITY,
 };
 pub use entity_attributes::{
     AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
@@ -242,6 +245,10 @@ pub use events::{
 };
 pub use events::{
     FishedDropSnapshot, PlayerFishedAttempt, MAX_FISHED_DROPS, MAX_FISHED_ITEM_COUNT,
+};
+pub use events::{
+    PlayerBreakSpeed, PlayerBreakSpeedAction, MAX_PLAYER_BREAK_SPEED,
+    MAX_PLAYER_BREAK_SPEED_CALLBACKS, PLAYER_BREAK_SPEED_MODIFY_CAPABILITY,
 };
 pub use events::{PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot};
 pub use events::{
@@ -327,11 +334,11 @@ pub use recipe::{
     CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
 };
 pub use registry::{
-    BlockAabb, BlockBehavior, BlockEntityModelDefinition, BlockPushReaction, BlockShape,
-    BlockShapeBoxes, BlockSound, BlockStateProperty, EntityModelDefinition,
-    IntegerComponentDefinition, ItemFood, ItemFoodEffect, ItemFoodEffects, ItemRarity,
-    ModelAnimation, ModelAnimationAxis, ModelCuboid, VillagerTradeItem, VillagerTradeOffer,
-    MAX_BLOCK_SHAPE_BOXES, MAX_BOUND_MODEL_CUBOIDS, MAX_ITEM_FOOD_EFFECTS,
+    set_item_glint_override, BlockAabb, BlockBehavior, BlockEntityModelDefinition,
+    BlockPushReaction, BlockShape, BlockShapeBoxes, BlockSound, BlockStateProperty,
+    EntityModelDefinition, IntegerComponentDefinition, ItemFood, ItemFoodEffect, ItemFoodEffects,
+    ItemRarity, ModelAnimation, ModelAnimationAxis, ModelCuboid, VillagerTradeItem,
+    VillagerTradeOffer, MAX_BLOCK_SHAPE_BOXES, MAX_BOUND_MODEL_CUBOIDS, MAX_ITEM_FOOD_EFFECTS,
     MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
 };
 pub use render::{
@@ -352,10 +359,11 @@ pub use scoreboard::{
     MAX_SCOREBOARD_ENTRY_BYTES, MAX_SCOREBOARD_OBJECTIVE_BYTES, MAX_SCORE_VALUE,
 };
 pub use screen_input::{
-    subscribe_mouse_released, unsubscribe_key_pressed, unsubscribe_mouse_released,
-    ScreenInputEvent, ScreenInputSubscriptionHandle, ScreenKeyPressedEvent,
-    ScreenKeyPressedSubscriptionHandle, ScreenMouseReleasedEvent,
-    ScreenMouseReleasedSubscriptionHandle, MAX_SCREEN_SCROLL_DELTA,
+    subscribe_mouse_dragged, subscribe_mouse_released, unsubscribe_key_pressed,
+    unsubscribe_mouse_dragged, unsubscribe_mouse_released, ScreenInputEvent,
+    ScreenInputSubscriptionHandle, ScreenKeyPressedEvent, ScreenKeyPressedSubscriptionHandle,
+    ScreenMouseDraggedEvent, ScreenMouseDraggedSubscriptionHandle, ScreenMouseReleasedEvent,
+    ScreenMouseReleasedSubscriptionHandle, MAX_SCREEN_DRAG_DELTA, MAX_SCREEN_SCROLL_DELTA,
 };
 pub use serialization::{
     from_bytes, to_bytes, Decoder, Encoder, StableDecode, StableEncode, MAX_COLLECTION_ITEMS,
@@ -377,10 +385,13 @@ pub use widgets::{
     Button, ProgressBar, TextField, TextFieldAction, Tooltip, WidgetRect, MAX_TEXT_FIELD_BYTES,
 };
 pub use world::{
+    block_destroy_speed, BiomeClimateSnapshot, BiomePrecipitation, BiomeTemperatureModifier,
     BlockProperty, BlockStateSnapshot, BlockUpdateOptions, ChunkPos, FluidStateSnapshot,
     HeightmapType, ItemSpawnVelocity, LightSnapshot, TagRegistry, WorldBorderSnapshot,
-    WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint, MAX_WORLD_BIOME_IDS,
+    WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
+    MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES, MAX_WORLD_BIOME_IDS,
     MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_COORDINATE,
+    MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_DESTROY_SPEED_RESPONSE_BYTES,
     MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
     MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
     MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK, MAX_WORLD_BORDER_DIAMETER,
@@ -402,8 +413,9 @@ pub mod prelude {
     };
     pub use crate::batch::{self, Batch, BatchValue, CallResult};
     pub use crate::block_entity::{
-        self, BlockEntity, BlockEntitySnapshot, NbtValue, PersistentDataValue,
-        MAX_PERSISTENT_DATA_KEY_BYTES, MAX_PERSISTENT_DATA_STRING_BYTES,
+        self, BlockEntity, BlockEntitySnapshot, NbtValue, PersistentDataValue, SignSide,
+        SignTextLines, MAX_PERSISTENT_DATA_KEY_BYTES, MAX_PERSISTENT_DATA_STRING_BYTES,
+        MAX_SIGN_TEXT_LINE_BYTES, MAX_SIGN_TEXT_RESPONSE_BYTES,
     };
     pub use crate::chat_messages;
     pub use crate::chat_messages::{
@@ -451,9 +463,10 @@ pub mod prelude {
         ClientScreenButton, ClientScreenCheckbox, ClientScreenDefinition,
         ClientScreenFormDefinition, ClientScreenListFormDefinition,
         ClientScreenMultiSelectFormDefinition, ClientScreenMultiSelectionList,
-        ClientScreenNumericSlider, ClientScreenSelectionList, ClientScreenSelectionOption,
-        ClientScreenSettingsFormDefinition, ClientScreenSliderFormDefinition,
-        ClientScreenTextField,
+        ClientScreenNumericSlider, ClientScreenProgressBar, ClientScreenSelectionList,
+        ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+        ClientScreenSliderFormDefinition, ClientScreenTextField, ClientScreenWithProgressBars,
+        MAX_CLIENT_SCREEN_PROGRESS_BARS, MAX_CLIENT_SCREEN_PROGRESS_BAR_ABS_VALUE,
     };
     pub use crate::command_suggestions::{
         ClientCommandSuggestionRequest, CommandSuggestionArgument, CommandSuggestionRequest,
@@ -463,13 +476,14 @@ pub mod prelude {
     };
     pub use crate::entity;
     pub use crate::entity::{
-        ActiveEffect, EntityEquipment, EntityEquipmentStack, EntitySnapshot, EntityTargetSnapshot,
-        EntityVelocity, EntityVitals, AI_CONTROL_CAPABILITY, HEALTH_WRITE_CAPABILITY,
-        MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES,
-        MAX_ENTITY_EFFECT_ID_BYTES, MAX_ENTITY_EQUIPMENT_DAMAGE,
-        MAX_ENTITY_EQUIPMENT_ITEM_ID_BYTES, MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES,
-        MAX_ENTITY_EQUIPMENT_STACK_COUNT, MAX_ENTITY_HEAL_AMOUNT, MAX_ENTITY_NAVIGATION_RANGE,
-        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_TARGET_COORDINATE,
+        ActiveEffect, EntityEquipment, EntityEquipmentStack, EntitySnapshot, EntityStateSnapshot,
+        EntityTargetSnapshot, EntityVelocity, EntityVitals, AI_CONTROL_CAPABILITY,
+        HEALTH_WRITE_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
+        MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_EFFECT_ID_BYTES,
+        MAX_ENTITY_EQUIPMENT_DAMAGE, MAX_ENTITY_EQUIPMENT_ITEM_ID_BYTES,
+        MAX_ENTITY_EQUIPMENT_RESPONSE_BYTES, MAX_ENTITY_EQUIPMENT_STACK_COUNT,
+        MAX_ENTITY_HEAL_AMOUNT, MAX_ENTITY_NAVIGATION_RANGE, MAX_ENTITY_NAVIGATION_SPEED,
+        MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_STATE_RESPONSE_BYTES, MAX_ENTITY_TARGET_COORDINATE,
         MAX_ENTITY_TARGET_ID_BYTES, MAX_ENTITY_TARGET_RANGE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
         MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES, MAX_ENTITY_TARGET_UUID_BYTES,
         MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_ENTITY_VITALS_VALUE,
@@ -506,12 +520,12 @@ pub mod prelude {
         EventPriority, ExplosionAttempt, InventoryChanged, ItemTooltipLines, ItemUseAction,
         ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock,
         ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAdvancementProgressEvent,
-        PlayerAttackAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
-        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
-        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
-        PlayerExperienceLevelChangeAttempt, PlayerInteracted, PlayerInteractionAttempt,
-        PlayerItemBroken, PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt,
-        PlayerJoined, PlayerLeft, PlayerMoved, PlayerPotionUseAttempt,
+        PlayerAttackAttempt, PlayerBreakSpeed, PlayerBreakSpeedAction, PlayerDropAttempt,
+        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
+        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
+        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemBroken, PlayerItemCrafted, PlayerItemPickupAttempt,
+        PlayerItemUseAttempt, PlayerJoined, PlayerLeft, PlayerMoved, PlayerPotionUseAttempt,
         PlayerPotionUseAttemptAction, PlayerSleepAttempt, PlayerTick, ProjectileImpactAttempt,
         ResourcesReloaded, ServerTick, WorldLifecycle, WorldTick, CLIENT_ACTION_CANCEL_CAPABILITY,
         DEFAULT_SERVER_TICK_INTERVAL, MAX_BLOCK_DROPS_ATTEMPT_CALLBACKS,
@@ -521,13 +535,14 @@ pub mod prelude {
         MAX_CRAFTED_ITEM_COUNT, MAX_ENTITY_DROPS_ATTEMPT_CALLBACKS, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
         MAX_ENTITY_DROPS_ATTEMPT_DURABILITY, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
         MAX_ENTITY_DROPS_ATTEMPT_PAYLOAD_BYTES, MAX_INVENTORY_CHANGE_COUNT,
-        MAX_INVENTORY_CHANGE_SLOT, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
-        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL,
-        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
-        MAX_PLAYER_POTION_USE_ATTEMPT_CALLBACKS, MAX_PLAYER_POTION_USE_DURATION_TICKS,
-        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_SERVER_TICK_INTERVAL,
-        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
-        PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY, PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
+        MAX_INVENTORY_CHANGE_SLOT, MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_BREAK_SPEED_CALLBACKS,
+        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MAX_PLAYER_EXPERIENCE_LEVEL, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_ATTEMPT_CALLBACKS,
+        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
+        MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA, PLAYER_ADVANCEMENT_OBSERVE_CAPABILITY,
+        PLAYER_BREAK_SPEED_MODIFY_CAPABILITY, PLAYER_EQUIPMENT_OBSERVE_CAPABILITY,
     };
     pub use crate::events::{BlockDropsAttempt, BlockDropsBreakerSnapshot, BlockDropsItemSnapshot};
     pub use crate::events::{EntityDropsAttempt, EntityDropsItemSnapshot};
@@ -632,21 +647,21 @@ pub mod prelude {
         set_block_random_ticking, set_block_shape, set_block_shape_boxes,
         set_block_state_light_level, set_block_state_shape, set_entity_attribute,
         set_item_attribute_modifier, set_item_boolean_component, set_item_float_component,
-        set_item_food, set_item_food_with_effects, set_item_integer_component, set_item_rarity,
-        set_item_string_component, AttributeModifierOperation, BlockAabb, BlockBehavior,
-        BlockDefinition, BlockEntityModelDefinition, BlockPushReaction, BlockShape,
-        BlockShapeBoxes, BlockSound, BlockStateProperty, CookingRecipeDefinition,
-        CookingRecipeKind, CreativeTabDefinition, EffectCategory, EntityAiGoal, EntityAttribute,
-        EntityDefinition, EntityModelDefinition, FloatComponentDefinition, FluidDefinition,
-        FluidVisualDefinition, IntegerComponentDefinition, ItemAttributeModifier,
-        ItemAttributeSlot, ItemDefinition, ItemFood, ItemFoodEffect, ItemFoodEffects, ItemRarity,
-        ModelAnimation, ModelAnimationAxis, ModelCuboid, RecipeIngredient, ShapedRecipeDefinition,
-        ShapedRecipeKey, ShapelessRecipeDefinition, SmithingTransformRecipeDefinition,
-        StringComponentDefinition, VillagerTradeItem, VillagerTradeOffer,
-        MAX_BLOCK_INTEGER_PROPERTY_VALUE, MAX_BLOCK_INTEGER_PROPERTY_VALUES, MAX_BLOCK_SHAPE_BOXES,
-        MAX_BLOCK_STATE_PROPERTIES, MAX_BLOCK_STATE_VARIANTS, MAX_BOUND_MODEL_CUBOIDS,
-        MAX_ENTITY_SPAWN_EGG_RGB_COLOR, MAX_ITEM_ATTRIBUTE_MODIFIERS,
-        MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT, MAX_ITEM_FOOD_EFFECTS,
+        set_item_food, set_item_food_with_effects, set_item_glint_override,
+        set_item_integer_component, set_item_rarity, set_item_string_component,
+        AttributeModifierOperation, BlockAabb, BlockBehavior, BlockDefinition,
+        BlockEntityModelDefinition, BlockPushReaction, BlockShape, BlockShapeBoxes, BlockSound,
+        BlockStateProperty, CookingRecipeDefinition, CookingRecipeKind, CreativeTabDefinition,
+        EffectCategory, EntityAiGoal, EntityAttribute, EntityDefinition, EntityModelDefinition,
+        FloatComponentDefinition, FluidDefinition, FluidVisualDefinition,
+        IntegerComponentDefinition, ItemAttributeModifier, ItemAttributeSlot, ItemDefinition,
+        ItemFood, ItemFoodEffect, ItemFoodEffects, ItemRarity, ModelAnimation, ModelAnimationAxis,
+        ModelCuboid, RecipeIngredient, ShapedRecipeDefinition, ShapedRecipeKey,
+        ShapelessRecipeDefinition, SmithingTransformRecipeDefinition, StringComponentDefinition,
+        VillagerTradeItem, VillagerTradeOffer, MAX_BLOCK_INTEGER_PROPERTY_VALUE,
+        MAX_BLOCK_INTEGER_PROPERTY_VALUES, MAX_BLOCK_SHAPE_BOXES, MAX_BLOCK_STATE_PROPERTIES,
+        MAX_BLOCK_STATE_VARIANTS, MAX_BOUND_MODEL_CUBOIDS, MAX_ENTITY_SPAWN_EGG_RGB_COLOR,
+        MAX_ITEM_ATTRIBUTE_MODIFIERS, MAX_ITEM_ATTRIBUTE_MODIFIER_AMOUNT, MAX_ITEM_FOOD_EFFECTS,
         MAX_ITEM_FOOD_EFFECT_DURATION_TICKS, MAX_ITEM_FOOD_EFFECT_ID_BYTES,
         MIN_BLOCK_INTEGER_PROPERTY_VALUE,
     };
@@ -670,10 +685,11 @@ pub mod prelude {
     };
     pub use crate::screen_input;
     pub use crate::screen_input::{
-        subscribe_mouse_released, unsubscribe_key_pressed, unsubscribe_mouse_released,
-        ScreenInputEvent, ScreenInputSubscriptionHandle, ScreenKeyPressedEvent,
-        ScreenKeyPressedSubscriptionHandle, ScreenMouseReleasedEvent,
-        ScreenMouseReleasedSubscriptionHandle, MAX_SCREEN_INPUT_COORDINATE,
+        subscribe_mouse_dragged, subscribe_mouse_released, unsubscribe_key_pressed,
+        unsubscribe_mouse_dragged, unsubscribe_mouse_released, ScreenInputEvent,
+        ScreenInputSubscriptionHandle, ScreenKeyPressedEvent, ScreenKeyPressedSubscriptionHandle,
+        ScreenMouseDraggedEvent, ScreenMouseDraggedSubscriptionHandle, ScreenMouseReleasedEvent,
+        ScreenMouseReleasedSubscriptionHandle, MAX_SCREEN_DRAG_DELTA, MAX_SCREEN_INPUT_COORDINATE,
         MAX_SCREEN_INPUT_SUBSCRIPTIONS, MAX_SCREEN_SCROLL_DELTA,
     };
     pub use crate::serialization::{
@@ -695,13 +711,16 @@ pub mod prelude {
     };
     pub use crate::world;
     pub use crate::world::{
+        block_destroy_speed, BiomeClimateSnapshot, BiomePrecipitation, BiomeTemperatureModifier,
         BlockProperty, BlockStateSnapshot, BlockUpdateOptions, ChunkPos, FluidStateSnapshot,
         HeightmapType, ItemSpawnVelocity, LightSnapshot, ProjectileVelocity, RaycastBlockMode,
         RaycastFluidMode, RaycastHit, RaycastPoint, TagRegistry, VanillaProjectileKind,
         WorldBorderSnapshot, WorldDifficulty, WorldGameRule, WorldIntegerGameRule, WorldSpawnPoint,
-        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES,
-        MAX_WORLD_BLOCK_PROPERTY_UPDATES, MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS,
-        MAX_WORLD_BORDER_CENTER, MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
+        MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES, MAX_WORLD_BLOCK_COORDINATE,
+        MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_DESTROY_SPEED_RESPONSE_BYTES,
+        MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
+        MAX_WORLD_BLOCK_STATES, MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_BORDER_CENTER,
+        MAX_WORLD_BORDER_DAMAGE_BUFFER, MAX_WORLD_BORDER_DAMAGE_PER_BLOCK,
         MAX_WORLD_BORDER_DIAMETER, MAX_WORLD_BORDER_LERP_MILLIS, MAX_WORLD_BORDER_WARNING_BLOCKS,
         MAX_WORLD_BORDER_WARNING_SECONDS, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES,
         MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED, MAX_WORLD_ITEM_STACK_COUNT,

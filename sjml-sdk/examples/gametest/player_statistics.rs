@@ -89,36 +89,20 @@ fn increment_and_verify(
     Ok(())
 }
 
-#[command(name = "player.statistics.registry.blocks")]
-fn check_block_statistics(input: PlayerId) -> SjmlResult<String> {
+#[command(name = "player.statistics.registry.increment")]
+fn check_registry_statistics(input: PlayerId) -> SjmlResult<String> {
     let handle = player_handle(&input.uuid)?;
     increment_and_verify(handle, StatisticFamily::BlockMined, "minecraft:stone")?;
-    Ok("block-mined statistic incremented".to_owned())
-}
-
-#[command(name = "player.statistics.registry.items")]
-fn check_item_statistics(input: PlayerId) -> SjmlResult<String> {
-    let handle = player_handle(&input.uuid)?;
     for (family, registry_id) in [
         (StatisticFamily::ItemUsed, "minecraft:diamond"),
         (StatisticFamily::ItemBroken, "minecraft:diamond"),
         (StatisticFamily::ItemCrafted, "minecraft:diamond"),
-    ] {
-        increment_and_verify(handle, family, registry_id)?;
-    }
-    Ok("item statistics incremented".to_owned())
-}
-
-#[command(name = "player.statistics.registry.entities")]
-fn check_entity_statistics(input: PlayerId) -> SjmlResult<String> {
-    let handle = player_handle(&input.uuid)?;
-    for (family, registry_id) in [
         (StatisticFamily::EntityKilled, "minecraft:zombie"),
         (StatisticFamily::EntityKilledBy, "minecraft:zombie"),
     ] {
         increment_and_verify(handle, family, registry_id)?;
     }
-    Ok("entity statistics incremented".to_owned())
+    Ok("registry-backed statistics incremented".to_owned())
 }
 
 fn set_and_restore(

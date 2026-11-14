@@ -38,6 +38,8 @@ pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
 pub const MAX_ENTITY_HEAL_AMOUNT: f32 = 64.0;
 /// Current health, maximum health, or absorption value returned in one bounded snapshot.
 pub const MAX_ENTITY_VITALS_VALUE: f32 = 1_000_000.0;
+/// Exact schema-v1 response size for seven detached entity state flags.
+pub const MAX_ENTITY_STATE_RESPONSE_BYTES: u32 = 11;
 /// Capability required with `entity.read` to request a bounded heal for a live entity.
 pub const HEALTH_WRITE_CAPABILITY: &str = "entity.health.write";
 /// Maximum UTF-8 byte length of a canonical item registry ID in an entity equipment snapshot.
@@ -218,6 +220,26 @@ pub struct EntityVitals {
     pub max_health: f32,
     /// Current absorption health, independently bounded by the host response limit.
     pub absorption: f32,
+}
+
+/// Detached movement and visibility flags for one loaded non-player entity.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityStateSnapshot {
+    /// Whether Minecraft currently considers the entity grounded.
+    pub on_ground: bool,
+    /// Whether the entity is currently in water.
+    pub in_water: bool,
+    /// Whether the entity is currently burning.
+    pub on_fire: bool,
+    /// Whether the entity is sprinting.
+    pub sprinting: bool,
+    /// Whether the entity is crouching.
+    pub crouching: bool,
+    /// Whether the entity is invisible.
+    pub invisible: bool,
+    /// Whether the entity is currently glowing.
+    pub glowing: bool,
 }
 
 /// Detached item identity, count, and durability for one living entity equipment slot.
@@ -593,6 +615,8 @@ extern "C" {
     fn imported_raycast(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "snapshot"]
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "state"]
+    fn imported_state(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "equipment"]
     fn imported_equipment(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_equipment"]
@@ -1032,6 +1056,35 @@ pub fn snapshot(handle: EntityHandle) -> SjmlResult<EntitySnapshot> {
             // SAFETY: the encoded handle and destination remain live through the synchronous call.
             unsafe {
                 imported_snapshot(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads seven detached movement/render-state flags for one loaded non-player entity.
+///
+/// The module must request and receive `entity.read`. The read is synchronous on the owning
+/// logical-server thread; the host validates the live, module-owned handle and does not load
+/// chunks. The flags report Minecraft's current grounded, water, fire, sprint, crouch, invisibility,
+/// and glowing state. No Minecraft object or mutable state crosses the ABI.
+pub fn state_snapshot(handle: EntityHandle) -> SjmlResult<EntityStateSnapshot> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output::<EntityStateSnapshot>(MAX_ENTITY_STATE_RESPONSE_BYTES, |output, capacity| {
+            // SAFETY: the encoded handle and destination stay live through this synchronous import.
+            unsafe {
+                imported_state(
                     encoded.as_ptr() as usize as u32 as i32,
                     encoded.len() as i32,
                     output,
@@ -2387,14 +2440,15 @@ mod tests {
         validate_custom_name, validate_entity_raycast, validate_navigation_target,
         validate_spatial_query, validate_teleport_target, within, ActiveEffect,
         ActiveEffectsResponse, EntityCustomNameResponse, EntityNavigationRequest,
-        EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityTargetResult,
-        EntityTargetSnapshot, EntityTargetSnapshotResult, EntityTeleportRequest, EntityVelocity,
-        SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
-        MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
-        MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
-        MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
-        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_TARGET_COORDINATE,
-        MAX_ENTITY_TARGET_ID_BYTES, MAX_ENTITY_TARGET_RANGE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
+        EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityStateSnapshot,
+        EntityTargetResult, EntityTargetSnapshot, EntityTargetSnapshotResult,
+        EntityTeleportRequest, EntityVelocity, SpatialQuery, SpatialResults,
+        MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES,
+        MAX_ENTITY_CUSTOM_NAME_BYTES, MAX_ENTITY_CUSTOM_NAME_CODE_POINTS,
+        MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES, MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS,
+        MAX_ENTITY_NAVIGATION_RANGE, MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE,
+        MAX_ENTITY_STATE_RESPONSE_BYTES, MAX_ENTITY_TARGET_COORDINATE, MAX_ENTITY_TARGET_ID_BYTES,
+        MAX_ENTITY_TARGET_RANGE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
         MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES, MAX_ENTITY_TARGET_UUID_BYTES,
         MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
         MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
@@ -2402,6 +2456,27 @@ mod tests {
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
     };
+
+    #[test]
+    fn state_snapshot_wire_schema_matches_host_field_order() {
+        let state = EntityStateSnapshot {
+            on_ground: true,
+            in_water: false,
+            on_fire: true,
+            sprinting: false,
+            crouching: true,
+            invisible: false,
+            glowing: true,
+        };
+        let expected = [1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1];
+        let encoded = crate::to_bytes(&state).unwrap();
+        assert_eq!(encoded, expected);
+        assert_eq!(MAX_ENTITY_STATE_RESPONSE_BYTES as usize, encoded.len());
+        assert_eq!(
+            crate::from_bytes::<EntityStateSnapshot>(&encoded).unwrap(),
+            state
+        );
+    }
 
     #[test]
     fn active_effect_response_is_versioned_bounded_and_validated() {

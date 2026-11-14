@@ -820,6 +820,23 @@ mod tests {
     }
 
     #[test]
+    fn player_break_speed_exports_a_synchronous_typed_action_callback() {
+        let generated = expand_event(
+            quote!(name = "player.break_speed"),
+            quote! {
+                fn set_break_speed(event: PlayerBreakSpeed) -> SjmlResult<PlayerBreakSpeedAction> {
+                    let _current = event.current_speed;
+                    Ok(PlayerBreakSpeedAction::Pass)
+                }
+            },
+        );
+        assert!(generated
+            .to_string()
+            .contains("sjml_v1_event_player.break_speed"));
+        assert!(generated.to_string().contains("dispatch_payload"));
+    }
+
+    #[test]
     fn cancellable_entity_heal_attempt_exports_the_sync_boolean_callback() {
         let generated = expand_event(
             quote!(name = "entity.heal_attempt"),

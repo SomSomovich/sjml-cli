@@ -49,6 +49,14 @@ fn register_content() -> SjmlResult<()> {
     )?;
     registry::register_entity_ai_goal(
         "river_mite",
+        EntityAiGoal::LookAtEntityType {
+            priority: 4,
+            entity_type_id: "minecraft:cow".to_owned(),
+            range: 24.0,
+        },
+    )?;
+    registry::register_entity_ai_goal(
+        "river_mite",
         EntityAiGoal::Retaliate { priority: 0 },
     )?;
     Ok(())
@@ -65,6 +73,7 @@ Every goal requires `content.register`. Priorities are `0..=31`; movement speeds
 | `Panic` | Flee after damage or ignition | Priority, speed |
 | `RandomSwimming` | Swim to random water positions | Priority, speed; vanilla target selection interval is 120 ticks |
 | `LookAtPlayer` | Turn toward a nearby player | Priority, range in blocks (`1..=64`); target class is fixed to `Player` |
+| `LookAtEntityType` | Turn toward the nearest living entity whose registry ID exactly matches the declared type | Priority, fully qualified entity type ID, range (`1..=64`) |
 | `AvoidPlayer` | Flee from nearby players using vanilla avoidance pathfinding | Priority, range (`1..=32`), walk and sprint speeds (`0.01..=8.0`), sprint speed must be at least walk speed; target class is fixed to `Player` |
 | `AvoidEntityType` | Flee from living entities whose registry ID exactly matches the declared type | Priority, fully qualified entity type ID, range (`1..=32`), walk and sprint speeds (`0.01..=8.0`) |
 | `MeleeAttack` | Attack a visible target | Priority, speed, long-memory flag |
@@ -75,6 +84,6 @@ Every goal requires `content.register`. Priorities are `0..=31`; movement speeds
 
 Goals are immutable after registration. They apply only to SJML-declared entity types and are never installed on vanilla or another mod's entities. Guest callbacks, arbitrary goal classes, arbitrary goal priority controls, and custom entity subclasses are not exposed. Loaded vanilla Mobs have separate bounded AI enable/disable and navigation APIs; see [entity AI control](ENTITY_AI_CONTROL.md) and [entity navigation](ENTITY_NAVIGATION.md).
 
-`AvoidPlayer` uses the additive `register_entity_ai_goal_v2` host import to carry its range and two speed modifiers. The type-specific goals use `register_entity_ai_goal_v3`, which also carries a bounded canonical entity type ID; vanilla goal selectors inspect living entities and then filter to that exact type. The existing v1 and v2 imports remain unchanged. A target type absent from the registry is skipped with a host warning when the mob is created; a non-living registered type has no living candidates and therefore never matches. Use a registered living entity type ID. All static goal imports require `content.register` and are accepted only during `mod_register`. No guest AI callback runs from Minecraft's AI tick.
+`AvoidPlayer` uses the additive `register_entity_ai_goal_v2` host import to carry its range and two speed modifiers. The type-specific goals use `register_entity_ai_goal_v3`, which also carries a bounded canonical entity type ID; vanilla goal selectors inspect living entities and then filter to that exact type. `LookAtEntityType` uses vanilla look-at scheduling and a static exact-type selector. The existing v1 and v2 imports remain unchanged. A target type absent from the registry is skipped with a host warning when the mob is created; a non-living registered type has no living candidates and therefore never matches. Use a registered living entity type ID. All static goal imports require `content.register` and are accepted only during `mod_register`. No guest AI callback runs from Minecraft's AI tick.
 
 `EntityAiGameTests.guestEntityInstallsItsDeclaredVanillaAiGoals` spawns the GameTest guest's entity, verifies it targets a farther cow instead of a closer pig, and checks the exact-type avoidance predicate.

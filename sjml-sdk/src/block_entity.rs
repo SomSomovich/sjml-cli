@@ -37,6 +37,51 @@ pub const MAX_PERSISTENT_DATA_KEY_BYTES: usize = 64;
 /// Maximum UTF-8 bytes in one persistent-data string value.
 pub const MAX_PERSISTENT_DATA_STRING_BYTES: usize = 2_048;
 
+/// Maximum UTF-8 bytes in one literal line exposed by the sign-text API.
+pub const MAX_SIGN_TEXT_LINE_BYTES: usize = 2_048;
+/// Maximum bytes returned for four literal lines plus their bounded wire framing.
+pub const MAX_SIGN_TEXT_RESPONSE_BYTES: usize = 2 * 4 + 4 * (4 + MAX_SIGN_TEXT_LINE_BYTES);
+
+/// Which side of a double-sided vanilla sign a text operation addresses.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum SignSide {
+    /// The front face of the sign.
+    Front,
+    /// The back face of the sign.
+    Back,
+}
+
+impl SignSide {
+    #[cfg(any(target_arch = "wasm32", test))]
+    const fn wire_value(self) -> i32 {
+        match self {
+            Self::Front => 0,
+            Self::Back => 1,
+        }
+    }
+}
+
+/// Four detached plain-text lines from one side of a vanilla sign.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SignTextLines {
+    lines: [String; 4],
+}
+
+impl SignTextLines {
+    /// Creates four bounded printable lines. Formatting and click actions are not accepted.
+    pub fn new(lines: [String; 4]) -> SjmlResult<Self> {
+        for line in &lines {
+            validate_sign_line(line)?;
+        }
+        Ok(Self { lines })
+    }
+
+    /// Returns the four lines in sign order.
+    pub fn lines(&self) -> &[String; 4] {
+        &self.lines
+    }
+}
+
 /// One immutable NBT value. The encoding uses standard NBT tag numbers and a versioned root.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NbtValue {
@@ -269,6 +314,16 @@ impl BlockEntity {
     pub fn remove_data(self, key: &str) -> SjmlResult<()> {
         remove_data(self.handle, key)
     }
+
+    /// Reads the selected side of a loaded vanilla sign as four plain-text lines.
+    pub fn sign_text(self, side: SignSide) -> SjmlResult<SignTextLines> {
+        read_sign_text(self.handle, side)
+    }
+
+    /// Replaces the selected side of a loaded, unwaxed vanilla sign with literal text.
+    pub fn set_sign_text(self, side: SignSide, lines: &SignTextLines) -> SjmlResult<()> {
+        set_sign_text(self.handle, side, lines)
+    }
 }
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "sjml_block_entity_v1")]
@@ -287,6 +342,11 @@ extern "C" {
     fn imported_set_data(request: i32, request_length: i32) -> i32;
     #[link_name = "remove_data"]
     fn imported_remove_data(request: i32, request_length: i32) -> i32;
+    #[link_name = "sign_text"]
+    fn imported_sign_text(h: i32, hl: i32, side: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_sign_text"]
+    fn imported_set_sign_text(h: i32, hl: i32, side: i32, payload: i32, payload_length: i32)
+        -> i32;
 }
 pub fn get(world: WorldHandle, pos: BlockPos) -> SjmlResult<Option<BlockEntity>> {
     #[cfg(target_arch = "wasm32")]
@@ -435,6 +495,131 @@ fn remove_data(handle: BlockEntityHandle, key: &str) -> SjmlResult<()> {
         let _ = handle;
         Err(unsupported())
     }
+}
+
+/// Reads four literal lines from one side of a loaded vanilla sign.
+///
+/// The handle must come from [`get`], the call must run on the logical-server thread, and the
+/// module needs `block_entity.sign.read`. The host never loads a chunk.
+pub fn read_sign_text(handle: BlockEntityHandle, side: SignSide) -> SjmlResult<SignTextLines> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let handle_bytes = to_bytes(&handle)?;
+        let response = read_raw_data_output(
+            MAX_SIGN_TEXT_RESPONSE_BYTES as u32,
+            |output, capacity| unsafe {
+                imported_sign_text(
+                    handle_bytes.as_ptr() as i32,
+                    handle_bytes.len() as i32,
+                    side.wire_value(),
+                    output,
+                    capacity,
+                )
+            },
+        )?;
+        decode_sign_text_response(&response)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, side);
+        Err(unsupported())
+    }
+}
+
+/// Replaces one side of a loaded unwaxed vanilla sign with four plain-text lines.
+///
+/// The write requires `block_entity.sign.write` and `world.write`, and must run on the logical-
+/// server thread. The operation preserves the sign's text color and glowing-text setting while
+/// replacing each line with a literal component that has no click or hover actions.
+pub fn set_sign_text(
+    handle: BlockEntityHandle,
+    side: SignSide,
+    lines: &SignTextLines,
+) -> SjmlResult<()> {
+    for line in &lines.lines {
+        validate_sign_line(line)?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let handle_bytes = to_bytes(&handle)?;
+        let payload = encode_sign_text_request(lines)?;
+        let capacity = u32::try_from(payload.len()).map_err(|_| data_limit())?;
+        let pointer = allocate_host_input(capacity);
+        if pointer == 0 {
+            return Err(data_limit());
+        }
+        unsafe {
+            core::ptr::copy_nonoverlapping(payload.as_ptr(), pointer as *mut u8, payload.len())
+        };
+        let status = unsafe {
+            imported_set_sign_text(
+                handle_bytes.as_ptr() as i32,
+                handle_bytes.len() as i32,
+                side.wire_value(),
+                pointer as i32,
+                capacity as i32,
+            )
+        };
+        unsafe { deallocate_host_input(pointer, capacity) };
+        status_data(status, "host rejected sign text write")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, side, lines);
+        Err(unsupported())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+const SIGN_TEXT_SCHEMA: u32 = 1;
+
+fn validate_sign_line(line: &str) -> SjmlResult<()> {
+    if line.len() > MAX_SIGN_TEXT_LINE_BYTES || line.chars().any(char::is_control) {
+        return Err(data_invalid(
+            "sign text lines must be printable and at most 2048 UTF-8 bytes",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn encode_sign_text_request(lines: &SignTextLines) -> SjmlResult<Vec<u8>> {
+    let mut encoder = crate::Encoder::new();
+    encoder.write_u32(SIGN_TEXT_SCHEMA)?;
+    encoder.write_u32(4)?;
+    for line in &lines.lines {
+        validate_sign_line(line)?;
+        line.encode(&mut encoder)?;
+    }
+    Ok(encoder.into_bytes())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn decode_sign_text_response(bytes: &[u8]) -> SjmlResult<SignTextLines> {
+    let mut input = bytes;
+    let schema = take_data_u32(&mut input)?;
+    if schema != SIGN_TEXT_SCHEMA {
+        return Err(SjmlError::new(
+            ErrorCode::IncompatibleAbiVersion,
+            "unsupported sign text response schema",
+        ));
+    }
+    if take_data_u32(&mut input)? != 4 {
+        return Err(data_invalid(
+            "sign text response must contain exactly four lines",
+        ));
+    }
+    let mut lines = Vec::with_capacity(4);
+    for _ in 0..4 {
+        let line = take_data_string(&mut input, MAX_SIGN_TEXT_LINE_BYTES)?;
+        validate_sign_line(&line)?;
+        lines.push(line);
+    }
+    ensure_data_padding(input)?;
+    let lines: [String; 4] = lines
+        .try_into()
+        .map_err(|_| data_invalid("sign text response must contain four lines"))?;
+    Ok(SignTextLines { lines })
 }
 
 fn validate_data_key(key: &str) -> SjmlResult<()> {
@@ -711,6 +896,84 @@ mod persistent_data_tests {
         let mut result = vec![0; DATA_RESPONSE_CAPACITY as usize];
         result[..bytes.len()].copy_from_slice(bytes);
         result
+    }
+}
+
+#[cfg(test)]
+mod sign_text_tests {
+    use super::*;
+
+    #[test]
+    fn four_line_wire_round_trip_is_bounded_and_little_endian() {
+        let lines = SignTextLines::new([
+            "front door".to_owned(),
+            "雪の家".to_owned(),
+            String::new(),
+            "welcome".to_owned(),
+        ])
+        .unwrap();
+        let request = encode_sign_text_request(&lines).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(request[0..4].try_into().unwrap()),
+            SIGN_TEXT_SCHEMA
+        );
+        assert_eq!(u32::from_le_bytes(request[4..8].try_into().unwrap()), 4);
+        assert_eq!(
+            decode_sign_text_response(&padded_sign(&request)).unwrap(),
+            lines
+        );
+    }
+
+    #[test]
+    fn sign_lines_reject_control_characters_and_oversized_utf8() {
+        assert!(SignTextLines::new([
+            "line\nfeed".into(),
+            String::new(),
+            String::new(),
+            String::new()
+        ])
+        .is_err());
+        assert!(SignTextLines::new([
+            "é".repeat(MAX_SIGN_TEXT_LINE_BYTES / 2 + 1),
+            String::new(),
+            String::new(),
+            String::new(),
+        ])
+        .is_err());
+        assert_eq!(SignSide::Front.wire_value(), 0);
+        assert_eq!(SignSide::Back.wire_value(), 1);
+    }
+
+    #[test]
+    fn sign_response_rejects_wrong_schema_count_invalid_utf8_and_nonzero_padding() {
+        let lines =
+            SignTextLines::new([String::new(), String::new(), String::new(), String::new()])
+                .unwrap();
+        let valid = encode_sign_text_request(&lines).unwrap();
+
+        let mut wrong_schema = valid.clone();
+        wrong_schema[0] = 2;
+        assert_eq!(
+            decode_sign_text_response(&padded_sign(&wrong_schema))
+                .unwrap_err()
+                .code(),
+            ErrorCode::IncompatibleAbiVersion
+        );
+
+        let mut wrong_count = valid.clone();
+        wrong_count[4] = 3;
+        assert!(decode_sign_text_response(&padded_sign(&wrong_count)).is_err());
+
+        let mut bad_padding = padded_sign(&valid);
+        let last = bad_padding.len() - 1;
+        bad_padding[last] = 1;
+        assert!(decode_sign_text_response(&bad_padding).is_err());
+    }
+
+    fn padded_sign(payload: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0; MAX_SIGN_TEXT_RESPONSE_BYTES];
+        bytes[..payload.len()].copy_from_slice(payload);
+        bytes
     }
 }
 #[cfg(target_arch = "wasm32")]

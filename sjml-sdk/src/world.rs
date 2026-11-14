@@ -26,6 +26,10 @@ pub const MAX_WORLD_BLOCK_PROPERTY_UPDATES: usize = 32;
 pub const MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES: usize = 10_932;
 /// Maximum output bytes reserved for one block-property snapshot.
 pub const MAX_WORLD_BLOCK_PROPERTIES_RESPONSE_BYTES: usize = 21_257;
+/// Maximum finite destroy speed returned by [`block_destroy_speed`].
+pub const MAX_WORLD_BLOCK_DESTROY_SPEED: f32 = 1_000_000.0;
+/// Maximum encoded response bytes reserved for [`block_destroy_speed`].
+pub const MAX_WORLD_BLOCK_DESTROY_SPEED_RESPONSE_BYTES: usize = 9;
 /// Allowed raw update-bit mask for [`set_block_with_options`].
 pub const WORLD_BLOCK_UPDATE_ALLOWED_MASK: i32 = 0b1_0011;
 /// Maximum output bytes reserved for one fluid-state snapshot.
@@ -96,6 +100,9 @@ pub const MAX_WORLD_CHUNKS_RESPONSE_BYTES: usize = 8 + MAX_WORLD_CHUNKS * 12;
 pub const MAX_WORLD_BIOME_IDS: usize = 4_000;
 /// Maximum UTF-8 bytes in one biome ID returned by [`biome_ids`].
 pub const MAX_WORLD_BIOME_ID_BYTES: usize = 256;
+/// Maximum stable response size for [`biome_climate_at`].
+pub const MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES: usize =
+    5 + 4 + MAX_WORLD_BIOME_ID_BYTES + 2 * 4 + 3;
 /// Maximum stable response size for [`biome_ids`].
 pub const MAX_WORLD_BIOME_IDS_RESPONSE_BYTES: usize =
     8 + MAX_WORLD_BIOME_IDS * (4 + MAX_WORLD_BIOME_ID_BYTES);
@@ -221,6 +228,43 @@ pub struct LightSnapshot {
     pub sky: u8,
     /// Block-emitted light.
     pub block: u8,
+}
+
+/// The biome's static Minecraft temperature adjustment rule.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum BiomeTemperatureModifier {
+    /// Use the biome's configured base temperature directly.
+    None,
+    /// Apply Minecraft's frozen-ocean temperature adjustment.
+    Frozen,
+}
+
+/// Precipitation Minecraft would produce at the queried position under precipitation weather.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum BiomePrecipitation {
+    /// The biome has no precipitation at the queried position.
+    None,
+    /// Rain is used at the queried position.
+    Rain,
+    /// Snow is used at the queried position.
+    Snow,
+}
+
+/// Detached static climate properties for a biome at a loaded world position.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BiomeClimateSnapshot {
+    /// Canonical biome registry ID.
+    pub biome_id: String,
+    /// Registered base temperature before Minecraft's position adjustment.
+    pub base_temperature: f32,
+    /// Registered biome downfall value.
+    pub downfall: f32,
+    /// Whether the biome supports precipitation.
+    pub has_precipitation: bool,
+    /// Static modifier applied by Minecraft to temperature calculations.
+    pub temperature_modifier: BiomeTemperatureModifier,
+    /// Rain, snow, or no precipitation at this position.
+    pub precipitation_at_position: BiomePrecipitation,
 }
 
 /// Detached weather timers and current precipitation state for one loaded dimension.
@@ -611,6 +655,111 @@ struct BiomeIdsResponse {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
+struct BiomeClimateQuery {
+    world: WorldHandle,
+    position: BlockPos,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
+struct BiomeClimateResponse {
+    result: Option<BiomeClimateSnapshot>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for BiomeClimateResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        if decoder.read_u32()? != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported biome-climate response schema",
+            ));
+        }
+        let available = match decoder.read_u8()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "biome-climate availability flag must be 0 or 1",
+                ));
+            }
+        };
+        if !available {
+            return Ok(Self { result: None });
+        }
+        let id_length = decoder.read_length(MAX_WORLD_BIOME_ID_BYTES)?;
+        if id_length == 0 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "biome ID must not be empty",
+            ));
+        }
+        let biome_id = String::from_utf8(decoder.read_raw(id_length)?.to_vec()).map_err(|_| {
+            SjmlError::new(ErrorCode::InvalidUtf8, "biome ID contains malformed UTF-8")
+        })?;
+        validate_resource_id(&biome_id, "biome")?;
+        let base_temperature = decoder.read_f32()?;
+        let downfall = decoder.read_f32()?;
+        if !base_temperature.is_finite() || !downfall.is_finite() {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "biome climate values must be finite",
+            ));
+        }
+        let has_precipitation = match decoder.read_u8()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "biome precipitation flag must be 0 or 1",
+                ));
+            }
+        };
+        let temperature_modifier = match decoder.read_u8()? {
+            0 => BiomeTemperatureModifier::None,
+            1 => BiomeTemperatureModifier::Frozen,
+            _ => {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "biome temperature modifier is unknown",
+                ));
+            }
+        };
+        let precipitation_at_position = match decoder.read_u8()? {
+            0 => BiomePrecipitation::None,
+            1 => BiomePrecipitation::Rain,
+            2 => BiomePrecipitation::Snow,
+            _ => {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "biome precipitation type is unknown",
+                ));
+            }
+        };
+        if !has_precipitation && precipitation_at_position != BiomePrecipitation::None {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "biome without precipitation returned rain or snow",
+            ));
+        }
+        Ok(Self {
+            result: Some(BiomeClimateSnapshot {
+                biome_id,
+                base_temperature,
+                downfall,
+                has_precipitation,
+                temperature_modifier,
+                precipitation_at_position,
+            }),
+        })
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
 struct StructuresAtQuery {
     world: WorldHandle,
     position: BlockPos,
@@ -864,6 +1013,21 @@ struct BlockPropertiesResponse {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
+struct BlockDestroySpeedQuery {
+    world: WorldHandle,
+    position: BlockPos,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct BlockDestroySpeedResponse {
+    destroy_speed: Option<f32>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
 struct FluidStateQuery {
     world: WorldHandle,
     position: BlockPos,
@@ -1069,6 +1233,8 @@ extern "C" {
     ) -> i32;
     #[link_name = "biome_ids"]
     fn imported_biome_ids(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "biome_climate_at"]
+    fn imported_biome_climate_at(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "structures_at"]
     fn imported_structures_at(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "block_has_tag"]
@@ -1147,6 +1313,13 @@ extern "C" {
     fn imported_block_states(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "block_properties"]
     fn imported_block_properties(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "block_destroy_speed"]
+    fn imported_block_destroy_speed(
+        query: i32,
+        query_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
     #[link_name = "fluid_at"]
     fn imported_fluid_at(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "raycast"]
@@ -1670,6 +1843,43 @@ pub fn biome_at(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<Str
         }
         validate_resource_id(&id, "biome")?;
         Ok(Some(id))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
+/// Reads static climate settings and local precipitation for a position in an already-loaded biome.
+///
+/// Requires `world.read` and a live logical-server [`WorldHandle`]. The returned temperature and
+/// downfall are the biome's registered settings; `precipitation_at_position` also accounts for
+/// the queried Y coordinate. Returns `None` outside build height or when the position's chunk is
+/// not already loaded. The query never loads a chunk.
+pub fn biome_climate_at(
+    world: WorldHandle,
+    position: BlockPos,
+) -> SjmlResult<Option<BiomeClimateSnapshot>> {
+    validate_world_position(position)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&BiomeClimateQuery { world, position })?;
+        let response: BiomeClimateResponse = read_output(
+            MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the stable query and bounded destination remain live for this synchronous call.
+                unsafe {
+                    imported_biome_climate_at(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        Ok(response.result)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -2691,6 +2901,48 @@ pub fn block_properties(
     }
 }
 
+/// Reads the vanilla destroy-speed value for one already-loaded block position.
+///
+/// Returns `None` when the position is outside build height or its chunk is not loaded; this query
+/// never loads chunks. A result of `-1.0` means vanilla considers the block unbreakable; all other
+/// results are finite values from `0.0` through [`MAX_WORLD_BLOCK_DESTROY_SPEED`]. The value is the
+/// block state's vanilla hardness/destroy speed and excludes player tool, effect, and enchantment
+/// modifiers. Requires `world.read` and the logical-server context.
+pub fn block_destroy_speed(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<f32>> {
+    if position.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block x/z coordinates must be within ±30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&BlockDestroySpeedQuery { world, position })?;
+        let response: BlockDestroySpeedResponse = read_output(
+            MAX_WORLD_BLOCK_DESTROY_SPEED_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: the encoded query and output remain live through this synchronous import.
+                unsafe {
+                    imported_block_destroy_speed(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        validate_block_destroy_speed(response.destroy_speed)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
 /// Reads the detached fluid state at one already-loaded block position.
 ///
 /// Returns `None` when the position is outside build height or its chunk is not already loaded;
@@ -2792,6 +3044,22 @@ fn validate_block_properties(
         previous_name = Some(&property.name);
     }
     Ok(Some(properties))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_block_destroy_speed(speed: Option<f32>) -> SjmlResult<Option<f32>> {
+    let Some(speed) = speed else {
+        return Ok(None);
+    };
+    if !speed.is_finite()
+        || (speed != -1.0 && (speed < 0.0 || speed > MAX_WORLD_BLOCK_DESTROY_SPEED))
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "host returned a block destroy speed outside the supported finite range",
+        ));
+    }
+    Ok(Some(speed))
 }
 
 /// Clips a bounded ray against one loaded dimension. The module must request and receive
@@ -3823,28 +4091,32 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        biome_ids, block_has_tag, block_properties, collides, day_time, daylight_cycle_enabled,
-        entity_type_tag_members, fluid_at, fluid_tag_members, integer_game_rule, item_has_tag,
-        item_tag_members, loaded_chunks, notify_neighbors_at, play_sound, raycast,
-        schedule_block_tick, schedule_fluid_tick, set_block, set_block_properties,
-        set_block_with_options, set_daylight_cycle_enabled, set_game_time, set_integer_game_rule,
-        set_time, spawn_entity, spawn_item, spawn_particle, spawn_projectile, structures_at,
-        tag_members, validate_biome_ids, validate_block_property_updates,
-        validate_loaded_chunk_query, validate_loaded_chunk_results, validate_structure_ids,
-        validate_tag_member_ids, validate_world_position, Aabb, BiomeIdsQuery, BiomeIdsResponse,
-        BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
-        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse,
-        BlockUpdateOptions, ChunkPos, DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse,
-        ItemSpawnVelocity, ItemTagQuery, ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse,
-        ProjectileVelocity, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
-        StructuresAtQuery, StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
+        biome_at, biome_climate_at, biome_ids, block_destroy_speed, block_has_tag,
+        block_properties, collides, day_time, daylight_cycle_enabled, entity_type_tag_members,
+        fluid_at, fluid_tag_members, integer_game_rule, item_has_tag, item_tag_members,
+        loaded_chunks, notify_neighbors_at, play_sound, raycast, schedule_block_tick,
+        schedule_fluid_tick, set_block, set_block_properties, set_block_with_options,
+        set_daylight_cycle_enabled, set_game_time, set_integer_game_rule, set_time, spawn_entity,
+        spawn_item, spawn_particle, spawn_projectile, structures_at, tag_members,
+        validate_biome_ids, validate_block_property_updates, validate_loaded_chunk_query,
+        validate_loaded_chunk_results, validate_structure_ids, validate_tag_member_ids,
+        validate_world_position, Aabb, BiomeClimateQuery, BiomeClimateResponse, BiomeIdsQuery,
+        BiomeIdsResponse, BiomePrecipitation, BiomeTemperatureModifier, BlockDestroySpeedQuery,
+        BlockDestroySpeedResponse, BlockPropertiesMutation, BlockPropertiesQuery,
+        BlockPropertiesResponse, BlockProperty, BlockStateBatch, BlockStateQuery,
+        BlockStateSnapshot, BlockTagQuery, BlockTagResponse, BlockUpdateOptions, ChunkPos,
+        DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity,
+        ItemTagQuery, ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
+        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery,
+        StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
         VanillaProjectileKind, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
         WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery,
         WorldGameRuleSnapshot, WorldIntegerGameRule, WorldIntegerGameRuleMutation,
         WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot, WorldItemSpawnRequest,
         WorldProjectileSpawnRequest, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
-        MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
-        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_PROPERTIES,
+        MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES, MAX_WORLD_BIOME_IDS,
+        MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_COORDINATE,
+        MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_PROPERTIES,
         MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
         MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
@@ -4035,6 +4307,68 @@ mod tests {
                 .unwrap_err()
                 .code(),
             "response count is bounded before allocating strings"
+        );
+    }
+
+    #[test]
+    fn biome_climate_query_response_and_values_are_versioned_bounded_and_validated() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = BlockPos {
+            x: -8,
+            y: 72,
+            z: 12,
+        };
+        let query = crate::to_bytes(&BiomeClimateQuery { world, position }).unwrap();
+        assert_eq!(44, query.len());
+        assert_eq!(1_u32.to_le_bytes(), query[0..4]);
+        assert_eq!(1_u32.to_le_bytes(), query[28..32]);
+
+        let mut response = vec![1, 0, 0, 0, 1];
+        let biome_id = b"minecraft:taiga";
+        response.extend_from_slice(&(biome_id.len() as u32).to_le_bytes());
+        response.extend_from_slice(biome_id);
+        response.extend_from_slice(&0.25_f32.to_bits().to_le_bytes());
+        response.extend_from_slice(&0.8_f32.to_bits().to_le_bytes());
+        response.extend_from_slice(&[1, 1, 2]);
+        let snapshot = crate::from_bytes::<BiomeClimateResponse>(&response)
+            .unwrap()
+            .result
+            .unwrap();
+        assert_eq!("minecraft:taiga", snapshot.biome_id);
+        assert_eq!(0.25, snapshot.base_temperature);
+        assert_eq!(0.8, snapshot.downfall);
+        assert!(snapshot.has_precipitation);
+        assert_eq!(
+            BiomeTemperatureModifier::Frozen,
+            snapshot.temperature_modifier
+        );
+        assert_eq!(BiomePrecipitation::Snow, snapshot.precipitation_at_position);
+        assert_eq!(MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES, 276);
+
+        assert!(crate::from_bytes::<BiomeClimateResponse>(&[1, 0, 0, 0, 0])
+            .unwrap()
+            .result
+            .is_none());
+        for invalid_response in [
+            [1_u32.to_le_bytes().as_slice(), &[2]].concat(),
+            [1_u32.to_le_bytes().as_slice(), &[1], &0_u32.to_le_bytes()].concat(),
+        ] {
+            assert_eq!(
+                ErrorCode::InvalidArgument,
+                crate::from_bytes::<BiomeClimateResponse>(&invalid_response)
+                    .unwrap_err()
+                    .code()
+            );
+        }
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            biome_climate_at(world, position).unwrap_err().code(),
+            "native targets fail closed without fabricating biome data"
+        );
+        assert_eq!(
+            ErrorCode::UnknownErrorCode,
+            biome_at(world, position).unwrap_err().code(),
+            "native biome ID reads retain their host requirement"
         );
     }
 
@@ -5432,6 +5766,92 @@ mod tests {
         expected.extend_from_slice(&64_i32.to_le_bytes());
         expected.extend_from_slice(&8_i32.to_le_bytes());
         assert_eq!(crate::to_bytes(&query).unwrap(), expected);
+    }
+
+    #[test]
+    fn block_destroy_speed_query_and_response_match_the_java_wire_contract() {
+        let query = BlockDestroySpeedQuery {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            position: BlockPos { x: -3, y: 64, z: 8 },
+        };
+        let mut expected_query = Vec::new();
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&1_u64.to_le_bytes());
+        expected_query.extend_from_slice(&2_u64.to_le_bytes());
+        expected_query.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected_query.extend_from_slice(&64_i32.to_le_bytes());
+        expected_query.extend_from_slice(&8_i32.to_le_bytes());
+        assert_eq!(crate::to_bytes(&query).unwrap(), expected_query);
+
+        let mut encoded_present = 1_u32.to_le_bytes().to_vec();
+        encoded_present.push(1);
+        encoded_present.extend_from_slice(&3.5_f32.to_bits().to_le_bytes());
+        assert_eq!(
+            crate::from_bytes::<BlockDestroySpeedResponse>(&encoded_present)
+                .unwrap()
+                .destroy_speed,
+            Some(3.5)
+        );
+        let encoded_missing = [1_u32.to_le_bytes().as_slice(), &[0]].concat();
+        assert_eq!(
+            crate::from_bytes::<BlockDestroySpeedResponse>(&encoded_missing)
+                .unwrap()
+                .destroy_speed,
+            None
+        );
+    }
+
+    #[test]
+    fn block_destroy_speed_validation_preserves_unbreakable_value_and_rejects_invalid_host_data() {
+        assert_eq!(super::validate_block_destroy_speed(None).unwrap(), None);
+        assert_eq!(
+            super::validate_block_destroy_speed(Some(-1.0)).unwrap(),
+            Some(-1.0)
+        );
+        assert_eq!(
+            super::validate_block_destroy_speed(Some(0.0)).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            super::validate_block_destroy_speed(Some(MAX_WORLD_BLOCK_DESTROY_SPEED)).unwrap(),
+            Some(MAX_WORLD_BLOCK_DESTROY_SPEED)
+        );
+        for value in [
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            -0.5,
+            1_000_001.0,
+        ] {
+            assert_eq!(
+                super::validate_block_destroy_speed(Some(value))
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            block_destroy_speed(
+                world,
+                BlockPos {
+                    x: i32::MIN,
+                    y: 0,
+                    z: 0
+                }
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            block_destroy_speed(world, BlockPos { x: 0, y: 64, z: 0 })
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
     }
 
     #[test]

@@ -31,3 +31,14 @@ The API uses the existing `sjml_entity_v1` imports:
 
 Boolean outputs are little-endian `u32` values (`0` or `1`); writes accept only
 `0` or `1`. Read output spans are checked before Minecraft is accessed.
+
+## Detached movement and visibility snapshot
+
+`entity::state_snapshot(handle)` returns one consistent set of seven read-only
+flags: `on_ground`, `in_water`, `on_fire`, `sprinting`, `crouching`,
+`invisible`, and `glowing`. It requires `entity.read` and a live loaded
+non-player entity handle on the logical-server thread. The schema-v1 response
+is exactly 11 bytes: little-endian `u32(1)`, followed in that field order by
+seven strict boolean bytes (`0` or `1`). The call does not create handles,
+load chunks, or change entity state. The live guest round trip is exercised by
+[`EntityStateFlagsGameTests`](../src/main/java/dev/somuch/sjml/neoforge/gametest/EntityStateFlagsGameTests.java).

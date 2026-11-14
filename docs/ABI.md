@@ -6,7 +6,7 @@ sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
 
-The current core ABI version is **1.91.0**. Versions use SemVer. ABI 1.91.0 adds four vertical contracts: `player.item_broken` is a schema-v1 observational server event carrying canonical player, dimension, item, and hand identifiers; `set_item_use_behavior` declares a bounded vanilla use animation and duration for an owned registered item; module-owned bounded finite-f32 data components can be declared and set as item defaults, then read or changed on existing loaded block/player inventory stacks; and schema-v7 client-screen updates replace the full definition of the active screen only when its owner and stable ID match. Each host boundary checks registration phase or live inventory ownership, bounds, permissions, side, and thread. ABI 1.90.0 adds the non-cancellable server `world.tick` event after each logical-server level tick, carrying dimension ID, game time, and day time. Its schema-v1 payload is a length-prefixed canonical dimension ID followed by a non-negative little-endian 64-bit game-time value and a signed little-endian 64-bit day-time value; subscriptions support a bounded interval from 1 to 1,200 ticks. ABI 1.89.0 adds `register_entity_ai_goal_v3`, a static registration import for exact-type avoid/target goals on declared SJML mobs. It carries a canonical fully qualified entity type ID and keeps target selection within living entity types. Existing v1 and v2 entity-goal imports remain unchanged. ABI 1.88.0 adds synchronous cancellable logical-server `entity.drops_attempt`, which can veto the bounded item-drop list from a living entity's death without preventing the death. ABI 1.87.0 adds synchronous cancellable logical-server `entity.mount_attempt`, which can veto an entity mount or dismount before Minecraft changes the riding relationship. ABI 1.86.0 adds synchronous cancellable logical-server `block.farmland_trample_attempt` and `entity.fall_attempt` events. A true farmland-trample result preserves the block; a true fall result prevents fall damage from being applied. ABI 1.85.0 adds synchronous cancellable logical-server `player.totem_use_attempt`, `entity.shield_block_attempt`, and `entity.teleport_attempt` callbacks. The shield callback runs only for vanilla-eligible shield blocks and a veto lets damage continue; the totem callback can veto the saving effect; the teleport callback captures server `EntityTeleportEvent` subclasses without loading destination chunks. All require synchronous guest callbacks and `events.subscribe` plus `events.cancel`, with bounded detached payloads. ABI 1.84.0 adds bounded multi-box registered-block shapes formed from 1–8 normalized AABBs; detached `entity::target_snapshot` results while preserving the legacy `entity::target` handle API; synchronous cancellable `player.potion_use_attempt` events; and opt-in veto of mouse releases delivered to an active screen. Bounds, callback counts, ownership, registration phase, live-world access, side/thread, and capabilities remain enforced; global mouse releases remain observational. ABI 1.83.0 adds bounded count and durability writes for existing block-inventory stacks, count changes and atomic slot-to-slot moves for player inventories, loaded-only non-player entity teleportation, entity custom-name visibility control, and static vanilla spawn eggs for registered mobs. It adds the synchronous `block.drops_attempt` event, mutable/cancellable player XP-point and level-change events, and bounded rich unsigned system-chat components with safe hover and click actions. ABI 1.82.0 added bounded enchantment read/set/remove imports for existing stacks in loaded block inventories, owner-routed synchronous `item.attack_attempt` veto callbacks for registered main-hand items, and a versioned villager-trade registration import that carries bounded initial demand. Entity-scope storage now rejects nonexistent, removed, or unloaded entities with `STALE_HANDLE` without loading chunks. ABI 1.80.0 adds per-state friction for registered blocks, loaded-only fluid-tick scheduling, and sampled physical-client cursor-movement callbacks. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
+The current core ABI version is **1.92.0**. Versions use SemVer. ABI 1.92.0 adds loaded-only biome-climate and block-destroy-speed queries, a detached seven-flag snapshot for loaded non-player entities, and synchronous logical-server `player.break_speed` callbacks that can pass, cancel, or request a bounded replacement. Vanilla signs expose bounded literal text reads and writes for both faces; writes reject waxed signs and preserve dye and glow settings. Registered items can declare a default foil/glint override, while exact block states can declare static weak, direct, and comparator signals in the block-behavior schema v3. Exact-type `LookAtEntityType` adds one bounded vanilla goal to registered mobs. Client screens and forms can include up to four passive progress bars in schema v8; existing versions remain accepted, and owner-scoped screen updates keep using schema v7. Active screens gain an opt-in mouse-drag callback on the client main thread. Loaded-only world queries never load chunks; sign access checks side, thread, permissions, and write limits; registration APIs enforce phase and ownership. ABI 1.91.0 adds four vertical contracts: `player.item_broken` is a schema-v1 observational server event carrying canonical player, dimension, item, and hand identifiers; `set_item_use_behavior` declares a bounded vanilla use animation and duration for an owned registered item; module-owned bounded finite-f32 data components can be declared and set as item defaults, then read or changed on existing loaded block/player inventory stacks; and schema-v7 client-screen updates replace the full definition of the active screen only when its owner and stable ID match. Each host boundary checks registration phase or live inventory ownership, bounds, permissions, side, and thread. ABI 1.90.0 adds the non-cancellable server `world.tick` event after each logical-server level tick, carrying dimension ID, game time, and day time. Its schema-v1 payload is a length-prefixed canonical dimension ID followed by a non-negative little-endian 64-bit game-time value and a signed little-endian 64-bit day-time value; subscriptions support a bounded interval from 1 to 1,200 ticks. ABI 1.89.0 adds `register_entity_ai_goal_v3`, a static registration import for exact-type avoid/target goals on declared SJML mobs. It carries a canonical fully qualified entity type ID and keeps target selection within living entity types. Existing v1 and v2 entity-goal imports remain unchanged. ABI 1.88.0 adds synchronous cancellable logical-server `entity.drops_attempt`, which can veto the bounded item-drop list from a living entity's death without preventing the death. ABI 1.87.0 adds synchronous cancellable logical-server `entity.mount_attempt`, which can veto an entity mount or dismount before Minecraft changes the riding relationship. ABI 1.86.0 adds synchronous cancellable logical-server `block.farmland_trample_attempt` and `entity.fall_attempt` events. A true farmland-trample result preserves the block; a true fall result prevents fall damage from being applied. ABI 1.85.0 adds synchronous cancellable logical-server `player.totem_use_attempt`, `entity.shield_block_attempt`, and `entity.teleport_attempt` callbacks. The shield callback runs only for vanilla-eligible shield blocks and a veto lets damage continue; the totem callback can veto the saving effect; the teleport callback captures server `EntityTeleportEvent` subclasses without loading destination chunks. All require synchronous guest callbacks and `events.subscribe` plus `events.cancel`, with bounded detached payloads. ABI 1.84.0 adds bounded multi-box registered-block shapes formed from 1–8 normalized AABBs; detached `entity::target_snapshot` results while preserving the legacy `entity::target` handle API; synchronous cancellable `player.potion_use_attempt` events; and opt-in veto of mouse releases delivered to an active screen. Bounds, callback counts, ownership, registration phase, live-world access, side/thread, and capabilities remain enforced; global mouse releases remain observational. ABI 1.83.0 adds bounded count and durability writes for existing block-inventory stacks, count changes and atomic slot-to-slot moves for player inventories, loaded-only non-player entity teleportation, entity custom-name visibility control, and static vanilla spawn eggs for registered mobs. It adds the synchronous `block.drops_attempt` event, mutable/cancellable player XP-point and level-change events, and bounded rich unsigned system-chat components with safe hover and click actions. ABI 1.82.0 added bounded enchantment read/set/remove imports for existing stacks in loaded block inventories, owner-routed synchronous `item.attack_attempt` veto callbacks for registered main-hand items, and a versioned villager-trade registration import that carries bounded initial demand. Entity-scope storage now rejects nonexistent, removed, or unloaded entities with `STALE_HANDLE` without loading chunks. ABI 1.80.0 adds per-state friction for registered blocks, loaded-only fluid-tick scheduling, and sampled physical-client cursor-movement callbacks. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
 a requested ABI when the major versions match and the host version is greater
 than or equal to the requested version. A different major version is
 incompatible. Build metadata does not affect version ordering. ABI 1.78.0 adds owner-scoped closing for guest screens, guarded server player rotation writes, detached six-slot equipment snapshots for loaded living non-player entities, and static crafting remainders for registered standalone items. ABI 1.76.0 adds module-owned player tab-list headers/footers and dummy scoreboard objectives, post-success villager-trade notifications, bounded ordinary item spawning, and exact-state block sound and predicate overrides. ABI 1.75.0 adds owner-scoped player boss bars, loaded non-player living-entity vitals and bounded healing, and exact-state emitted-light overrides for registered blocks. ABI 1.74.0 adds per-state bounded shape overrides for
@@ -767,12 +767,12 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `world.unloaded`, `world.tick`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `player.item_broken`, `resources.reloaded`, `menu.action`, `player.tick`,
 `entity.tick`, `client.tick`, `client.item.tooltip`, `player.item_crafted`,
-`player.villager_traded`,
+`player.villager_traded`, `player.break_speed`,
 `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`, `player.fished_attempt`,
 `player.attack_attempt`, and
 `client.chat.send_attempt`.
 Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
-`player.interaction`, `player.drop_attempt`, `player.item_pickup_attempt`, `player.sleep_attempt`,
+`player.interaction`, `player.drop_attempt`, `player.item_pickup_attempt`, `player.sleep_attempt`, `player.break_speed`,
 `player.item_use_attempt`, `player.potion_use_attempt`, `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`,
 `client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.fall_attempt`, `entity.mount_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,
@@ -823,6 +823,25 @@ most 2,048 combined bytes. Strings must be non-empty and contain no control
 characters. The host caps one tooltip at 64 callbacks, 64 lines, and 8,192
 combined output bytes. Returned strings become literal tooltip components
 appended after vanilla content; they cannot carry style or interaction data.
+
+### Player block-break speed callback
+
+The logical-server guest export is `sjml_v1_event_player.break_speed`. Its
+subscription requires `events.subscribe` and `events.cancel`; returning
+`SetSpeed` additionally requires `player.break_speed.modify`. The callback is
+synchronous and cannot use `#[event_async]`. It runs for an online `ServerPlayer`
+on the owning server thread and receives only detached values: schema `u32(1)`,
+length-prefixed canonical player UUID, dimension ID, and block ID; a position
+tag followed by `u32 BlockPos schema=1` and signed `i32 x/y/z` when present;
+then finite `f32` original and current speed. The position may be absent for
+legacy NeoForge events. Payloads are capped at 2 KiB, strings at 256 bytes, and
+speed snapshots at `-1..=1024`.
+
+The callback returns one byte: `0=Pass`, `1=Cancel`, or `2=SetSpeed` followed
+by little-endian `f32`. Replacement speed is finite `0..=1024`. At most 64
+handlers run in priority/registration order; later handlers see the latest
+accepted speed. An unauthorized replacement is ignored. Invalid action data or
+a trapped callback disables only that module. See [player break speed](PLAYER_BREAK_SPEED.md).
 
 ### Client outgoing chat veto
 
@@ -914,6 +933,7 @@ The Rust SDK's registration wrappers use these imports during the
 | --- | --- | --- |
 | `sjml_registry_v1.register_item` | `(path_ptr: i32, path_len: i32, max_stack: i32, fire_resistant: i32) -> i32` | Stage an item under `<package>/<module>/<path>`. |
 | `sjml_registry_v1.set_item_enchantment_value` | `(item_path_ptr: i32, item_path_len: i32, value: i32) -> i32` | Set vanilla enchantability from 0 to 255 on a previously declared item owned by the same module. |
+| `sjml_registry_v1.set_item_glint_override` | `(item_path_ptr: i32, item_path_len: i32, enabled: i32) -> i32` | Set the vanilla enchantment-glint default component to true or false on an item form declared by this module; `enabled` must be 0 or 1. |
 | `sjml_registry_v1.set_item_attribute_modifier` | `(item_path_ptr: i32, item_path_len: i32, attribute_id_ptr: i32, attribute_id_len: i32, modifier_path_ptr: i32, modifier_path_len: i32, amount_bits: i32, operation: i32, slot: i32) -> i32` | Add one static vanilla or modded item attribute modifier to an item declared by the same module. Attribute IDs are canonical registry IDs, modifier paths are package/module scoped, amounts are finite `-1024..=1024`, operation codes are `0 add_value`, `1 add_multiplied_base`, `2 add_multiplied_total`, and slot codes are `0 any`, `1 mainhand`, `2 offhand`, `3 hand`, `4 feet`, `5 legs`, `6 chest`, `7 head`, `8 armor`, `9 body`; each item accepts at most 16 entries. |
 | `sjml_registry_v1.set_item_food` | `(item_path_ptr: i32, item_path_len: i32, nutrition: i32, saturation_modifier_bits: i32, flags: i32) -> i32` | Set nutrition 1–20, finite saturation modifier 0–10, and vanilla `fast` (bit 0) / `always_eat` (bit 1) flags on a previously declared item owned by the same module. |
 | `sjml_registry_v1.set_item_max_damage` | `(item_path_ptr: i32, item_path_len: i32, max_damage: i32) -> i32` | Set vanilla maximum durability from 1 through 1,000,000 on a same-module standalone item declared with stack size 1. |
@@ -922,7 +942,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.set_block_shape` | `(path_ptr: i32, path_len: i32, kind: i32, min_x_bits: i32, min_y_bits: i32, min_z_bits: i32, max_x_bits: i32, max_y_bits: i32, max_z_bits: i32) -> i32` | Set a fixed full-cube (`kind=0`), empty (`kind=1`), or normalized cuboid (`kind=2`) selection, collision, occlusion, and support shape on a block already staged by this module. Non-cuboid coordinates must be zero; cuboid floats must be finite and ordered within 0..=1. |
 | `sjml_registry_v1.set_block_shape_boxes` | `(path_ptr: i32, path_len: i32, payload_ptr: i32, payload_len: i32) -> i32` | Set a block's selection, collision, occlusion, and support shape to a union of 1–8 normalized AABBs. Schema-v1 payload is little-endian `u32 schema=1`, `u32 count`, then `count` records of six little-endian `f32` coordinates (`min_xyz`, `max_xyz`); total length must equal `8 + count * 24` bytes and be at most 200 bytes. Coordinates must be finite, in 0..=1, and strictly ordered on each axis. |
 | `sjml_registry_v1.set_block_state_light_level` | `(path_ptr: i32, path_len: i32, payload_ptr: i32, payload_len: i32) -> i32` | Set emitted light (`0..=15`) for one complete exact state of a same-module block with declared state properties. The schema-v1 payload contains a property count, each property name/value pair, and the light level; duplicate, undeclared, missing, or invalid property values are rejected. Call only during `mod_register`, after declaring the block and all its properties. |
-| `sjml_registry_v1.set_block_state_behavior` | `(path_ptr: i32, path_len: i32, payload_ptr: i32, payload_len: i32) -> i32` | Set exact-state sound and vanilla predicates for a complete state of a same-module registered block. Schema-v1 is at most 512 bytes and validates property selectors and field values; unset fields retain block defaults. Registration-only. |
+| `sjml_registry_v1.set_block_state_behavior` | `(path_ptr: i32, path_len: i32, payload_ptr: i32, payload_len: i32) -> i32` | Set exact-state sound, predicates, friction, and schema-v3 weak/direct/comparator redstone outputs for a complete state of a same-module registered block. Accepts schemas v1–v3; payloads are at most 512 bytes and unset fields retain defaults. Registration-only. |
 | `sjml_registry_v1.set_block_behavior` | `(path_ptr: i32, path_len: i32, friction_bits: i32, speed_factor_bits: i32, jump_factor_bits: i32, light_level: i32, flags: i32, push_reaction: i32, sound: i32) -> i32` | Set bounded friction (`0..=2`), speed/jump multipliers (`0..=4`), emitted light (`0..=15`), optional lava ignition (flag bit 0), piston reaction (`0 normal`, `1 destroy`, `2 block`, `3 ignore`, `4 push_only`), and an allowlisted sound group (`0 stone`, `1 wood`, `2 gravel`, `3 grass`, `4 metal`, `5 glass`, `6 sand`, `7 wool`, `8 snow`, `9 slime`, `10 honey`, `11 netherite`, `12 amethyst`) on a block already staged by this module. Float fields are IEEE-754 bits and must be finite. Reserved flag bits are rejected. |
 | `sjml_registry_v1.register_block_entity` | `(path_ptr: i32, path_len: i32, block_path_ptr: i32, block_path_len: i32) -> i32` | Stage a generic block entity type for a block declared by the same module. |
 | `sjml_registry_v1.register_entity_model` | `(path_ptr: i32, path_len: i32, model_ptr: i32, model_len: i32) -> i32` | Stage a bounded colored model for an entity declared by the same module, with optional model-wide and per-cuboid sine rotations. |
@@ -934,6 +954,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.register_entity` | `(path_ptr: i32, path_len: i32, width_bits: i32, height_bits: i32, tracking_range: i32, update_interval: i32, fire_immune: i32) -> i32` | Stage a generic living `MobCategory.MISC` entity type. |
 | `sjml_registry_v1.register_entity_ai_goal` | `(path_ptr: i32, path_len: i32, goal: i32, priority: i32, value_bits: i32, flags: i32) -> i32` | Add one bounded vanilla goal to an entity declared by the same module. |
 | `sjml_registry_v1.register_entity_ai_goal_v2` | `(path_ptr: i32, path_len: i32, goal: i32, priority: i32, range_bits: i32, walk_speed_bits: i32, sprint_speed_bits: i32, flags: i32) -> i32` | Add the bounded AvoidPlayer goal to an entity declared by the same module. |
+| `sjml_registry_v1.register_entity_ai_goal_v3` | `(path_ptr: i32, path_len: i32, goal: i32, priority: i32, value_bits: i32, range_bits: i32, walk_speed_bits: i32, flags: i32, entity_type_ptr: i32, entity_type_len: i32) -> i32` | Add an exact-type avoid, target, or look-at goal using one canonical entity registry ID; retains the v1/v2 imports. |
 | `sjml_registry_v1.register_fluid` | `(path_ptr: i32, path_len: i32, tick_rate: i32, level_decrease_per_block: i32, slope_find_distance: i32, explosion_resistance_bits: i32) -> i32` | Stage a flowing fluid pair, liquid block, and bucket with vanilla water visuals. |
 | `sjml_registry_v1.register_fluid_with_visuals` | `(path_ptr: i32, path_len: i32, tick_rate: i32, level_decrease_per_block: i32, slope_find_distance: i32, explosion_resistance_bits: i32, still_texture_ptr: i32, still_texture_len: i32, flowing_texture_ptr: i32, flowing_texture_len: i32) -> i32` | Stage a fluid with package-owned `block/` still and flowing texture IDs. |
 | `sjml_registry_v1.register_shapeless_recipe` | `(path_ptr: i32, path_len: i32, output_item_ptr: i32, output_item_len: i32, output_count: i32, ingredient_lines_ptr: i32, ingredient_lines_len: i32) -> i32` | Stage a bounded shapeless recipe with one to nine item or item-tag ingredients. |
@@ -973,7 +994,7 @@ canonical; the host validates them against the declared property types and
 ranges. See [the emitted-light guide](BLOCK_STATE_LIGHT.md) for the Rust API
 example.
 
-The `set_block_state_behavior` schema-v1 payload is at most 512 bytes and carries a complete property selector, field mask, sound code, and predicate values. Its field bits select sound, redstone conductor, suffocation, view blocking, emissive rendering, and post-process; Boolean fields accept exactly zero or one. Unspecified fields retain block defaults. State-specific lookup is immutable and never calls guest code. Per-state friction, speed/jump, lava ignition, piston reaction, and destroy speed remain block-wide because Minecraft 1.21.1 does not expose safe state-aware setters. See [the exact-state behavior guide](BLOCK_STATE_BEHAVIOR.md).
+The `set_block_state_behavior` payload accepts schema-v1, v2, and v3 while preserving the older layouts. Schema v1 carries the complete property selector, field mask, sound code, and predicate values; v2 appends friction bits; v3 appends weak redstone, direct redstone, and comparator values as three little-endian `i32` fields. Each signal value is `0..=15`; an unset signal retains vanilla behavior, and comparator output alone does not make a block a redstone source. State-specific lookup is immutable and never calls guest code. Per-state speed/jump, lava ignition, and piston reaction remain block-wide because Minecraft 1.21.1 does not expose safe state-aware setters. See [the exact-state behavior guide](BLOCK_STATE_BEHAVIOR.md) and [static redstone outputs](BLOCK_REDSTONE_OUTPUTS.md).
 
 Paths are 1–256 lowercase ASCII letters, digits, `.`, `_`, or `-`. Boolean
 fields accept exactly zero or one. Item stack sizes are 1–99; block strengths
@@ -1473,6 +1494,8 @@ registration and dedicated-server module instances fail closed.
 | `unsubscribe` | `(i32 handle_ptr, i32 handle_len) -> i32` | Revoke one subscription owned by this module runtime |
 | `subscribe_mouse_released` | `(i64 callback_id, i32 handle_out_ptr) -> i32` | Register a separate active-screen mouse-release callback; requires `client.input.screen_cancel` |
 | `unsubscribe_mouse_released` | `(i32 handle_ptr, i32 handle_len) -> i32` | Revoke one mouse-release veto subscription owned by this module runtime |
+| `subscribe_mouse_dragged` | `(i64 callback_id, i32 handle_out_ptr) -> i32` | Register a separate active-screen mouse-drag callback; requires `client.input.screen_cancel` |
+| `unsubscribe_mouse_dragged` | `(i32 handle_ptr, i32 handle_len) -> i32` | Revoke one mouse-drag subscription owned by this module runtime |
 
 The host calls `sjml_v1_screen_input_dispatch(pointer, length) -> i64`. Its
 little-endian payload begins with schema `u32` (currently `1`), callback ID
@@ -1493,6 +1516,11 @@ modifiers); it is sent only to callbacks registered through the separate release
 It uses the same strict one-byte boolean result. Release veto callbacks require
 `client.input.screen_cancel`, run only for an active screen on the client main thread,
 and cannot veto global mouse releases. Mouse events report Shift, Control, and Alt.
+A schema-v1 tag `5` is a 30-byte drag event: bounded GUI `f32 x/y`, bounded
+`f32 delta_x/delta_y`, and button `u8`. It is sent only through the separate
+drag subscription lane; returning true consumes the active screen's drag
+handler. Deltas are finite and bounded to ±4,096; global movement remains
+observational.
 A module may hold 256 active input subscriptions across the lanes. See
 [active-screen scrolling](SCREEN_INPUT_SCROLL.md) and
 [active-screen mouse releases](SCREEN_INPUT_MOUSE_RELEASE.md).
@@ -1628,6 +1656,16 @@ replaces the definition and callback route on that screen. A stale or foreign
 screen is not modified. The callback export required by the replacement must
 exist before the update is applied. Existing open-screen schemas v1 through v6
 and their callback payloads remain unchanged.
+
+ABI 1.92.0 adds an optional schema-v8 wrapper for opening a screen or form with
+one to four passive progress bars. The wrapper contains `u32 schema=8`,
+`u32 definition_length`, the complete existing v1–v6 definition, a `u32` bar
+count, then each length-prefixed label and signed `i32 minimum`, `maximum`, and
+`value`. Labels are 1–96 bytes; bounds are ordered within ±1,000,000 and the
+value must lie inside them. The complete request stays within 4,096 bytes.
+When updating, the same v8 definition is nested inside the existing v7
+owner-scoped update envelope; older open and update payloads remain valid. See
+[client screen progress bars](CLIENT_SCREEN.md#progress-bars).
 
 The exact payload is little-endian schema-v1 data:
 
@@ -1904,6 +1942,8 @@ registration binds the signatures but every call during `mod_register` returns
 | `game_rule` | `query_ptr, query_len, out_ptr, out_capacity` | Read an allowlisted boolean gamerule using a 32-byte schema-v1 query and exact 5-byte response; requires `world.read` |
 | `set_game_rule` | `mutation_ptr, mutation_len` | Set an allowlisted boolean gamerule from a 33-byte schema-v1 mutation; requires `world.read` and `world.write` |
 | `biome_at` | `handle_ptr, handle_len, x, y, z, out_ptr, out_capacity` | Stable `Option<String>`: u32 UTF-8 length (`0` means unavailable), then canonical biome ID bytes |
+| `biome_climate_at` | `query_ptr, query_len, out_ptr, out_capacity` | Schema-v1 loaded-position biome climate snapshot; requires `world.read` |
+| `block_destroy_speed` | `query_ptr, query_len, out_ptr, out_capacity` | Schema-v1 optional vanilla block destroy speed at a loaded position; requires `world.read` |
 | `biome_ids` | `query_ptr, query_len, out_ptr, out_capacity` | Enumerate up to 4,000 canonical IDs from this world's biome registry using a schema-v1 query/response; requires `world.read` and never loads chunks |
 | `tag_members` | `query_ptr, query_len, out_ptr, out_capacity` | Enumerate up to 1,024 sorted canonical members from one block, item, fluid, or entity-type tag; schema-v1 request and response; a four-byte output capacity probes required response size; requires `world.read` |
 | `set_time` | `handle_ptr, handle_len, day_time_low, day_time_high` | Set absolute daylight-cycle time; status only |
@@ -1962,6 +2002,21 @@ biome ID of at most 256 bytes; a zero length means the position is outside
 build height or belongs to an unloaded chunk. It requires `world.read`, checks
 the owning logical-server thread and loaded-world handle, and never loads a
 chunk. See [world biome lookup](WORLD_BIOMES.md).
+`biome_climate_at` takes a 44-byte schema-v1 query: `u32 schema=1`, the
+24-byte world handle, `u32 BlockPos schema=1`, then signed `i32 x/y/z`. The
+response starts with `u32 schema=1` and a strict availability byte. `Some`
+appends the length-prefixed canonical biome ID, finite `f32` base temperature
+and downfall, a precipitation boolean, a temperature-modifier tag (`0=None`,
+`1=Frozen`), and the precipitation tag (`0=None`, `1=Rain`, `2=Snow`) for that
+position. The call requires `world.read`, validates the live handle and server
+thread, and returns unavailable outside build height or in an unloaded chunk;
+it never loads chunks. See [biome climate](BIOME_CLIMATE.md).
+`block_destroy_speed` uses the same 44-byte world/position query. Its response
+is `u32 schema=1`, a strict availability byte, and, when present, one finite
+`f32` from Minecraft's `BlockState.getDestroySpeed`; negative vanilla values
+normalize to `-1.0` for unbreakable blocks, and nonnegative results are capped
+at 1,000,000. It also requires `world.read` and never loads chunks. See
+[block destroy speed](BLOCK_DESTROY_SPEED.md).
 `biome_ids` accepts exactly 28 query bytes: little-endian `u32 schema=1` and
 the 24-byte world handle. Its complete response is `u32 schema=1`, `u32 count`,
 then up to 4,000 canonical, strictly UTF-8 biome IDs as length-prefixed
@@ -2376,6 +2431,7 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | --- | --- | --- |
 | `loaded` | `out_ptr, out_capacity` | Stable `Vec<EntityHandle>`: little-endian u32 count, then 24 bytes per handle |
 | `snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | `EntitySnapshot`: u32 schema version `1`, three length-prefixed UTF-8 strings (`uuid`, `entity_type_id`, `dimension_id`), then three little-endian `f64` values (`x`, `y`, `z`) |
+| `state` | `handle_ptr, handle_len, out_ptr, out_capacity` | Exact 11-byte schema-v1 snapshot of on-ground, in-water, on-fire, sprinting, crouching, invisible, and glowing flags; requires `entity.read` |
 | `target_snapshot` | `mob_handle_ptr, mob_handle_len, out_ptr, out_capacity` | Schema-v1 optional detached UUID/type/dimension/position snapshot; requires `entity.read` |
 | `target` | `mob_handle_ptr, mob_handle_len, out_ptr, out_capacity` | Existing schema-v1 optional module-scoped `EntityHandle`; its `entity::target` SDK contract and encoding remain unchanged |
 | `equipment` | `handle_ptr, handle_len, out_ptr, out_capacity` | Six fixed optional equipment slots as schema-v1 canonical item ID/count/damage/max-damage values; requires `entity.read` |
@@ -2488,6 +2544,12 @@ client calls fail closed. See [entity state flags](ENTITY_STATE_FLAGS.md).
 | --- | --- | --- |
 | `is_glowing`, `is_silent` | `handle_ptr, handle_len, out_ptr, out_capacity` | Write little-endian `u32(0 or 1)`; status only |
 | `set_glowing`, `set_silent` | `handle_ptr, handle_len, value` | Change the requested flag; status only |
+
+The separate `state` import writes exactly 11 bytes: little-endian `u32(1)`,
+then strict Boolean bytes for `on_ground`, `in_water`, `on_fire`, `sprinting`,
+`crouching`, `invisible`, and `glowing`, in that order. It requires a live
+module-owned handle for a loaded non-player entity and `entity.read`; it runs on
+the server thread and does not load chunks. See [entity state flags](ENTITY_STATE_FLAGS.md).
 
 ## Literal non-player entity custom names
 
@@ -2835,6 +2897,8 @@ runtime-scoped, use kind `BLOCK_ENTITY` (5), are non-transferable, and have a
 | `get_data` | `request_ptr, request_len, out_ptr, out_capacity` | Schema-v1 optional Boolean/i32/String value for one typed key |
 | `set_data` | `request_ptr, request_len` | Status only; sets one owner-private persistent typed value |
 | `remove_data` | `request_ptr, request_len` | Status only; removes one owner-private persistent value |
+| `sign_text` | `handle_ptr, handle_len, side, out_ptr, out_capacity` | Schema-v1 text for the selected face of a loaded vanilla sign; requires `block_entity.sign.read` |
+| `set_sign_text` | `handle_ptr, handle_len, side, payload_ptr, payload_len` | Replace the selected face of a loaded, unwaxed vanilla sign; requires `block_entity.sign.write` and `world.write` |
 
 `get` takes a 24-byte `WorldHandle` and a 16-byte stable `BlockPos` (schema
 version 1, then signed little-endian `i32` x/y/z). The output capacity must be
@@ -2863,6 +2927,17 @@ stable substitute for typed capabilities. Lookups do not load chunks. Handles
 become stale on block-entity replacement/removal, chunk or world unload, or
 module/runtime close. Every operation revalidates the live entity and required
 permissions. Native SDK builds report unsupported host imports.
+
+`sign_text` and `set_sign_text` accept `side=0` for the front and `side=1` for
+the back. The schema-v1 text record is `u32 version=1`, `u32 line_count=4`,
+then four length-prefixed UTF-8 strings, each at most 2,048 bytes and free of
+control characters. Its maximum size is 8,200 bytes. Reads require
+`world.read` and `block_entity.sign.read`; writes require `world.read`,
+`world.write`, and `block_entity.sign.write`, and are limited to 32 per module
+per server tick. Writes create literal components, update raw and filtered
+text, preserve dye/glow settings, and reject waxed signs. Both calls validate
+the owner-scoped handle and server thread and never load chunks. See
+[vanilla sign text](SIGN_TEXT.md).
 
 Typed persistent data is a separate API for `SjmlRegisteredBlockEntity` values
 created by the calling module. The request is schema-v1: `u32` version, `u8`

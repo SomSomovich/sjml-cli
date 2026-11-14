@@ -20,7 +20,7 @@ const MAX_BLOCK_SHAPE_BOXES_PAYLOAD_BYTES: usize =
     BLOCK_SHAPE_BOXES_HEADER_BYTES + MAX_BLOCK_SHAPE_BOXES * BLOCK_SHAPE_BOX_BYTES;
 const BLOCK_STATE_LIGHT_LEVEL_SCHEMA_VERSION: u32 = 1;
 const MAX_BLOCK_STATE_LIGHT_LEVEL_PAYLOAD_BYTES: usize = 512;
-const BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION: u32 = 2;
+const BLOCK_STATE_BEHAVIOR_SCHEMA_VERSION: u32 = 3;
 const MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES: usize = 512;
 const BLOCK_STATE_BEHAVIOR_SOUND: u32 = 1;
 const BLOCK_STATE_BEHAVIOR_REDSTONE_CONDUCTOR: u32 = 1 << 1;
@@ -29,6 +29,9 @@ const BLOCK_STATE_BEHAVIOR_VIEW_BLOCKING: u32 = 1 << 3;
 const BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING: u32 = 1 << 4;
 const BLOCK_STATE_BEHAVIOR_POST_PROCESS: u32 = 1 << 5;
 const BLOCK_STATE_BEHAVIOR_FRICTION: u32 = 1 << 6;
+const BLOCK_STATE_BEHAVIOR_REDSTONE_SIGNAL: u32 = 1 << 7;
+const BLOCK_STATE_BEHAVIOR_DIRECT_REDSTONE_SIGNAL: u32 = 1 << 8;
+const BLOCK_STATE_BEHAVIOR_COMPARATOR_SIGNAL: u32 = 1 << 9;
 /// Maximum number of vanilla status effects on one registered food item.
 pub const MAX_ITEM_FOOD_EFFECTS: usize = 8;
 /// Maximum UTF-8 size of one fully qualified vanilla or modded effect ID.
@@ -647,6 +650,9 @@ pub struct BlockStateBehavior {
     view_blocking: Option<bool>,
     emissive_rendering: Option<bool>,
     post_process: Option<bool>,
+    redstone_signal: Option<u32>,
+    direct_redstone_signal: Option<u32>,
+    comparator_signal: Option<u32>,
 }
 
 impl BlockStateBehavior {
@@ -660,6 +666,9 @@ impl BlockStateBehavior {
             view_blocking: None,
             emissive_rendering: None,
             post_process: None,
+            redstone_signal: None,
+            direct_redstone_signal: None,
+            comparator_signal: None,
         }
     }
 
@@ -687,6 +696,46 @@ impl BlockStateBehavior {
     pub const fn redstone_conductor(mut self, value: bool) -> Self {
         self.redstone_conductor = Some(value);
         self
+    }
+
+    /// Sets the weak redstone signal for this exact state, from 0 through 15.
+    ///
+    /// This is a static vanilla block behavior. It does not call guest code while Minecraft
+    /// evaluates redstone updates.
+    pub fn redstone_signal(mut self, signal: u32) -> SjmlResult<Self> {
+        if signal > 15 {
+            return Err(invalid_argument(
+                "block-state redstone signal must be between 0 and 15",
+            ));
+        }
+        self.redstone_signal = Some(signal);
+        Ok(self)
+    }
+
+    /// Sets the direct redstone signal for this exact state, from 0 through 15.
+    ///
+    /// Direct output is independent from [`Self::redstone_signal`].
+    pub fn direct_redstone_signal(mut self, signal: u32) -> SjmlResult<Self> {
+        if signal > 15 {
+            return Err(invalid_argument(
+                "block-state direct redstone signal must be between 0 and 15",
+            ));
+        }
+        self.direct_redstone_signal = Some(signal);
+        Ok(self)
+    }
+
+    /// Sets the analog comparator output for this exact state, from 0 through 15.
+    ///
+    /// Configuring this value makes the block an analog-output source for vanilla comparators.
+    pub fn comparator_signal(mut self, signal: u32) -> SjmlResult<Self> {
+        if signal > 15 {
+            return Err(invalid_argument(
+                "block-state comparator signal must be between 0 and 15",
+            ));
+        }
+        self.comparator_signal = Some(signal);
+        Ok(self)
     }
 
     /// Overrides whether this state blocks entity suffocation checks.
@@ -721,6 +770,9 @@ impl BlockStateBehavior {
             && self.view_blocking.is_none()
             && self.emissive_rendering.is_none()
             && self.post_process.is_none()
+            && self.redstone_signal.is_none()
+            && self.direct_redstone_signal.is_none()
+            && self.comparator_signal.is_none()
         {
             return Err(invalid_argument(
                 "block-state behavior must set at least one property",
@@ -729,7 +781,7 @@ impl BlockStateBehavior {
         Ok(())
     }
 
-    fn abi_values(self) -> (u32, i32, u32, u32) {
+    fn abi_values(self) -> (u32, i32, u32, u32, u32, u32, u32) {
         let mut mask = 0;
         let mut values = 0;
         if self.friction.is_some() {
@@ -737,6 +789,15 @@ impl BlockStateBehavior {
         }
         if self.sound.is_some() {
             mask |= BLOCK_STATE_BEHAVIOR_SOUND;
+        }
+        if self.redstone_signal.is_some() {
+            mask |= BLOCK_STATE_BEHAVIOR_REDSTONE_SIGNAL;
+        }
+        if self.direct_redstone_signal.is_some() {
+            mask |= BLOCK_STATE_BEHAVIOR_DIRECT_REDSTONE_SIGNAL;
+        }
+        if self.comparator_signal.is_some() {
+            mask |= BLOCK_STATE_BEHAVIOR_COMPARATOR_SIGNAL;
         }
         for (field, value) in [
             (
@@ -763,6 +824,9 @@ impl BlockStateBehavior {
             self.sound.map_or(0, |sound| sound as i32),
             values,
             self.friction.map_or(0, f32::to_bits),
+            self.redstone_signal.unwrap_or(0),
+            self.direct_redstone_signal.unwrap_or(0),
+            self.comparator_signal.unwrap_or(0),
         )
     }
 }
@@ -940,6 +1004,12 @@ pub enum EntityAiGoal {
     },
     /// Look at a nearby player within a bounded distance.
     LookAtPlayer { priority: u32, range: f32 },
+    /// Look at the nearest living entity of exactly this registered type within a bounded distance.
+    LookAtEntityType {
+        priority: u32,
+        entity_type_id: String,
+        range: f32,
+    },
     /// Attack a visible nearby target at a bounded movement speed.
     MeleeAttack {
         priority: u32,
@@ -1762,6 +1832,8 @@ extern "C" {
     ) -> i32;
     #[link_name = "set_item_rarity"]
     fn imported_set_item_rarity(path_pointer: i32, path_length: i32, rarity: i32) -> i32;
+    #[link_name = "set_item_glint_override"]
+    fn imported_set_item_glint_override(path_pointer: i32, path_length: i32, glint: i32) -> i32;
     #[link_name = "set_item_enchantment_value"]
     fn imported_set_item_enchantment_value(path_pointer: i32, path_length: i32, value: i32) -> i32;
     #[link_name = "set_item_attribute_modifier"]
@@ -2285,6 +2357,33 @@ pub fn set_item_rarity(item_path: &str, rarity: ItemRarity) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = rarity;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets an explicit default enchantment glint value for an item declared earlier by this module.
+///
+/// Call this from `#[mod_register]`, after `register_item` or after registering a block with an
+/// item form. `true` forces the vanilla foil glint and `false` suppresses it, including on stacks
+/// that have enchantments. An unset item keeps Minecraft's normal glint behavior. The host accepts
+/// only items owned by the same package and module, and each item accepts one declaration.
+pub fn set_item_glint_override(item_path: &str, glint: bool) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the boolean wire value.
+        let status = unsafe {
+            imported_set_item_glint_override(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                i32::from(glint),
+            )
+        };
+        return status_result(status, "host rejected the item glint override");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = glint;
         Err(unsupported_target())
     }
 }
@@ -2846,11 +2945,22 @@ fn encode_block_state_behavior(
         payload.extend_from_slice(name.as_bytes());
         payload.extend_from_slice(value.as_bytes());
     }
-    let (mask, sound, boolean_values, friction_bits) = behavior.abi_values();
+    let (
+        mask,
+        sound,
+        boolean_values,
+        friction_bits,
+        redstone_signal,
+        direct_redstone_signal,
+        comparator_signal,
+    ) = behavior.abi_values();
     payload.extend_from_slice(&mask.to_le_bytes());
     payload.extend_from_slice(&sound.to_le_bytes());
     payload.extend_from_slice(&boolean_values.to_le_bytes());
     payload.extend_from_slice(&friction_bits.to_le_bytes());
+    payload.extend_from_slice(&redstone_signal.to_le_bytes());
+    payload.extend_from_slice(&direct_redstone_signal.to_le_bytes());
+    payload.extend_from_slice(&comparator_signal.to_le_bytes());
     if payload.len() > MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES {
         return Err(invalid_argument(
             "block-state behavior payload exceeds its supported byte limit",
@@ -4339,6 +4449,16 @@ fn valid_entity_ai_goal(goal: &EntityAiGoal) -> bool {
         EntityAiGoal::LookAtPlayer { priority, range } => {
             valid_priority(*priority) && range.is_finite() && (1.0..=64.0).contains(range)
         }
+        EntityAiGoal::LookAtEntityType {
+            priority,
+            entity_type_id,
+            range,
+        } => {
+            valid_priority(*priority)
+                && valid_ai_entity_type_id(entity_type_id)
+                && range.is_finite()
+                && (1.0..=64.0).contains(range)
+        }
         EntityAiGoal::TargetPlayer { priority, .. } => valid_priority(*priority),
         EntityAiGoal::TargetEntityType {
             priority,
@@ -4378,7 +4498,9 @@ fn entity_ai_goal_wire(goal: &EntityAiGoal) -> (i32, u32, f32, i32) {
         EntityAiGoal::Panic { priority, speed } => (8, *priority, *speed, 0),
         EntityAiGoal::RandomSwimming { priority, speed } => (9, *priority, *speed, 0),
         EntityAiGoal::AvoidPlayer { .. } => unreachable!("AvoidPlayer uses the v2 host import"),
-        EntityAiGoal::AvoidEntityType { .. } | EntityAiGoal::TargetEntityType { .. } => {
+        EntityAiGoal::AvoidEntityType { .. }
+        | EntityAiGoal::TargetEntityType { .. }
+        | EntityAiGoal::LookAtEntityType { .. } => {
             unreachable!("type-specific goals use the v3 host import")
         }
     }
@@ -4428,6 +4550,11 @@ fn entity_ai_goal_v3_wire(goal: &EntityAiGoal) -> Option<(i32, u32, f32, f32, f3
             i32::from(*must_see),
             entity_type_id,
         )),
+        EntityAiGoal::LookAtEntityType {
+            priority,
+            entity_type_id,
+            range,
+        } => Some((13, *priority, *range, 0.0, 0.0, 0, entity_type_id)),
         _ => None,
     }
 }
@@ -5450,12 +5577,18 @@ mod tests {
             .unwrap()
             .sound(BlockSound::Amethyst)
             .redstone_conductor(false)
+            .redstone_signal(9)
+            .unwrap()
+            .direct_redstone_signal(13)
+            .unwrap()
+            .comparator_signal(7)
+            .unwrap()
             .suffocating(false)
             .view_blocking(true)
             .emissive_rendering(true)
             .post_process(false);
         let encoded = encode_block_state_behavior(&[("powered", "true")], behavior).unwrap();
-        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 2);
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 3);
         assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 1);
         assert_eq!(
             u32::from_le_bytes(encoded[27..31].try_into().unwrap()),
@@ -5466,6 +5599,9 @@ mod tests {
                 | BLOCK_STATE_BEHAVIOR_EMISSIVE_RENDERING
                 | BLOCK_STATE_BEHAVIOR_POST_PROCESS
                 | BLOCK_STATE_BEHAVIOR_FRICTION
+                | BLOCK_STATE_BEHAVIOR_REDSTONE_SIGNAL
+                | BLOCK_STATE_BEHAVIOR_DIRECT_REDSTONE_SIGNAL
+                | BLOCK_STATE_BEHAVIOR_COMPARATOR_SIGNAL
         );
         assert_eq!(i32::from_le_bytes(encoded[31..35].try_into().unwrap()), 12);
         assert_eq!(
@@ -5476,6 +5612,9 @@ mod tests {
             u32::from_le_bytes(encoded[39..43].try_into().unwrap()),
             0.95_f32.to_bits()
         );
+        assert_eq!(u32::from_le_bytes(encoded[43..47].try_into().unwrap()), 9);
+        assert_eq!(u32::from_le_bytes(encoded[47..51].try_into().unwrap()), 13);
+        assert_eq!(u32::from_le_bytes(encoded[51..55].try_into().unwrap()), 7);
         assert!(encoded.len() <= MAX_BLOCK_STATE_BEHAVIOR_PAYLOAD_BYTES);
 
         let friction_only = encode_block_state_behavior(
@@ -5491,6 +5630,33 @@ mod tests {
             u32::from_le_bytes(friction_only[39..43].try_into().unwrap()),
             1.2_f32.to_bits()
         );
+        assert_eq!(
+            u32::from_le_bytes(friction_only[43..47].try_into().unwrap()),
+            0
+        );
+        for invalid in [16, u32::MAX] {
+            assert_eq!(
+                BlockStateBehavior::new()
+                    .redstone_signal(invalid)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                BlockStateBehavior::new()
+                    .direct_redstone_signal(invalid)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                BlockStateBehavior::new()
+                    .comparator_signal(invalid)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
         for invalid in [f32::NAN, f32::INFINITY, -0.01, 2.01] {
             assert_eq!(
                 BlockStateBehavior::new()
@@ -6575,6 +6741,26 @@ mod tests {
             entity_ai_goal_v3_wire(&target_cows),
             Some((12, 1, 0.0, 0.0, 0.0, 1, "minecraft:cow"))
         );
+        let look_at_cows = EntityAiGoal::LookAtEntityType {
+            priority: 2,
+            entity_type_id: "minecraft:cow".to_owned(),
+            range: 24.0,
+        };
+        assert!(valid_entity_ai_goal(&look_at_cows));
+        assert_eq!(
+            entity_ai_goal_v3_wire(&look_at_cows),
+            Some((13, 2, 24.0, 0.0, 0.0, 0, "minecraft:cow"))
+        );
+        assert!(!valid_entity_ai_goal(&EntityAiGoal::LookAtEntityType {
+            priority: 2,
+            entity_type_id: "minecraft:cow".to_owned(),
+            range: 64.01,
+        }));
+        assert!(!valid_entity_ai_goal(&EntityAiGoal::LookAtEntityType {
+            priority: 2,
+            entity_type_id: "minecraft:bad type".to_owned(),
+            range: 24.0,
+        }));
         assert!(!valid_entity_ai_goal(&EntityAiGoal::TargetEntityType {
             priority: 1,
             entity_type_id: "minecraft:unknown type".to_owned(),
@@ -7103,6 +7289,21 @@ mod tests {
         );
         assert_eq!(
             set_item_rarity("../ruby", ItemRarity::Epic)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_glint_override_validates_paths_before_import() {
+        assert_eq!(
+            set_item_glint_override("ruby", true).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_glint_override("../ruby", false)
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument

@@ -15,6 +15,8 @@ pub const MAX_SCREEN_INPUT_SUBSCRIPTIONS: usize = 256;
 pub const MAX_SCREEN_INPUT_COORDINATE: f32 = 1_048_576.0;
 /// Maximum absolute axis delta accepted for active-screen mouse-wheel input.
 pub const MAX_SCREEN_SCROLL_DELTA: f64 = 64.0;
+/// Maximum absolute axis delta accepted for active-screen mouse-drag input.
+pub const MAX_SCREEN_DRAG_DELTA: f32 = 4_096.0;
 #[cfg(target_arch = "wasm32")]
 const SCREEN_INPUT_SCHEMA_VERSION: u32 = 1;
 #[cfg(target_arch = "wasm32")]
@@ -28,6 +30,9 @@ pub type ScreenKeyPressedSubscriptionHandle = EventSubscriptionHandle;
 
 /// Module-owned handle for synchronous active-screen mouse-release veto callbacks.
 pub type ScreenMouseReleasedSubscriptionHandle = EventSubscriptionHandle;
+
+/// Module-owned handle for synchronous active-screen mouse-drag veto callbacks.
+pub type ScreenMouseDraggedSubscriptionHandle = EventSubscriptionHandle;
 
 /// Detached press data available before the active screen's `keyPressed` handler runs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,6 +57,21 @@ pub struct ScreenMouseReleasedEvent {
     pub button: u8,
     /// Shift, Control, Alt, Super, Caps Lock, and Num Lock occupy the low six bits.
     pub modifiers: u8,
+}
+
+/// Detached pointer movement captured while a button is held over the active screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenMouseDraggedEvent {
+    /// Scaled logical GUI X coordinate after movement.
+    pub mouse_x: f32,
+    /// Scaled logical GUI Y coordinate after movement.
+    pub mouse_y: f32,
+    /// Scaled logical GUI X movement since the previous drag callback.
+    pub delta_x: f32,
+    /// Scaled logical GUI Y movement since the previous drag callback.
+    pub delta_y: f32,
+    /// GLFW mouse button index held during this movement.
+    pub button: u8,
 }
 
 /// A click, release, or key press from the active screen, captured on the client main thread.
@@ -90,6 +110,15 @@ pub enum ScreenInputEvent {
         mouse_y: f32,
         delta_x: f64,
         delta_y: f64,
+    },
+    /// Active-screen pointer movement. Delivered only to `subscribe_mouse_dragged` callbacks
+    /// because older general subscribers do not understand this event tag.
+    MouseDragged {
+        mouse_x: f32,
+        mouse_y: f32,
+        delta_x: f32,
+        delta_y: f32,
+        button: u8,
     },
 }
 
@@ -153,6 +182,26 @@ impl ScreenInputEvent {
                     ));
                 }
             }
+            Self::MouseDragged {
+                mouse_x,
+                mouse_y,
+                delta_x,
+                delta_y,
+                button,
+            } => {
+                validate_coordinate(mouse_x)?;
+                validate_coordinate(mouse_y)?;
+                if !delta_x.is_finite()
+                    || !delta_y.is_finite()
+                    || delta_x.abs() > MAX_SCREEN_DRAG_DELTA
+                    || delta_y.abs() > MAX_SCREEN_DRAG_DELTA
+                {
+                    return Err(invalid("screen drag deltas must be finite and bounded"));
+                }
+                if button > 31 {
+                    return Err(invalid("mouse button is outside the supported range"));
+                }
+            }
         }
         Ok(self)
     }
@@ -173,6 +222,10 @@ extern "C" {
     fn imported_subscribe_mouse_released(callback_id: i64, handle_output_pointer: i32) -> i32;
     #[link_name = "unsubscribe_mouse_released"]
     fn imported_unsubscribe_mouse_released(handle_pointer: i32, handle_length: i32) -> i32;
+    #[link_name = "subscribe_mouse_dragged"]
+    fn imported_subscribe_mouse_dragged(callback_id: i64, handle_output_pointer: i32) -> i32;
+    #[link_name = "unsubscribe_mouse_dragged"]
+    fn imported_unsubscribe_mouse_dragged(handle_pointer: i32, handle_length: i32) -> i32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -192,6 +245,7 @@ enum SubscriptionKind {
     General,
     KeyPressed,
     MouseReleased,
+    MouseDragged,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -457,6 +511,84 @@ where
     }
 }
 
+/// Subscribes a synchronous callback to pointer drags over the active screen only.
+/// Return `true` to consume the screen's drag handler. Requires
+/// `client.input.screen_cancel`; asynchronous callbacks cannot be used here.
+pub fn subscribe_mouse_dragged<F>(callback: F) -> SjmlResult<ScreenMouseDraggedSubscriptionHandle>
+where
+    F: FnMut(ScreenMouseDraggedEvent) -> SjmlResult<bool> + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut callback = callback;
+        let adapter = move |event: ScreenInputEvent| match event {
+            ScreenInputEvent::MouseDragged {
+                mouse_x,
+                mouse_y,
+                delta_x,
+                delta_y,
+                button,
+            } => callback(ScreenMouseDraggedEvent {
+                mouse_x,
+                mouse_y,
+                delta_x,
+                delta_y,
+                button,
+            }),
+            _ => Ok(false),
+        };
+        let callback_id = CALLBACKS.with(|registry| {
+            registry
+                .borrow_mut()
+                .insert(adapter, SubscriptionKind::MouseDragged)
+        })?;
+        let output = allocate_host_input(HANDLE_BYTES);
+        if output == 0 {
+            CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "could not allocate screen mouse-drag handle output",
+            ));
+        }
+        // SAFETY: initialize the complete live output allocation before the host writes the handle.
+        unsafe { core::ptr::write_bytes(output as *mut u8, 0, HANDLE_BYTES as usize) };
+        // SAFETY: the output allocation remains live during the synchronous host import.
+        let status = unsafe { imported_subscribe_mouse_dragged(callback_id as i64, output as i32) };
+        let result = if status == 0 {
+            // SAFETY: a successful host call initialized the complete handle allocation.
+            from_bytes::<ScreenMouseDraggedSubscriptionHandle>(unsafe {
+                core::slice::from_raw_parts(output as *const u8, HANDLE_BYTES as usize)
+            })
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected screen mouse-drag subscription",
+            ))
+        };
+        // SAFETY: release the same allocation returned above after the synchronous call.
+        unsafe { deallocate_host_input(output, HANDLE_BYTES) };
+        match result {
+            Ok(handle) => {
+                CALLBACKS.with(|registry| {
+                    if let Some(entry) = registry.borrow_mut().entries.get_mut(&callback_id) {
+                        entry.handle = Some(handle);
+                    }
+                });
+                Ok(handle)
+            }
+            Err(error) => {
+                CALLBACKS.with(|registry| registry.borrow_mut().entries.remove(&callback_id));
+                Err(error)
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = callback;
+        Err(unsupported())
+    }
+}
+
 /// Removes an active subscription from both the host and guest callback registry.
 pub fn unsubscribe(handle: ScreenInputSubscriptionHandle) -> SjmlResult<()> {
     #[cfg(target_arch = "wasm32")]
@@ -492,6 +624,12 @@ pub fn unsubscribe(handle: ScreenInputSubscriptionHandle) -> SjmlResult<()> {
                     imported_unsubscribe_mouse_released(bytes.as_ptr() as i32, bytes.len() as i32)
                 }
             }
+            SubscriptionKind::MouseDragged => {
+                // SAFETY: the exact serialized handle remains live for the synchronous host call.
+                unsafe {
+                    imported_unsubscribe_mouse_dragged(bytes.as_ptr() as i32, bytes.len() as i32)
+                }
+            }
         };
         if status != 0 {
             return Err(SjmlError::from_abi_code(
@@ -520,6 +658,12 @@ pub fn unsubscribe_key_pressed(handle: ScreenKeyPressedSubscriptionHandle) -> Sj
 /// Removes the synchronous active-screen mouse-release callback returned by
 /// [`subscribe_mouse_released`].
 pub fn unsubscribe_mouse_released(handle: ScreenMouseReleasedSubscriptionHandle) -> SjmlResult<()> {
+    unsubscribe(handle)
+}
+
+/// Removes the synchronous active-screen mouse-drag callback returned by
+/// [`subscribe_mouse_dragged`].
+pub fn unsubscribe_mouse_dragged(handle: ScreenMouseDraggedSubscriptionHandle) -> SjmlResult<()> {
     unsubscribe(handle)
 }
 
@@ -570,6 +714,13 @@ impl StableDecode for ScreenInputDelivery {
                 mouse_y: decoder.read_f32()?,
                 delta_x: decoder.read_f64()?,
                 delta_y: decoder.read_f64()?,
+            },
+            5 => ScreenInputEvent::MouseDragged {
+                mouse_x: decoder.read_f32()?,
+                mouse_y: decoder.read_f32()?,
+                delta_x: decoder.read_f32()?,
+                delta_y: decoder.read_f32()?,
+                button: decoder.read_u8()?,
             },
             _ => return Err(invalid("unknown screen input event type")),
         }
@@ -646,8 +797,8 @@ fn unsupported() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        ScreenInputEvent, ScreenKeyPressedEvent, MAX_SCREEN_INPUT_COORDINATE,
-        MAX_SCREEN_SCROLL_DELTA,
+        ScreenInputEvent, ScreenKeyPressedEvent, MAX_SCREEN_DRAG_DELTA,
+        MAX_SCREEN_INPUT_COORDINATE, MAX_SCREEN_SCROLL_DELTA,
     };
 
     #[test]
@@ -756,6 +907,34 @@ mod tests {
                 mouse_y: 0.0,
                 delta_x,
                 delta_y,
+            }
+            .validate()
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn validates_bounded_active_screen_mouse_drag_events() {
+        let event = ScreenInputEvent::MouseDragged {
+            mouse_x: MAX_SCREEN_INPUT_COORDINATE,
+            mouse_y: -MAX_SCREEN_INPUT_COORDINATE,
+            delta_x: -MAX_SCREEN_DRAG_DELTA,
+            delta_y: MAX_SCREEN_DRAG_DELTA,
+            button: 31,
+        };
+        assert_eq!(event.validate().unwrap(), event);
+        for (delta_x, delta_y, button) in [
+            (f32::NAN, 0.0, 0),
+            (0.0, f32::INFINITY, 0),
+            (MAX_SCREEN_DRAG_DELTA + 0.1, 0.0, 0),
+            (0.0, 0.0, 32),
+        ] {
+            assert!(ScreenInputEvent::MouseDragged {
+                mouse_x: 0.0,
+                mouse_y: 0.0,
+                delta_x,
+                delta_y,
+                button,
             }
             .validate()
             .is_err());

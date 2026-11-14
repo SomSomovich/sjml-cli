@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[path = "gametest/block_drops_attempt.rs"]
 mod block_drops_attempt;
+#[path = "gametest/block_entity_sign_text.rs"]
+mod block_entity_sign_text;
 #[path = "gametest/block_farmland_trample_attempt.rs"]
 mod block_farmland_trample_attempt;
 #[path = "gametest/block_fertilize_attempt.rs"]
@@ -165,11 +167,26 @@ static SAW_MENU_ACTION: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_DROP_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_ALLOWED_STICK_PICKUP_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_VETOED_DIAMOND_PICKUP_ATTEMPT: AtomicBool = AtomicBool::new(false);
+static ARM_PLAYER_BREAK_SPEED: AtomicBool = AtomicBool::new(false);
 
 #[mod_register]
 fn register_test_content() -> SjmlResult<()> {
     registry::register_block("gametest_block", BlockDefinition::default())?;
     registry::register_block_entity("gametest_machine", "gametest_block")?;
+    registry::register_block("gametest_signal_entity_block", BlockDefinition::default())?;
+    registry::register_block_entity("gametest_signal_machine", "gametest_signal_entity_block")?;
+    registry::add_block_state_property(
+        "gametest_signal_entity_block",
+        &BlockStateProperty::boolean("powered", false)?,
+    )?;
+    registry::set_block_state_behavior(
+        "gametest_signal_entity_block",
+        &[("powered", "true")],
+        registry::BlockStateBehavior::new()
+            .redstone_signal(6)?
+            .direct_redstone_signal(12)?
+            .comparator_signal(4)?,
+    )?;
     let shape_boxes = BlockShapeBoxes::new([
         BlockAabb::new([0.25, 0.0, 0.25], [0.75, 0.5, 0.45])?,
         BlockAabb::new([0.25, 0.0, 0.55], [0.75, 0.5, 0.75])?,
@@ -235,6 +252,9 @@ fn register_test_content() -> SjmlResult<()> {
             .friction(0.95)?
             .sound(BlockSound::Amethyst)
             .redstone_conductor(false)
+            .redstone_signal(9)?
+            .direct_redstone_signal(13)?
+            .comparator_signal(7)?
             .suffocating(false)
             .view_blocking(true)
             .emissive_rendering(true)
@@ -308,6 +328,11 @@ fn register_test_content() -> SjmlResult<()> {
     registry::set_item_crafting_remainder("gametest_crafting_container", "minecraft:bucket")?;
     registry::register_item("gametest_epic_rarity", ItemDefinition::default())?;
     registry::set_item_rarity("gametest_epic_rarity", ItemRarity::Epic)?;
+    registry::register_item("gametest_glint_on", ItemDefinition::default())?;
+    registry::set_item_glint_override("gametest_glint_on", true)?;
+    registry::register_item("gametest_glint_off", ItemDefinition::default())?;
+    registry::set_item_glint_override("gametest_glint_off", false)?;
+    registry::register_item("gametest_glint_default", ItemDefinition::default())?;
     registry::register_item("gametest_enchantable", ItemDefinition::default())?;
     registry::set_item_enchantment_value("gametest_enchantable", 31)?;
     registry::register_item(
@@ -646,6 +671,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe_with_interval("world.tick", EventPriority::Normal, 2)?;
     events::subscribe("inventory.changed", EventPriority::Normal)?;
     events::subscribe("player.item_broken", EventPriority::Normal)?;
+    events::subscribe("player.break_speed", EventPriority::Normal)?;
     events::subscribe("resources.reloaded", EventPriority::Normal)?;
     events::subscribe("menu.action", EventPriority::Normal)?;
     gameplay_events::initialize()?;
@@ -675,6 +701,22 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     block_fluid_place_attempt::initialize()?;
     entity_tick::initialize()?;
     Ok(())
+}
+
+#[event(name = "player.break_speed")]
+fn override_player_break_speed(event: PlayerBreakSpeed) -> SjmlResult<PlayerBreakSpeedAction> {
+    if event.block_id == "minecraft:stone" && ARM_PLAYER_BREAK_SPEED.swap(false, Ordering::Relaxed)
+    {
+        Ok(PlayerBreakSpeedAction::SetSpeed(7.25))
+    } else {
+        Ok(PlayerBreakSpeedAction::Pass)
+    }
+}
+
+#[command(name = "player.break_speed.arm")]
+fn arm_player_break_speed(_: WorldArguments) -> SjmlResult<String> {
+    ARM_PLAYER_BREAK_SPEED.store(true, Ordering::Relaxed);
+    Ok("player.break_speed override armed".to_owned())
 }
 
 #[event(name = "block.break")]
@@ -1259,6 +1301,8 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
         z: player_snapshot.z.floor() as i32,
     };
     let biome_id = world::biome_at(player_world, player_position)?;
+    let biome_climate = world::biome_climate_at(player_world, player_position)?;
+    let block_destroy_speed = world::block_destroy_speed(player_world, player_position)?;
     let heightmap = world::heightmap(
         player_world,
         HeightmapType::MotionBlocking,
@@ -1454,6 +1498,15 @@ fn inspect_world(_: WorldArguments) -> SjmlResult<String> {
             .as_deref()
             .and_then(|id| id.split_once(':'))
             .is_none()
+        || biome_climate.as_ref().is_none_or(|climate| {
+            biome_id.as_deref() != Some(climate.biome_id.as_str())
+                || !climate.base_temperature.is_finite()
+                || !climate.downfall.is_finite()
+        })
+        || block_destroy_speed.is_none_or(|speed| {
+            !speed.is_finite()
+                || (speed != -1.0 && (speed < 0.0 || speed > world::MAX_WORLD_BLOCK_DESTROY_SPEED))
+        })
         || heightmap.is_none_or(|height| !(-64..=320).contains(&height))
         || light.is_none_or(|light| light.sky > 15 || light.block > 15)
         || world::get("sjml_game_test:unloaded")?.is_some()
@@ -2687,6 +2740,13 @@ fn check_entity_state_flags(arguments: EntityRaycastArguments) -> SjmlResult<Str
         })?;
     let original_glowing = entity::is_glowing(handle)?;
     let original_silent = entity::is_silent(handle)?;
+    let state = entity::state_snapshot(handle)?;
+    if state.glowing != original_glowing || state.on_fire != (entity::fire_ticks(handle)? > 0) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity state snapshot did not match live glowing/fire state",
+        ));
+    }
     let check = (|| {
         entity::set_glowing(handle, !original_glowing)?;
         if entity::is_glowing(handle)? == original_glowing {

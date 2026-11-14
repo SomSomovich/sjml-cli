@@ -25,10 +25,16 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.99.0
-and core ABI 1.91.0. Live
+unverified. This guide describes the private SDK workspace target 0.100.0
+and core ABI 1.92.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
+SDK 0.100.0 adds loaded-only biome climate and block destroy-speed reads, a
+seven-flag entity snapshot, synchronous player break-speed actions, vanilla
+sign text access, static redstone output declarations, item glint defaults,
+exact-type look-at goals, passive progress bars on client screens, and active
+screen mouse-drag callbacks. The detailed contracts are linked from the
+[compatibility guide](COMPATIBILITY.md).
 SDK 0.99.0 adds bounded finite-f32 item components, static registered-item use
 animation/duration settings, the `player.item_broken` event, and owner-scoped
 updates for an already open client screen. See
@@ -474,7 +480,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.99.0"
+sjml-sdk = "0.100.0"
 ```
 
 For development against this checkout, use

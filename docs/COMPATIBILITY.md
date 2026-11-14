@@ -16,15 +16,29 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.101.0`, Rust SDK/macros `0.99.0`, private CLI
-`0.1.31`, and ABI `1.91.0`. ABI compatibility remains major-version based: host
-0.101.0 accepts ABI `1.0.x` through `1.91.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.91.0` and host range
-`^0.101.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.102.0`, Rust SDK/macros `0.100.0`, private CLI
+`0.1.32`, and ABI `1.92.0`. ABI compatibility remains major-version based: host
+0.102.0 accepts ABI `1.0.x` through `1.92.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.92.0` and host range
+`^0.102.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.92.0
+
+This version adds loaded-only biome climate and block destroy-speed reads, a
+detached entity movement/visibility snapshot, synchronous player break-speed
+callbacks, bounded text read/write access for vanilla signs, registered-item
+glint defaults, exact-state static redstone outputs, an exact-type look-at goal,
+and passive screen progress bars. The client also gains an active-screen mouse
+drag callback. See [biome climate](BIOME_CLIMATE.md),
+[block destroy speed](BLOCK_DESTROY_SPEED.md), [entity state flags](ENTITY_STATE_FLAGS.md),
+[player break speed](PLAYER_BREAK_SPEED.md), [sign text](SIGN_TEXT.md),
+[item glint](ITEM_GLINT_OVERRIDE.md), [redstone outputs](BLOCK_REDSTONE_OUTPUTS.md),
+[entity AI goals](ENTITY_AI_GOALS.md), [client screens](CLIENT_SCREEN.md), and
+[screen input](SCREEN_INPUT_MOUSE_RELEASE.md).
 
 ### APIs added in ABI 1.91.0
 

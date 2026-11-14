@@ -53,6 +53,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "player.attack_attempt"
             | "player.experience_change_attempt"
             | "player.experience_level_change_attempt"
+            | "player.break_speed"
             | "player.potion_use_attempt"
             | "player.totem_use_attempt"
             | "player.fished_attempt"
@@ -361,6 +362,13 @@ mod tests {
                 quote! { async fn drops_attempt(_: BlockDropsAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "block.drops_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.break_speed"),
+                quote! { async fn set_speed(_: PlayerBreakSpeed) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.break_speed is cancellable",
         );
         diagnostic(
             expand_event_async(

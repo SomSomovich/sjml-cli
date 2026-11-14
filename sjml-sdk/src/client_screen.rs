@@ -18,6 +18,8 @@ pub const CLIENT_SCREEN_SLIDER_FORM_SCHEMA_VERSION: u32 = 5;
 pub const CLIENT_SCREEN_MULTI_SELECT_FORM_SCHEMA_VERSION: u32 = 6;
 /// Schema version for the owner-scoped update envelope around one complete screen definition.
 pub const CLIENT_SCREEN_UPDATE_SCHEMA_VERSION: u32 = 7;
+/// Schema version for adding passive progress bars to any existing screen/form definition.
+pub const CLIENT_SCREEN_PROGRESS_BAR_SCHEMA_VERSION: u32 = 8;
 /// Maximum UTF-8 length of a screen or button ID.
 pub const MAX_CLIENT_SCREEN_ID_BYTES: usize = 64;
 /// Maximum UTF-8 length of a screen title.
@@ -46,6 +48,10 @@ pub const MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS: usize = 32;
 pub const MAX_CLIENT_SCREEN_CHECKBOXES: usize = 8;
 /// Absolute bound accepted by client numeric slider endpoints and values.
 pub const MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE: i32 = 1_000_000;
+/// Maximum number of passive progress bars on one screen.
+pub const MAX_CLIENT_SCREEN_PROGRESS_BARS: usize = 4;
+/// Absolute bound accepted by progress-bar range endpoints and values.
+pub const MAX_CLIENT_SCREEN_PROGRESS_BAR_ABS_VALUE: i32 = 1_000_000;
 /// Maximum UTF-8 length of one selection list or option label.
 pub const MAX_CLIENT_SCREEN_SELECTION_LABEL_BYTES: usize = 96;
 /// Maximum encoded size of a complete screen definition.
@@ -619,6 +625,122 @@ impl ClientScreenMultiSelectFormDefinition {
             )));
         }
         Ok(size)
+    }
+}
+
+/// A passive progress bar displayed with a screen or form.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenProgressBar {
+    /// Literal label displayed beside the current value.
+    pub label: String,
+    /// Inclusive minimum value represented by an empty bar.
+    pub minimum: i32,
+    /// Inclusive maximum value represented by a full bar.
+    pub maximum: i32,
+    /// Current value, which must lie inside the inclusive range.
+    pub value: i32,
+}
+
+impl ClientScreenProgressBar {
+    /// Builds and validates one passive progress bar.
+    pub fn new(
+        label: impl Into<String>,
+        minimum: i32,
+        maximum: i32,
+        value: i32,
+    ) -> SjmlResult<Self> {
+        let progress = Self {
+            label: label.into(),
+            minimum,
+            maximum,
+            value,
+        };
+        progress.validate()?;
+        Ok(progress)
+    }
+
+    /// Returns the normalized fill fraction in the inclusive range 0.0–1.0.
+    pub fn fraction(&self) -> f32 {
+        if self.maximum <= self.minimum || self.value <= self.minimum {
+            return 0.0;
+        }
+        if self.value >= self.maximum {
+            return 1.0;
+        }
+        let raw = (f64::from(self.value) - f64::from(self.minimum))
+            / (f64::from(self.maximum) - f64::from(self.minimum));
+        raw.clamp(0.0, 1.0) as f32
+    }
+
+    fn validate(&self) -> SjmlResult<()> {
+        validate_text(
+            &self.label,
+            1,
+            MAX_CLIENT_SCREEN_BUTTON_LABEL_BYTES,
+            "progress bar label",
+        )?;
+        if self.minimum < -MAX_CLIENT_SCREEN_PROGRESS_BAR_ABS_VALUE
+            || self.maximum > MAX_CLIENT_SCREEN_PROGRESS_BAR_ABS_VALUE
+            || self.minimum >= self.maximum
+            || self.value < self.minimum
+            || self.value > self.maximum
+        {
+            return Err(invalid(
+                "progress bar requires ordered bounds within ±1000000 and a value inside those bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Implemented by SDK screen/form definitions that can be decorated with passive widgets.
+#[doc(hidden)]
+pub trait ClientScreenDefinitionSource {
+    #[doc(hidden)]
+    fn encode_client_screen_definition(&self) -> SjmlResult<Vec<u8>>;
+}
+
+/// Existing screen or form content plus one to four passive progress bars.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientScreenWithProgressBars<D: ClientScreenDefinitionSource> {
+    /// The base screen, text form, list form, settings form, slider form, or multi-select form.
+    pub definition: D,
+    /// One to four progress bars, displayed below the body and above form controls.
+    pub progress_bars: Vec<ClientScreenProgressBar>,
+}
+
+impl<D: ClientScreenDefinitionSource> ClientScreenWithProgressBars<D> {
+    /// Builds and validates a screen/form with one to four passive progress bars.
+    pub fn new(definition: D, progress_bars: Vec<ClientScreenProgressBar>) -> SjmlResult<Self> {
+        if !(1..=MAX_CLIENT_SCREEN_PROGRESS_BARS).contains(&progress_bars.len()) {
+            return Err(invalid(format!(
+                "a progress screen must contain between 1 and {MAX_CLIENT_SCREEN_PROGRESS_BARS} bars"
+            )));
+        }
+        for progress_bar in &progress_bars {
+            progress_bar.validate()?;
+        }
+        let result = Self {
+            definition,
+            progress_bars,
+        };
+        let _ = result.encode_definition()?;
+        Ok(result)
+    }
+
+    /// Opens this screen/form with its passive progress bars on the physical client.
+    pub fn open(&self) -> SjmlResult<()> {
+        open_payload(&self.encode_definition()?)
+    }
+
+    /// Replaces the current same-ID owner screen/form and its progress bars in place.
+    pub fn update(&self) -> SjmlResult<()> {
+        update_payload(&self.encode_definition()?)
+    }
+
+    fn encode_definition(&self) -> SjmlResult<Vec<u8>> {
+        let base = self.definition.encode_client_screen_definition()?;
+        encode_progress_bars_definition(&base, &self.progress_bars)
     }
 }
 
@@ -1404,6 +1526,98 @@ fn encode_multi_select_form_definition(
     Ok(payload)
 }
 
+impl ClientScreenDefinitionSource for ClientScreenDefinition {
+    fn encode_client_screen_definition(&self) -> SjmlResult<Vec<u8>> {
+        encode_definition(self)
+    }
+}
+
+impl ClientScreenDefinitionSource for ClientScreenFormDefinition {
+    fn encode_client_screen_definition(&self) -> SjmlResult<Vec<u8>> {
+        encode_form_definition(self)
+    }
+}
+
+impl ClientScreenDefinitionSource for ClientScreenListFormDefinition {
+    fn encode_client_screen_definition(&self) -> SjmlResult<Vec<u8>> {
+        encode_list_form_definition(self)
+    }
+}
+
+impl ClientScreenDefinitionSource for ClientScreenSettingsFormDefinition {
+    fn encode_client_screen_definition(&self) -> SjmlResult<Vec<u8>> {
+        encode_settings_form_definition(self)
+    }
+}
+
+impl ClientScreenDefinitionSource for ClientScreenSliderFormDefinition {
+    fn encode_client_screen_definition(&self) -> SjmlResult<Vec<u8>> {
+        encode_slider_form_definition(self)
+    }
+}
+
+impl ClientScreenDefinitionSource for ClientScreenMultiSelectFormDefinition {
+    fn encode_client_screen_definition(&self) -> SjmlResult<Vec<u8>> {
+        encode_multi_select_form_definition(self)
+    }
+}
+
+fn encode_progress_bars_definition(
+    base_definition: &[u8],
+    progress_bars: &[ClientScreenProgressBar],
+) -> SjmlResult<Vec<u8>> {
+    if base_definition.len() < core::mem::size_of::<u32>() {
+        return Err(invalid("base client screen definition is truncated"));
+    }
+    let base_schema = u32::from_le_bytes(
+        base_definition[..4]
+            .try_into()
+            .expect("the base schema has four bytes"),
+    );
+    if !(CLIENT_SCREEN_SCHEMA_VERSION..=CLIENT_SCREEN_MULTI_SELECT_FORM_SCHEMA_VERSION)
+        .contains(&base_schema)
+    {
+        return Err(invalid(
+            "base client screen definition has an unsupported schema",
+        ));
+    }
+    if !(1..=MAX_CLIENT_SCREEN_PROGRESS_BARS).contains(&progress_bars.len()) {
+        return Err(invalid(format!(
+            "a progress screen must contain between 1 and {MAX_CLIENT_SCREEN_PROGRESS_BARS} bars"
+        )));
+    }
+    let base_length = u32::try_from(base_definition.len()).map_err(|_| payload_overflow())?;
+    let mut size = 3usize
+        .checked_mul(core::mem::size_of::<u32>())
+        .and_then(|size| size.checked_add(base_definition.len()))
+        .ok_or_else(payload_overflow)?;
+    for bar in progress_bars {
+        bar.validate()?;
+        size = checked_string_size(size, &bar.label)?;
+        size = size
+            .checked_add(3 * core::mem::size_of::<u32>())
+            .ok_or_else(payload_overflow)?;
+    }
+    if size > MAX_CLIENT_SCREEN_PAYLOAD_BYTES - 2 * core::mem::size_of::<u32>() {
+        return Err(too_large(
+            "encoded progress screen leaves no room for the schema-v7 update envelope",
+        ));
+    }
+    let mut payload = Vec::with_capacity(size);
+    write_u32(&mut payload, CLIENT_SCREEN_PROGRESS_BAR_SCHEMA_VERSION);
+    write_u32(&mut payload, base_length);
+    payload.extend_from_slice(base_definition);
+    write_u32(&mut payload, progress_bars.len() as u32);
+    for bar in progress_bars {
+        write_string(&mut payload, &bar.label)?;
+        write_u32(&mut payload, bar.minimum as u32);
+        write_u32(&mut payload, bar.maximum as u32);
+        write_u32(&mut payload, bar.value as u32);
+    }
+    debug_assert_eq!(payload.len(), size);
+    Ok(payload)
+}
+
 fn write_string(payload: &mut Vec<u8>, value: &str) -> SjmlResult<()> {
     let length = u32::try_from(value.len()).map_err(|_| payload_overflow())?;
     write_u32(payload, length);
@@ -1469,11 +1683,12 @@ mod tests {
         encode_slider_form_definition, encode_update_payload, ClientScreenButton,
         ClientScreenCheckbox, ClientScreenDefinition, ClientScreenFormDefinition,
         ClientScreenListFormDefinition, ClientScreenMultiSelectFormDefinition,
-        ClientScreenMultiSelectionList, ClientScreenNumericSlider, ClientScreenSelectionList,
-        ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
-        ClientScreenSliderFormDefinition, ClientScreenTextField, MAX_CLIENT_SCREEN_CHECKBOXES,
-        MAX_CLIENT_SCREEN_ID_BYTES, MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS,
-        MAX_CLIENT_SCREEN_PAYLOAD_BYTES, MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
+        ClientScreenMultiSelectionList, ClientScreenNumericSlider, ClientScreenProgressBar,
+        ClientScreenSelectionList, ClientScreenSelectionOption, ClientScreenSettingsFormDefinition,
+        ClientScreenSliderFormDefinition, ClientScreenTextField, ClientScreenWithProgressBars,
+        MAX_CLIENT_SCREEN_CHECKBOXES, MAX_CLIENT_SCREEN_ID_BYTES,
+        MAX_CLIENT_SCREEN_MULTI_SELECT_OPTIONS, MAX_CLIENT_SCREEN_PAYLOAD_BYTES,
+        MAX_CLIENT_SCREEN_SLIDER_ABS_VALUE,
     };
     use crate::ErrorCode;
 
@@ -1558,6 +1773,105 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn wraps_a_form_in_schema_v8_and_keeps_it_inside_the_v7_update_envelope() {
+        let screen = ClientScreenDefinition::new(
+            "demo:progress",
+            "Downloading",
+            vec!["Preparing files".to_owned()],
+            vec![ClientScreenButton::new("cancel", "Cancel").unwrap()],
+        )
+        .unwrap();
+        let form = ClientScreenFormDefinition::new(
+            screen,
+            vec![ClientScreenTextField::new("status", "Status", "Active", 32).unwrap()],
+        )
+        .unwrap();
+        let decorated = ClientScreenWithProgressBars::new(
+            form,
+            vec![ClientScreenProgressBar::new("Download", 0, 100, 25).unwrap()],
+        )
+        .unwrap();
+        let definition = decorated.encode_definition().unwrap();
+        let update = encode_update_payload(&definition).unwrap();
+
+        assert_eq!(
+            u32::from_le_bytes(definition[0..4].try_into().unwrap()),
+            super::CLIENT_SCREEN_PROGRESS_BAR_SCHEMA_VERSION
+        );
+        let base_length = u32::from_le_bytes(definition[4..8].try_into().unwrap()) as usize;
+        assert_eq!(
+            u32::from_le_bytes(definition[8..12].try_into().unwrap()),
+            super::CLIENT_SCREEN_FORM_SCHEMA_VERSION
+        );
+        assert_eq!(
+            u32::from_le_bytes(update[0..4].try_into().unwrap()),
+            super::CLIENT_SCREEN_UPDATE_SCHEMA_VERSION
+        );
+        assert_eq!(
+            u32::from_le_bytes(update[8..12].try_into().unwrap()),
+            super::CLIENT_SCREEN_PROGRESS_BAR_SCHEMA_VERSION
+        );
+        assert_eq!(
+            u32::from_le_bytes(update[12..16].try_into().unwrap()) as usize,
+            base_length
+        );
+        assert_eq!(decorated.progress_bars[0].fraction(), 0.25);
+        assert!(update.len() <= MAX_CLIENT_SCREEN_PAYLOAD_BYTES);
+    }
+
+    #[test]
+    fn progress_bars_reject_empty_or_out_of_range_definitions() {
+        let screen = ClientScreenDefinition::new(
+            "demo:progress",
+            "Progress",
+            Vec::new(),
+            vec![ClientScreenButton::new("close", "Close").unwrap()],
+        )
+        .unwrap();
+        assert_eq!(
+            ClientScreenWithProgressBars::new(screen.clone(), Vec::new())
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            ClientScreenProgressBar::new("Work", 10, 10, 10)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            ClientScreenProgressBar::new("Work", 0, 10, 11)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            ClientScreenProgressBar::new("Work", -1_000_001, 10, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let bar = ClientScreenProgressBar {
+            label: "Work".to_owned(),
+            minimum: 0,
+            maximum: 10,
+            value: 12,
+        };
+        assert_eq!(
+            bar.fraction(),
+            1.0,
+            "rendering clamps defensively to a full bar"
+        );
+        assert_eq!(
+            ClientScreenWithProgressBars::new(screen, vec![bar])
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
         );
     }
 
