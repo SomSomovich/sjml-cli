@@ -25,11 +25,11 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.104.0
-and core ABI 1.96.0. Live
+unverified. This guide describes the private SDK workspace target 0.105.0
+and core ABI 1.97.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
-SDK 0.104.0 adds ageable-Mob age control, runtime villager-offer CRUD, fluid-type properties, placed ore generation, batch particles, Arrow and Spectral Arrow spawning, enchantment and fire-spread events, and package-owned client asset discovery. See the focused guides and [ABI compatibility](COMPATIBILITY.md).
+SDK 0.105.0 adds client fog overrides, the `player.item_consumed` event, typed furnace-fuel registration, and Mob navigation snapshots and cancellation. See the focused guides and [ABI compatibility](COMPATIBILITY.md).
 SDK 0.103.0 adds exact-state piston/fire behavior for registered blocks, bounded drop suppression during block updates, item repair tags and player-stack glint controls, non-player entity orientation/equipment/drop-chance APIs, raw client cursor motion, and observational sound-start callbacks.
 SDK 0.102.0 adds player ability writes, mob persistence and loot-pickup controls, chunk lifecycle notifications, client resource-reload and chat-history APIs, world-save and entity-left-level events, live villager trade access, and player statistic-change notifications.
 SDK 0.100.0 adds loaded-only biome climate and block destroy-speed reads, a
@@ -492,7 +492,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.104.0"
+sjml-sdk = "0.105.0"
 ```
 
 For development against this checkout, use
@@ -1385,6 +1385,10 @@ declaration requires `content.register` and is limited to standalone items
 owned by the same module; it does not create
 stacks or expose stack components. See
 [`ITEM_CRAFTING_REMAINDER.md`](ITEM_CRAFTING_REMAINDER.md).
+
+Registered items can also receive a bounded, static NeoForge furnace-fuel duration through
+`registry::set_item_furnace_fuel_burn_time`; see
+[`ITEM_FURNACE_FUEL.md`](ITEM_FURNACE_FUEL.md).
 
 The same `#[mod_register]` callback may stage a generic block entity attached
 to a block declared by that module, plus a `MobCategory.MISC` living entity
@@ -2450,7 +2454,10 @@ Request and receive
 blocks in the Mob's current dimension, inside build height and the world
 border, and the path corridor must already be loaded. This server-thread call
 never loads chunks and returns whether Minecraft accepted the path. It does not
-expose path nodes or custom pathfinding callbacks. See
+expose path nodes or custom pathfinding callbacks. `entity::navigation_snapshot`
+reads an `EntityNavigationSnapshot { active, target }` with only `entity.read`;
+`entity::stop_navigation` requires both capabilities and returns whether it
+stopped an active path. See
 [bounded entity navigation](ENTITY_NAVIGATION.md).
 
 Loaded non-player entities expose bounded yaw/pitch reads and writes with `entity::rotation` and `entity::set_rotation`, plus yaw/pitch/head-yaw snapshots and writes with `entity::orientation` and `entity::set_orientation`; writes require `entity.read` plus `entity.rotation.write`. See [entity rotation](ENTITY_ROTATION.md). They also expose a bounded `entity::vitals` snapshot and normal-path `entity::heal` request; healing requires `entity.read` plus `entity.health.write`, while reads require `entity.read`. See [entity vitals and healing](ENTITY_HEALTH.md).

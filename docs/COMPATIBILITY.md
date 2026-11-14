@@ -16,15 +16,23 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.106.0`, Rust SDK/macros `0.104.0`, private CLI
-`0.1.36`, and ABI `1.96.0`. ABI compatibility remains major-version based: host
-0.106.0 accepts ABI `1.0.x` through `1.96.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.96.0` and host range
-`^0.106.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.107.0`, Rust SDK/macros `0.105.0`, private CLI
+`0.1.37`, and ABI `1.97.0`. ABI compatibility remains major-version based: host
+0.107.0 accepts ABI `1.0.x` through `1.97.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.97.0` and host range
+`^0.107.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.97.0
+
+This version adds persistent physical-client fog overrides, the observation-only
+`player.item_consumed` event, a typed furnace-fuel data-map declaration for
+same-module items, and loaded-Mob navigation snapshots and path cancellation.
+The API bounds and lifecycle checks are documented in the focused guides and
+the coverage matrix.
 
 ### APIs added in ABI 1.96.0
 

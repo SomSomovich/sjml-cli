@@ -2,9 +2,9 @@
 
 SJML exposes a narrow AI switch for an already loaded, non-player Minecraft
 `Mob`. It does not expose goal selectors, target selection, arbitrary
-navigation goals, path inspection, or custom pathfinding hooks. A separate
-bounded command can ask vanilla navigation to follow a short path; see
-[bounded entity navigation](ENTITY_NAVIGATION.md).
+navigation goals, path nodes, or custom pathfinding hooks. A separate bounded
+navigation API can read whether a path is active and its optional target, or
+stop that path; see [bounded entity navigation](ENTITY_NAVIGATION.md).
 
 ## Permissions and side
 

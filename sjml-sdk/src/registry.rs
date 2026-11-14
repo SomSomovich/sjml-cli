@@ -46,6 +46,8 @@ pub const MAX_ITEM_FOOD_EFFECT_DURATION_TICKS: u32 = 72_000;
 pub const MAX_ITEM_MAX_DAMAGE: u32 = 1_000_000;
 /// Maximum static vanilla stack size for one registered item.
 pub const MAX_ITEM_MAX_STACK_SIZE: u32 = 99;
+/// Maximum static NeoForge furnace-fuel burn duration for a registered item, in ticks.
+pub const MAX_ITEM_FURNACE_FUEL_BURN_TIME: u32 = 1_000_000;
 /// Maximum static use duration for one registered item, in ticks.
 pub const MAX_ITEM_USE_DURATION_TICKS: u32 = 72_000;
 /// Maximum UTF-8 size of one fully qualified static item crafting remainder ID.
@@ -2089,6 +2091,12 @@ extern "C" {
         path_length: i32,
         max_stack_size: i32,
     ) -> i32;
+    #[link_name = "set_item_furnace_fuel_burn_time"]
+    fn imported_set_item_furnace_fuel_burn_time(
+        path_pointer: i32,
+        path_length: i32,
+        burn_time: i32,
+    ) -> i32;
     #[link_name = "set_item_use_behavior"]
     fn imported_set_item_use_behavior(
         path_pointer: i32,
@@ -2881,6 +2889,46 @@ pub fn set_item_max_stack_size(item_path: &str, max_stack_size: u32) -> SjmlResu
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = max_stack_size;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the static NeoForge furnace-fuel burn duration for an item registered by this module.
+///
+/// Call this from `#[mod_register]` after [`register_item`] or after registering a block or fluid
+/// that provides an item form. The host adds the canonical item ID to
+/// `data/neoforge/data_maps/item/furnace_fuels.json`; `burn_time` must be in
+/// `1..=1_000_000` ticks. The item must belong to this module and can have only one declaration.
+/// NeoForge applies the data map on server data-pack reloads. This static data map is not available
+/// when connected to a vanilla server, and it does not provide per-stack or NBT-sensitive fuel
+/// durations.
+pub fn set_item_furnace_fuel_burn_time(item_path: &str, burn_time: u32) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    if item_path == "." || item_path == ".." {
+        return Err(invalid_argument(
+            "item furnace fuel path cannot be a dot segment",
+        ));
+    }
+    if !(1..=MAX_ITEM_FURNACE_FUEL_BURN_TIME).contains(&burn_time) {
+        return Err(invalid_argument(
+            "item furnace fuel burn time must be between 1 and 1000000 ticks",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates duration and item ownership.
+        let status = unsafe {
+            imported_set_item_furnace_fuel_burn_time(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                burn_time as i32,
+            )
+        };
+        return status_result(status, "host rejected the item furnace-fuel declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = burn_time;
         Err(unsupported_target())
     }
 }
@@ -8205,6 +8253,44 @@ mod tests {
         );
         assert_eq!(
             set_item_max_stack_size("../bundle", 16).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_furnace_fuel_burn_time_is_bounded_and_paths_validate_before_import() {
+        assert_eq!(MAX_ITEM_FURNACE_FUEL_BURN_TIME, 1_000_000);
+        assert_eq!(
+            set_item_furnace_fuel_burn_time("charcoal_chunk", 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_furnace_fuel_burn_time("charcoal_chunk", MAX_ITEM_FURNACE_FUEL_BURN_TIME)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        for invalid_time in [0, MAX_ITEM_FURNACE_FUEL_BURN_TIME + 1] {
+            assert_eq!(
+                set_item_furnace_fuel_burn_time("charcoal_chunk", invalid_time)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            set_item_furnace_fuel_burn_time("../charcoal_chunk", 1600)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_item_furnace_fuel_burn_time("..", 1600)
+                .unwrap_err()
+                .code(),
             ErrorCode::InvalidArgument
         );
     }

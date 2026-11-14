@@ -3,6 +3,7 @@
     allow(dead_code)
 )]
 
+use sjml::events::PlayerItemConsumed;
 use sjml::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -177,6 +178,7 @@ static SAW_SERVER_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_WORLD_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_INVENTORY_PICKUP: AtomicBool = AtomicBool::new(false);
 static SAW_ITEM_BROKEN: AtomicBool = AtomicBool::new(false);
+static SAW_ITEM_CONSUMED: AtomicBool = AtomicBool::new(false);
 static SAW_MENU_ACTION: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_DROP_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_ALLOWED_STICK_PICKUP_ATTEMPT: AtomicBool = AtomicBool::new(false);
@@ -343,6 +345,8 @@ fn register_test_content() -> SjmlResult<()> {
     )?;
     registry::register_item("gametest_crafting_container", ItemDefinition::default())?;
     registry::set_item_crafting_remainder("gametest_crafting_container", "minecraft:bucket")?;
+    registry::register_item("gametest_furnace_fuel", ItemDefinition::default())?;
+    registry::set_item_furnace_fuel_burn_time("gametest_furnace_fuel", 1_800)?;
     registry::register_item("gametest_epic_rarity", ItemDefinition::default())?;
     registry::set_item_rarity("gametest_epic_rarity", ItemRarity::Epic)?;
     registry::register_item("gametest_glint_on", ItemDefinition::default())?;
@@ -724,6 +728,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe_with_interval("world.tick", EventPriority::Normal, 2)?;
     events::subscribe("inventory.changed", EventPriority::Normal)?;
     events::subscribe("player.item_broken", EventPriority::Normal)?;
+    events::subscribe("player.item_consumed", EventPriority::Normal)?;
     events::subscribe("player.break_speed", EventPriority::Normal)?;
     events::subscribe("resources.reloaded", EventPriority::Normal)?;
     events::subscribe("menu.action", EventPriority::Normal)?;
@@ -993,6 +998,21 @@ fn observe_player_item_broken(event: PlayerItemBroken) -> SjmlResult<()> {
     Ok(())
 }
 
+#[event(name = "player.item_consumed")]
+fn observe_player_item_consumed(event: PlayerItemConsumed) -> SjmlResult<()> {
+    if event.player_id.len() == 36
+        && event.dimension_id == "minecraft:overworld"
+        && event.hand == "main"
+        && event.item_id == "minecraft:potion"
+        && event.count == 2
+        && event.result_item_id == "minecraft:glass_bottle"
+        && event.result_count == 1
+    {
+        SAW_ITEM_CONSUMED.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
 #[event(name = "resources.reloaded")]
 fn mark_successful_resource_reload(event: ResourcesReloaded) -> SjmlResult<()> {
     if event.tick_count < 0 {
@@ -1227,13 +1247,17 @@ fn check_server_tick(_: EntityDeathCheckArguments) -> SjmlResult<String> {
 fn check_inventory_changed(_: EntityDeathCheckArguments) -> SjmlResult<String> {
     let saw_pickup = SAW_INVENTORY_PICKUP.swap(false, Ordering::Relaxed);
     let saw_item_broken = SAW_ITEM_BROKEN.swap(false, Ordering::Relaxed);
-    if saw_pickup && saw_item_broken {
-        Ok("successful inventory pickup and player.item_broken callbacks delivered".to_owned())
+    let saw_item_consumed = SAW_ITEM_CONSUMED.swap(false, Ordering::Relaxed);
+    if saw_pickup && saw_item_broken && saw_item_consumed {
+        Ok(
+            "inventory.changed, player.item_broken, and player.item_consumed callbacks delivered"
+                .to_owned(),
+        )
     } else {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             format!(
-                "expected inventory pickup and player.item_broken callbacks: inventory.changed={saw_pickup}, player.item_broken={saw_item_broken}"
+                "expected inventory pickup, player.item_broken, and player.item_consumed callbacks: inventory.changed={saw_pickup}, player.item_broken={saw_item_broken}, player.item_consumed={saw_item_consumed}"
             ),
         ))
     }

@@ -39,5 +39,30 @@ fn starts_bounded_navigation(arguments: EntityNavigationArguments) -> SjmlResult
             "Minecraft did not accept a navigation path for the GameTest pig",
         ));
     }
-    Ok("guest started a bounded path for the loaded pig".to_owned())
+    let requested_target = BlockPos {
+        x: arguments.x,
+        y: arguments.y,
+        z: arguments.z,
+    };
+    let status = entity::navigation_snapshot(target)?;
+    if !status.active || status.target != Some(requested_target) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the navigation status snapshot did not report the requested active pig path",
+        ));
+    }
+    if !entity::stop_navigation(target)? {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the guest could not confirm stopping its active navigation path",
+        ));
+    }
+    let stopped = entity::navigation_snapshot(target)?;
+    if stopped.active {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "the pig still reports an active path after stop_navigation",
+        ));
+    }
+    Ok("guest started, inspected, and stopped a bounded path for the loaded pig".to_owned())
 }

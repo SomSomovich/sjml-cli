@@ -20,9 +20,9 @@ license = "MIT"
 distribution = "server_only"
 
 [runtime]
-abi = "^1.96.0"
+abi = "^1.97.0"
 minecraft = "~1.21.1"
-sjml = "^0.106.0"
+sjml = "^0.107.0"
 
 [[modules]]
 id = "core"
@@ -284,7 +284,10 @@ UTF-8 `payload` string. NeoForge data maps can also be contributed at
 foreign data namespace because NeoForge resolves built-in data map IDs in its
 own `neoforge` namespace. If multiple packages provide the same map path, the
 package whose mod ID sorts first lexicographically wins and later copies are
-skipped with a startup warning. Other JSON files must remain under the
+skipped with a startup warning. Typed item furnace-fuel declarations merge into
+the selected raw `furnace_fuels.json` values, replacing a direct raw value for
+the exact same item ID and removing a matching direct removal entry. Other raw
+values and tag-based removal rules remain. Other JSON files must remain under the
 package's own namespace; unsupported `data/` paths are ignored.
 
 Binary structure templates are accepted as compressed NBT under

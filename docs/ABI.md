@@ -1,12 +1,19 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.96.0**. This version adds ageable-Mob age reads/writes, bounded runtime villager-offer creation/removal, fluid-type properties, placed ore world-generation features, bounded batch particle spawning, Arrow and Spectral Arrow spawning, post-application enchantment events, random fire-spread attempt events, and package-owned client asset discovery. Existing ABI 1.95.0 contracts remain supported.
+The current ABI is **1.97.0**. This version adds bounded client fog overrides, the observational `player.item_consumed` event, typed furnace-fuel data-map registration, and loaded-Mob path snapshots and cancellation. Existing ABI 1.96.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.97.0 adds physical-client fog color, distance, and shape overrides;
+the observation-only `player.item_consumed` completion event; static typed
+furnace-fuel burn times for same-module registered items; and loaded-Mob
+navigation snapshots plus path cancellation. Each contract is bounded and
+checks side, thread, registration ownership, or runtime capability as
+appropriate. See the focused guides for field limits and lifecycle behavior.
 
 ABI 1.96.0 adds `entity::age` snapshots and guarded age writes for loaded
 ageable Mobs; module-owned runtime villager-offer insertion/removal; bounded
@@ -744,6 +751,17 @@ ID, and hand string (`main`, `off`, or empty when unavailable). It runs on the
 logical-server thread through NeoForge's `PlayerDestroyItemEvent`, requires
 `events.subscribe`, and is observation-only. See
 [player item broken](PLAYER_ITEM_BROKEN.md).
+The `player.item_consumed` callback receives schema-v1 `PlayerItemConsumed`:
+version `1`, canonical player UUID, dimension ID, hand, input item registry ID,
+input stack count, result item registry ID, and result stack count. Empty result
+stacks use an empty item ID and count zero. Counts are bounded to
+`0..=1,000,000` for the result and `1..=1,000,000` for the input. NeoForge's
+`LivingEntityUseItemEvent.Finish` hook runs after item effects and is not
+cancellable; the input count describes the pre-finish stack and does not imply
+the item was consumed from inventory. The synchronous callback requires
+`events.subscribe`, runs on the owning logical-server thread, and exposes no
+stack components or Minecraft objects. See
+[player completed item use](PLAYER_ITEM_CONSUMED.md).
 Guest commands are described below.
 Server event subscriptions are accepted only in integrated-server and
 dedicated-server execution contexts. `client.item.tooltip`,
@@ -968,6 +986,7 @@ The Rust SDK's registration wrappers use these imports during the
 | `sjml_registry_v1.set_item_attribute_modifier` | `(item_path_ptr: i32, item_path_len: i32, attribute_id_ptr: i32, attribute_id_len: i32, modifier_path_ptr: i32, modifier_path_len: i32, amount_bits: i32, operation: i32, slot: i32) -> i32` | Add one static vanilla or modded item attribute modifier to an item declared by the same module. Attribute IDs are canonical registry IDs, modifier paths are package/module scoped, amounts are finite `-1024..=1024`, operation codes are `0 add_value`, `1 add_multiplied_base`, `2 add_multiplied_total`, and slot codes are `0 any`, `1 mainhand`, `2 offhand`, `3 hand`, `4 feet`, `5 legs`, `6 chest`, `7 head`, `8 armor`, `9 body`; each item accepts at most 16 entries. |
 | `sjml_registry_v1.set_item_food` | `(item_path_ptr: i32, item_path_len: i32, nutrition: i32, saturation_modifier_bits: i32, flags: i32) -> i32` | Set nutrition 1–20, finite saturation modifier 0–10, and vanilla `fast` (bit 0) / `always_eat` (bit 1) flags on a previously declared item owned by the same module. |
 | `sjml_registry_v1.set_item_max_damage` | `(item_path_ptr: i32, item_path_len: i32, max_damage: i32) -> i32` | Set vanilla maximum durability from 1 through 1,000,000 on a same-module standalone item declared with stack size 1. |
+| `sjml_registry_v1.set_item_furnace_fuel_burn_time` | `(item_path_ptr: i32, item_path_len: i32, burn_time: i32) -> i32` | Set a same-module staged item's static NeoForge furnace-fuel burn duration to 1 through 1,000,000 ticks. |
 | `sjml_registry_v1.set_item_crafting_remainder` | `(item_path_ptr: i32, item_path_len: i32, remainder_item_id_ptr: i32, remainder_item_id_len: i32) -> i32` | Set one static vanilla crafting remainder on a same-module standalone item. The canonical, fully qualified remainder ID is at most 256 UTF-8 bytes and must already exist in the item registry when `mod_register` runs; unknown IDs and IDs for other staged SJML items are rejected. |
 | `sjml_registry_v1.register_block` | `(path_ptr: i32, path_len: i32, strength_bits: i32, resistance_bits: i32, requires_tool: i32, has_item: i32) -> i32` | Stage a basic block and optionally its `BlockItem`. |
 | `sjml_registry_v1.set_block_shape` | `(path_ptr: i32, path_len: i32, kind: i32, min_x_bits: i32, min_y_bits: i32, min_z_bits: i32, max_x_bits: i32, max_y_bits: i32, max_z_bits: i32) -> i32` | Set a fixed full-cube (`kind=0`), empty (`kind=1`), or normalized cuboid (`kind=2`) selection, collision, occlusion, and support shape on a block already staged by this module. Non-cuboid coordinates must be zero; cuboid floats must be finite and ordered within 0..=1. |
@@ -2484,6 +2503,8 @@ binds signatures but calls return `PERMISSION_DENIED`.
 | `start_riding` | `passenger_ptr, passenger_len, vehicle_ptr, vehicle_len, out_ptr, out_capacity` | Writes little-endian `u32` `0`/`1` for refused/successful non-forced mount |
 | `stop_riding` | `passenger_ptr, passenger_len, out_ptr, out_capacity` | Writes little-endian `u32` `0`/`1` for no change/successful dismount |
 | `navigate_to` | `request_ptr, request_len, out_ptr, out_capacity` | Schema-v1 44-byte request (`u32` version, 24-byte entity handle, `i32 x/y/z`, raw `f32` speed); writes schema-v1 `u32` and `u8` accepted flag |
+| `stop_navigation` | `handle_ptr, handle_len, out_ptr, out_capacity` | Writes schema-v1 `u32` and `u8` flag indicating whether an active path was stopped; requires `entity.read` and `entity.navigation.write` |
+| `navigation_snapshot` | `handle_ptr, handle_len, out_ptr, out_capacity` | Exact 18-byte schema-v1 detached active flag and optional target block position; requires `entity.read` |
 | `apply_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len, duration_ticks, amplifier` | Apply one registered effect to a loaded living non-player entity; status only |
 | `remove_effect` | `handle_ptr, handle_len, effect_id_ptr, effect_id_len` | Remove one registered active effect from a loaded living non-player entity; status only |
 | `discard` | `(handle_ptr: i32, handle_len: i32) -> i32` | Discard one loaded non-player entity and revoke its handle; status only |
@@ -2542,6 +2563,18 @@ operation is server-thread-only, accepts loaded non-player Mobs, and never asks
 Minecraft to load a chunk. It returns `false` if the Mob's navigator rejects
 the path, including when AI is disabled. Static registration and client calls
 are denied. See [bounded entity navigation](ENTITY_NAVIGATION.md).
+`navigation_snapshot` uses an exact 18-byte schema-v1 result: little-endian
+`u32(1)`, `u8 active`, `u8 has_target`, then three little-endian `i32` target
+coordinates. An absent target must use zero coordinates; X/Z are bounded to
+±30,000,000. The result is a detached copy, requires `entity.read`, and never
+loads chunks. `stop_navigation` accepts the same 24-byte live handle request
+shape as other single-handle imports and writes the five-byte schema-v1
+boolean result `true` only when a path was active before vanilla
+`PathNavigation.stop()` ran. Stopping requires `entity.read` and
+`entity.navigation.write`. Both imports require a loaded non-player Mob and
+the owning server thread; client contexts, static registration, stale or
+foreign module handles, and unloaded entities fail closed. See
+[bounded entity navigation](ENTITY_NAVIGATION.md).
 Effect removal applies only to loaded living non-player entities on the owning
 server thread. Stale handles, players, nonliving targets, and unknown IDs are
 rejected. See [effect removal](ENTITY_EFFECT_REMOVAL.md).

@@ -18,6 +18,8 @@ pub const MAX_INVENTORY_CHANGE_COUNT: i32 = 4_096;
 pub const MAX_INVENTORY_CHANGE_SLOT: i32 = 255;
 /// Maximum output stack count represented by one `player.item_crafted` event.
 pub const MAX_CRAFTED_ITEM_COUNT: i32 = 1_000_000;
+/// Maximum item count represented by one `player.item_consumed` event snapshot.
+pub const MAX_PLAYER_ITEM_CONSUMED_COUNT: i32 = 1_000_000;
 /// Maximum detached item snapshots included in one `player.fished_attempt` callback.
 pub const MAX_FISHED_DROPS: usize = 16;
 /// Maximum count represented by one detached `player.fished_attempt` drop.
@@ -2083,6 +2085,93 @@ fn validate_player_item_broken(event: &PlayerItemBroken) -> SjmlResult<()> {
     Ok(())
 }
 
+/// Synchronous, non-cancellable snapshot emitted when a server player finishes using an item.
+/// The `count` field is the stack size before the finish hook; result fields describe the
+/// replacement stack. Stack components and mutable Minecraft objects are never exposed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerItemConsumed {
+    /// Canonical UUID string of the player who finished using the item.
+    pub player_id: String,
+    /// Resource location of the level where use finished.
+    pub dimension_id: String,
+    /// `main`, `off`, or empty if NeoForge did not identify a hand.
+    pub hand: String,
+    /// Registry ID of the item stack before use completed.
+    pub item_id: String,
+    /// Stack size before use completed.
+    pub count: i32,
+    /// Registry ID of the replacement stack, or empty when the result stack is empty.
+    pub result_item_id: String,
+    /// Replacement stack size, zero when the result stack is empty.
+    pub result_count: i32,
+}
+
+impl StableEncode for PlayerItemConsumed {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_item_consumed(self)?;
+        encoder.write_u32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encode_bounded_event_string(&self.dimension_id, encoder)?;
+        encode_bounded_event_string(&self.hand, encoder)?;
+        encode_bounded_event_string(&self.item_id, encoder)?;
+        encoder.write_i32(self.count)?;
+        encode_bounded_event_string(&self.result_item_id, encoder)?;
+        encoder.write_i32(self.result_count)
+    }
+}
+
+impl StableDecode for PlayerItemConsumed {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let version = decoder.read_u32()?;
+        if version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!("PlayerItemConsumed schema version {version} is unsupported"),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            dimension_id: decode_bounded_event_string(decoder)?,
+            hand: decode_bounded_event_string(decoder)?,
+            item_id: decode_bounded_event_string(decoder)?,
+            count: decoder.read_i32()?,
+            result_item_id: decode_bounded_event_string(decoder)?,
+            result_count: decoder.read_i32()?,
+        };
+        validate_player_item_consumed(&event)?;
+        Ok(event)
+    }
+}
+
+fn validate_player_item_consumed(event: &PlayerItemConsumed) -> SjmlResult<()> {
+    if !canonical_uuid(&event.player_id)
+        || !canonical_resource_location(&event.dimension_id)
+        || !canonical_resource_location(&event.item_id)
+        || (!event.result_item_id.is_empty() && !canonical_resource_location(&event.result_item_id))
+        || !(event.hand.is_empty() || event.hand == "main" || event.hand == "off")
+        || !(1..=MAX_PLAYER_ITEM_CONSUMED_COUNT).contains(&event.count)
+        || !(0..=MAX_PLAYER_ITEM_CONSUMED_COUNT).contains(&event.result_count)
+        || event.result_item_id.is_empty() != (event.result_count == 0)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player.item_consumed contains invalid identity, item, hand, or count data",
+        ));
+    }
+    if event.player_id.len() > 256
+        || event.dimension_id.len() > 256
+        || event.hand.len() > 256
+        || event.item_id.len() > 256
+        || event.result_item_id.len() > 256
+    {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player.item_consumed event string exceeds the 256-byte limit",
+        ));
+    }
+    Ok(())
+}
+
 /// Synchronous, non-cancellable snapshot emitted after a player completes a trade with a villager
 /// or wandering trader. The NeoForge event runs after the merchant accepted the inputs and updated
 /// the offer use count. IDs and stack counts are detached; item components and mutable Minecraft
@@ -3210,17 +3299,18 @@ mod tests {
         PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
         PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
         PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemCrafted,
-        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt,
-        PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
-        PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed,
+        PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved,
+        PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt,
+        PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
         ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle, WorldTick,
         MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
         MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
         MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
-        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
-        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
-        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_ITEM_CONSUMED_COUNT,
+        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
+        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -5733,6 +5823,70 @@ mod tests {
             .unwrap_err()
             .code(),
             ErrorCode::PayloadTooLarge
+        );
+    }
+
+    #[test]
+    fn player_item_consumed_snapshot_matches_host_schema_and_bounds_stacks() {
+        let event = PlayerItemConsumed {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:the_nether".to_owned(),
+            hand: "off".to_owned(),
+            item_id: "minecraft:potion".to_owned(),
+            count: 2,
+            result_item_id: "minecraft:glass_bottle".to_owned(),
+            result_count: 1,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &event.player_id);
+        append_test_string(&mut expected, &event.dimension_id);
+        append_test_string(&mut expected, &event.hand);
+        append_test_string(&mut expected, &event.item_id);
+        expected.extend_from_slice(&event.count.to_le_bytes());
+        append_test_string(&mut expected, &event.result_item_id);
+        expected.extend_from_slice(&event.result_count.to_le_bytes());
+        assert_eq!(
+            encoded, expected,
+            "Rust encoding must match host schema-v1 bytes"
+        );
+        assert_eq!(from_bytes::<PlayerItemConsumed>(&encoded).unwrap(), event);
+
+        let no_result = PlayerItemConsumed {
+            result_item_id: String::new(),
+            result_count: 0,
+            ..event.clone()
+        };
+        assert_eq!(
+            from_bytes::<PlayerItemConsumed>(&to_bytes(&no_result).unwrap()).unwrap(),
+            no_result
+        );
+        assert_eq!(
+            to_bytes(&PlayerItemConsumed {
+                count: 0,
+                ..event.clone()
+            })
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            to_bytes(&PlayerItemConsumed {
+                result_count: 0,
+                ..event.clone()
+            })
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            to_bytes(&PlayerItemConsumed {
+                count: MAX_PLAYER_ITEM_CONSUMED_COUNT + 1,
+                ..event
+            })
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
         );
     }
 

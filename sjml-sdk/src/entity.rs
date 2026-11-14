@@ -97,6 +97,8 @@ pub const NAVIGATION_WRITE_CAPABILITY: &str = "entity.navigation.write";
 pub const MAX_ENTITY_NAVIGATION_RANGE: f64 = 32.0;
 /// Maximum pathfinding speed multiplier accepted by [`navigate_to`].
 pub const MAX_ENTITY_NAVIGATION_SPEED: f32 = 4.0;
+/// Exact schema-v1 response size for one detached Mob navigation snapshot.
+pub const MAX_ENTITY_NAVIGATION_SNAPSHOT_RESPONSE_BYTES: u32 = 18;
 /// Maximum UTF-8 byte length for a plain entity custom name.
 pub const MAX_ENTITY_CUSTOM_NAME_BYTES: usize = 1024;
 /// Maximum Unicode scalar count for a plain entity custom name.
@@ -1461,6 +1463,16 @@ extern "C" {
     fn imported_set_baby(handle: i32, handle_length: i32, baby: i32) -> i32;
     #[link_name = "navigate_to"]
     fn imported_navigate_to(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "stop_navigation"]
+    fn imported_stop_navigation(handle: i32, handle_length: i32, output: i32, capacity: i32)
+        -> i32;
+    #[link_name = "navigation_snapshot"]
+    fn imported_navigation_snapshot(
+        handle: i32,
+        handle_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
     #[link_name = "is_glowing"]
     fn imported_is_glowing(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_glowing"]
@@ -3448,6 +3460,122 @@ pub fn navigate_to(handle: EntityHandle, target: BlockPos, speed: f32) -> SjmlRe
     }
 }
 
+/// Stops the current vanilla path for one loaded non-player Mob.
+///
+/// Requires `entity.read` and [`NAVIGATION_WRITE_CAPABILITY`]. The same live,
+/// module-owned entity handle and logical-server-thread checks as
+/// [`navigate_to`] apply. Calls `PathNavigation::stop`; it does not alter AI,
+/// target selection, or goals. Returns `true` if a path was active when the
+/// request stopped it.
+pub fn stop_navigation(handle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output::<EntityNavigationResult>(5, |output, capacity| {
+            // SAFETY: the handle and output allocation remain live for the synchronous host call.
+            unsafe {
+                imported_stop_navigation(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+        .map(|result| result.accepted)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads a detached active-path flag and optional target for one loaded Mob.
+///
+/// Requires `entity.read` and runs synchronously on the owning logical-server
+/// thread. The returned target is a copied block position; no Minecraft object
+/// or path nodes are exposed. This read does not load chunks.
+pub fn navigation_snapshot(handle: EntityHandle) -> SjmlResult<EntityNavigationSnapshot> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let response = read_output::<EntityNavigationSnapshotResponse>(
+            MAX_ENTITY_NAVIGATION_SNAPSHOT_RESPONSE_BYTES,
+            |output, capacity| {
+                // SAFETY: the handle and output allocation remain live for the synchronous host call.
+                unsafe {
+                    imported_navigation_snapshot(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        decode_navigation_snapshot(response)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Detached status and optional target position for a Mob's current vanilla path.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct EntityNavigationSnapshot {
+    /// Whether the Mob's current navigation path is in progress.
+    pub active: bool,
+    /// Current navigation target, when Minecraft has one.
+    pub target: Option<BlockPos>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableDecode)]
+#[sjml(version = 1)]
+struct EntityNavigationSnapshotResponse {
+    active: bool,
+    has_target: bool,
+    target_x: i32,
+    target_y: i32,
+    target_z: i32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn decode_navigation_snapshot(
+    response: EntityNavigationSnapshotResponse,
+) -> SjmlResult<EntityNavigationSnapshot> {
+    let target = if response.has_target {
+        if i64::from(response.target_x).abs() > 30_000_000
+            || i64::from(response.target_z).abs() > 30_000_000
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned entity navigation target coordinates outside world bounds",
+            ));
+        }
+        Some(BlockPos {
+            x: response.target_x,
+            y: response.target_y,
+            z: response.target_z,
+        })
+    } else {
+        if response.target_x != 0 || response.target_y != 0 || response.target_z != 0 {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned nonzero coordinates for an absent navigation target",
+            ));
+        }
+        None
+    };
+    Ok(EntityNavigationSnapshot {
+        active: response.active,
+        target,
+    })
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
@@ -4024,28 +4152,31 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         active_effects, age_ticks, air_supply, apply_effect, can_pick_up_loot, clear_custom_name,
-        clear_target, custom_name, damage, fire_ticks, is_baby, is_persistence_required,
-        navigate_to, raycast, remove_effect, set_age_ticks, set_air_supply, set_baby,
-        set_can_pick_up_loot, set_custom_name, set_fire_ticks, set_persistence_required,
-        set_target, set_velocity, target, target_snapshot, teleport, validate_active_effects,
-        validate_age_ticks, validate_custom_name, validate_entity_raycast,
-        validate_navigation_target, validate_spatial_query, validate_teleport_target, within,
-        ActiveEffect, ActiveEffectsResponse, AgeTicksResponse, BabyStateResponse, EntityAirSupply,
-        EntityBounds, EntityCustomNameResponse, EntityNavigationRequest, EntityNavigationResult,
-        EntityRaycastQuery, EntityRaycastResult, EntityStateSnapshot, EntityTargetResult,
-        EntityTargetSnapshot, EntityTargetSnapshotResult, EntityTeleportRequest, EntityVelocity,
-        SpatialQuery, SpatialResults, AGE_WRITE_CAPABILITY, LOOT_PICKUP_WRITE_CAPABILITY,
+        clear_target, custom_name, damage, decode_navigation_snapshot, fire_ticks, is_baby,
+        is_persistence_required, navigate_to, navigation_snapshot, raycast, remove_effect,
+        set_age_ticks, set_air_supply, set_baby, set_can_pick_up_loot, set_custom_name,
+        set_fire_ticks, set_persistence_required, set_target, set_velocity, stop_navigation,
+        target, target_snapshot, teleport, validate_active_effects, validate_age_ticks,
+        validate_custom_name, validate_entity_raycast, validate_navigation_target,
+        validate_spatial_query, validate_teleport_target, within, ActiveEffect,
+        ActiveEffectsResponse, AgeTicksResponse, BabyStateResponse, EntityAirSupply, EntityBounds,
+        EntityCustomNameResponse, EntityNavigationRequest, EntityNavigationResult,
+        EntityNavigationSnapshot, EntityNavigationSnapshotResponse, EntityRaycastQuery,
+        EntityRaycastResult, EntityStateSnapshot, EntityTargetResult, EntityTargetSnapshot,
+        EntityTargetSnapshotResult, EntityTeleportRequest, EntityVelocity, SpatialQuery,
+        SpatialResults, AGE_WRITE_CAPABILITY, LOOT_PICKUP_WRITE_CAPABILITY,
         MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_AGE_TICKS,
         MAX_ENTITY_AIR_SUPPLY, MAX_ENTITY_AIR_SUPPLY_RESPONSE_BYTES, MAX_ENTITY_BOUNDS_COORDINATE,
         MAX_ENTITY_BOUNDS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
         MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
         MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
-        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_STATE_RESPONSE_BYTES,
-        MAX_ENTITY_TARGET_COORDINATE, MAX_ENTITY_TARGET_ID_BYTES, MAX_ENTITY_TARGET_RANGE,
-        MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES,
-        MAX_ENTITY_TARGET_UUID_BYTES, MAX_ENTITY_TELEPORT_COORDINATE,
-        MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
-        MIN_ENTITY_AGE_TICKS, NAVIGATION_WRITE_CAPABILITY, PERSISTENCE_WRITE_CAPABILITY,
+        MAX_ENTITY_NAVIGATION_SNAPSHOT_RESPONSE_BYTES, MAX_ENTITY_NAVIGATION_SPEED,
+        MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_STATE_RESPONSE_BYTES, MAX_ENTITY_TARGET_COORDINATE,
+        MAX_ENTITY_TARGET_ID_BYTES, MAX_ENTITY_TARGET_RANGE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
+        MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES, MAX_ENTITY_TARGET_UUID_BYTES,
+        MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
+        MAX_SPATIAL_QUERY_RESULTS, MIN_ENTITY_AGE_TICKS, NAVIGATION_WRITE_CAPABILITY,
+        PERSISTENCE_WRITE_CAPABILITY,
     };
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, Decoder, EntityHandle, ErrorCode,
@@ -5227,6 +5358,82 @@ mod tests {
                 .code(),
             ErrorCode::UnknownErrorCode
         );
+    }
+
+    #[test]
+    fn navigation_snapshot_decodes_detached_path_state_and_rejects_invalid_targets() {
+        assert_eq!(MAX_ENTITY_NAVIGATION_SNAPSHOT_RESPONSE_BYTES, 18);
+        let active_target = [
+            1_u32.to_le_bytes().as_slice(),
+            &[1, 1],
+            &5_i32.to_le_bytes(),
+            &64_i32.to_le_bytes(),
+            &(-3_i32).to_le_bytes(),
+        ]
+        .concat();
+        let response =
+            crate::from_bytes::<EntityNavigationSnapshotResponse>(&active_target).unwrap();
+        assert_eq!(
+            decode_navigation_snapshot(response).unwrap(),
+            EntityNavigationSnapshot {
+                active: true,
+                target: Some(BlockPos { x: 5, y: 64, z: -3 }),
+            }
+        );
+
+        let idle_without_target = [1_u32.to_le_bytes().as_slice(), &[0, 0], &[0; 12]].concat();
+        let response =
+            crate::from_bytes::<EntityNavigationSnapshotResponse>(&idle_without_target).unwrap();
+        assert_eq!(
+            decode_navigation_snapshot(response).unwrap(),
+            EntityNavigationSnapshot {
+                active: false,
+                target: None,
+            }
+        );
+
+        let absent_with_coordinates = EntityNavigationSnapshotResponse {
+            active: false,
+            has_target: false,
+            target_x: 1,
+            target_y: 0,
+            target_z: 0,
+        };
+        assert_eq!(
+            decode_navigation_snapshot(absent_with_coordinates)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let out_of_bounds = EntityNavigationSnapshotResponse {
+            active: true,
+            has_target: true,
+            target_x: 30_000_001,
+            target_y: 0,
+            target_z: 0,
+        };
+        assert_eq!(
+            decode_navigation_snapshot(out_of_bounds)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn navigation_control_requires_wasm_host() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            assert_eq!(
+                stop_navigation(handle).unwrap_err().code(),
+                ErrorCode::UnknownErrorCode
+            );
+            assert_eq!(
+                navigation_snapshot(handle).unwrap_err().code(),
+                ErrorCode::UnknownErrorCode
+            );
+        }
     }
 
     #[test]

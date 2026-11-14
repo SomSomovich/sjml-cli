@@ -91,6 +91,14 @@ emits it after the crafting result is taken, alongside the existing
 change the output, or cancel crafting. It requires `events.subscribe` and runs
 on the logical-server thread.
 
+Server modules can also observe completed item use with `player.item_consumed`.
+Its `PlayerItemConsumed` snapshot contains the player UUID, dimension, hand, the
+pre-finish item ID and stack count, and the replacement item ID and count. This
+does not mean the item was necessarily removed: the NeoForge Finish hook also
+covers completed uses of bows and other non-consumable items. The hook runs
+after item effects, is not cancellable, and exposes only bounded detached values.
+See [player completed item use](PLAYER_ITEM_CONSUMED.md).
+
 Server modules can observe a successful villager or wandering-trader offer with
 `player.villager_traded`. Its `PlayerVillagerTraded` snapshot includes both
 entity UUIDs, merchant type and position, dimension, villager profession and
