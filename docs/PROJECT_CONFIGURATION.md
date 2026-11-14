@@ -32,7 +32,7 @@ mymod/
 
 `Cargo.toml` builds a Rust library as a WebAssembly `cdylib` and also enables a
 native `rlib` for tests. The default registry dependency is `sjml-sdk =
-"0.100.0"`; `--sdk-path` instead writes a local path dependency. Keep the
+"0.101.0"`; `--sdk-path` instead writes a local path dependency. Keep the
 generated `[workspace]` table so a project created inside another Cargo
 workspace remains an independent root.
 
@@ -59,9 +59,9 @@ name = "mymod"
 version = "0.1.0"
 
 [runtime]
-abi = "^1.92.0"
+abi = "^1.93.0"
 minecraft = "~1.21.1"
-sjml = "^0.102.0"
+sjml = "^0.103.0"
 
 [[modules]]
 id = "main"
@@ -211,7 +211,9 @@ capabilities = ["entity.read", "entity.glowing.write"]
 | `entity.equipment.write` | Adding one registered item's default stack to an empty slot of a loaded living non-player entity; also requires `entity.read`. Occupied slots are left unchanged. |
 | `entity.mount.write` | Starting or stopping a non-forced ride between two loaded non-player entities; also requires `entity.read` and same-world live handles. |
 | `entity.glowing.write` | Changing the glowing flag on a loaded non-player entity; also requires `entity.read`. |
-| `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write`, `entity.custom_name.write`, `entity.ai.control`, `entity.navigation.write` | Removing loaded non-player entities, changing bounded velocity, fire duration, the silent flag, literal custom names, or the enabled-AI flag on loaded Mob entities, starting a bounded path for a loaded Mob, and reading/writing allowlisted living-entity and server-player attribute base values; entity writes also require `entity.read`. Navigation also requires a loaded target corridor and server execution. |
+| `entity.remove`, `entity.velocity.write`, `entity.attributes.write`, `entity.fire.write`, `entity.state.write`, `entity.custom_name.write`, `entity.ai.control`, `entity.navigation.write` | Removing loaded non-player entities, changing bounded velocity, fire duration, silent/no-gravity state, literal custom names, or the enabled-AI flag on loaded Mob entities, starting a bounded path for a loaded Mob, and reading/writing allowlisted living-entity and server-player attribute base values; entity writes also require `entity.read`. Navigation also requires a loaded target corridor and server execution. |
+| `entity.invulnerability.write` | Changing invulnerability on a loaded non-player entity; also requires `entity.read` and logical-server execution. |
+| `entity.air.write` | Changing current air supply on a loaded living non-player entity; also requires `entity.read` and logical-server execution. The current value cannot exceed that entity's maximum. |
 | `player.teleport`, `player.respawn.write`, `player.vitals.write`, `player.game_mode.write`, `player.motion.write`, `player.rotation.write`, `player.abilities.write`, `player.cooldown.write`, `player.advancement.write`, `player.statistics.write` | Teleporting a live player, changing their saved respawn position, bounded vitals, game mode, velocity, yaw/pitch, flight state, vanilla item cooldowns, advancement progress, or vanilla custom statistics; player writes also require `entity.read` and logical-server execution. |
 | `entity.data.read`, `entity.data.write` | Reading or changing module-owned data attached to non-player entities. |
 | `inventory.read`, `inventory.write` | Reading loaded block/player inventories and detached item-stack snapshots, or changing registered block-inventory stacks, literal custom names on existing block- and player-inventory stacks, bounded block/player slot transfers, player slots/durability and ordinary item grants, and same-module integer components. Player operations also require `entity.read`; block operations require `world.read` and an inventory capability. |

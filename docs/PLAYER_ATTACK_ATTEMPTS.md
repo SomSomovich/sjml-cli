@@ -29,4 +29,4 @@ damage amount, weapon stack, or mutable NeoForge fields. The callback runs
 synchronously on the owning logical-server thread. It requires
 `events.subscribe` and `events.cancel`; events already canceled by another
 listener are not sent to guest modules. Callback failures fail open and disable
-the failing module. See the [ABI callback contract](ABI.md).
+the failing module. See the [ABI callback contract](../sjml-cli/docs/ABI.md).

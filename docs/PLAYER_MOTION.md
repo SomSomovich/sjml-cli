@@ -23,7 +23,11 @@ use sjml::prelude::*;
 
 fn boost_player(handle: PlayerHandle) -> SjmlResult<()> {
     let current = player::motion(handle)?;
-    host::log(LogLevel::Info, &format!("yaw={}, pitch={}", current.yaw, current.pitch))?;
+    let direction = current.look_direction();
+    host::log(
+        LogLevel::Info,
+        &format!("look direction: [{}, {}, {}]", direction[0], direction[1], direction[2]),
+    )?;
     player::set_velocity(handle, player::PlayerVelocity::new(0.0, 0.8, 0.0)?)
 }
 ```
@@ -40,6 +44,13 @@ The Rust API is `player::motion(handle: PlayerHandle) ->
 SjmlResult<PlayerMotion>` and `player::set_velocity(handle: PlayerHandle,
 velocity: PlayerVelocity) -> SjmlResult<()>`. `PlayerMotion` contains
 `velocity_x`, `velocity_y`, `velocity_z`, `yaw`, and `pitch`, in that order.
+`PlayerMotion::look_direction()` derives a normalized `[f64; 3]` direction
+vector locally from yaw and pitch; it makes no host call and does not add
+fields to the motion record. It follows Minecraft's convention:
+`x = -sin(yaw) * cos(pitch)`, `y = -sin(pitch)`, and
+`z = cos(yaw) * cos(pitch)`, with angles in degrees. Yaw 0 and pitch 0 point
+toward positive Z; positive yaw turns toward negative X and positive pitch
+points downward.
 `PlayerVelocity::new(x, y, z)` rejects non-finite components and components
 outside -64..=64 blocks per tick. The host repeats these checks for direct ABI
 callers and also rejects non-finite rotations from the player provider.

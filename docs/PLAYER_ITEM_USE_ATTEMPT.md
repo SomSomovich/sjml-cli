@@ -34,3 +34,7 @@ The module and administrator grant both need `events.subscribe` and
 `events.cancel`. The event cannot be asynchronous. Its schema-v1 wire layout
 and callback export are specified in [ABI.md](ABI.md); general ordering,
 priorities, and subscription lifetime are in [GAMEPLAY_EVENTS.md](GAMEPLAY_EVENTS.md).
+
+For custom behavior on an item declared by the module, use the owner-scoped
+[`item.use` callback](CUSTOM_ITEM_BEHAVIOR.md). This global veto event remains
+separate and compatible with existing handlers.

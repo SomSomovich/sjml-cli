@@ -78,6 +78,8 @@ mod entity_tick;
 mod gameplay_events;
 #[path = "gametest/player_advancements.rs"]
 mod player_advancements;
+#[path = "gametest/player_air_supply.rs"]
+mod player_air_supply;
 #[path = "gametest/player_attack_attempt.rs"]
 mod player_attack_attempt;
 #[path = "gametest/player_bossbar.rs"]
@@ -86,6 +88,8 @@ mod player_bossbar;
 mod player_equipment_changed;
 #[path = "gametest/player_experience_change.rs"]
 mod player_experience_change;
+#[path = "gametest/player_fall_distance.rs"]
+mod player_fall_distance;
 #[path = "gametest/player_fished_attempt.rs"]
 mod player_fished_attempt;
 #[path = "gametest/player_inventory_custom_name.rs"]
@@ -98,6 +102,8 @@ mod player_inventory_give;
 mod player_inventory_lore;
 #[path = "gametest/player_item_use_attempt.rs"]
 mod player_item_use_attempt;
+#[path = "gametest/player_movement_state.rs"]
+mod player_movement_state;
 #[path = "gametest/player_potion_use_attempt.rs"]
 mod player_potion_use_attempt;
 #[path = "gametest/player_respawn_point.rs"]
@@ -332,6 +338,16 @@ fn register_test_content() -> SjmlResult<()> {
     registry::set_item_glint_override("gametest_glint_on", true)?;
     registry::register_item("gametest_glint_off", ItemDefinition::default())?;
     registry::set_item_glint_override("gametest_glint_off", false)?;
+    registry::register_item("gametest_fire_resistant", ItemDefinition::default())?;
+    registry::set_item_fire_resistant("gametest_fire_resistant", true)?;
+    registry::register_item(
+        "gametest_fire_resistance_disabled",
+        ItemDefinition {
+            max_stack_size: 64,
+            fire_resistant: true,
+        },
+    )?;
+    registry::set_item_fire_resistant("gametest_fire_resistance_disabled", false)?;
     registry::register_item("gametest_glint_default", ItemDefinition::default())?;
     registry::register_item("gametest_enchantable", ItemDefinition::default())?;
     registry::set_item_enchantment_value("gametest_enchantable", 31)?;
@@ -369,6 +385,15 @@ fn register_test_content() -> SjmlResult<()> {
         },
     )?;
     registry::set_item_max_damage("gametest_durable", 256)?;
+    registry::register_item(
+        "gametest_no_repair",
+        ItemDefinition {
+            max_stack_size: 1,
+            fire_resistant: false,
+        },
+    )?;
+    registry::set_item_max_damage("gametest_no_repair", 256)?;
+    registry::set_item_no_repair("gametest_no_repair")?;
     registry::register_integer_component(
         "player_charge",
         IntegerComponentDefinition::new(-10, 10)?,
@@ -1175,7 +1200,9 @@ fn check_inventory_changed(_: EntityDeathCheckArguments) -> SjmlResult<String> {
     } else {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            format!("expected inventory pickup and player.item_broken callbacks: inventory.changed={saw_pickup}, player.item_broken={saw_item_broken}"),
+            format!(
+                "expected inventory pickup and player.item_broken callbacks: inventory.changed={saw_pickup}, player.item_broken={saw_item_broken}"
+            ),
         ))
     }
 }
@@ -1670,16 +1697,68 @@ fn inspect_world_collision(arguments: BlockBatchArguments) -> SjmlResult<String>
             ),
         )
     };
+    let origin = BlockPos {
+        x: arguments.x,
+        y: arguments.y,
+        z: arguments.z,
+    };
+    let full_cube = world::block_collision_boxes(world, origin)?;
+    let empty_shape = world::block_collision_boxes(
+        world,
+        BlockPos {
+            x: arguments.x + 1,
+            y: arguments.y,
+            z: arguments.z,
+        },
+    )?;
+    let partial_shape = world::block_collision_boxes(
+        world,
+        BlockPos {
+            x: arguments.x + 2,
+            y: arguments.y,
+            z: arguments.z,
+        },
+    )?;
+    let unloaded_shape = world::block_collision_boxes(
+        world,
+        BlockPos {
+            x: arguments.x + 256,
+            y: arguments.y,
+            z: arguments.z,
+        },
+    )?;
+    let box_matches = |box_: &world::BlockCollisionBox, bounds: [f64; 6]| {
+        [
+            box_.min_x, box_.min_y, box_.min_z, box_.max_x, box_.max_y, box_.max_z,
+        ]
+        .into_iter()
+        .zip(bounds)
+        .all(|(actual, expected)| (actual - expected).abs() <= 1.0e-6)
+    };
     if world::collides(world, bounds_at(arguments.x))? != Some(true)
         || world::collides(world, bounds_at(arguments.x + 1))? != Some(false)
         || world::collides(world, bounds_at(arguments.x + 256))?.is_some()
+        || full_cube.as_ref().is_none_or(|boxes| {
+            boxes.len() != 1 || !box_matches(&boxes[0], [0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+        })
+        || empty_shape.as_ref().is_none_or(|boxes| !boxes.is_empty())
+        || partial_shape.as_ref().is_none_or(|boxes| {
+            boxes.len() != 2
+                || !boxes
+                    .iter()
+                    .any(|box_| box_matches(box_, [0.25, 0.0, 0.25, 0.75, 0.5, 0.45]))
+                || !boxes
+                    .iter()
+                    .any(|box_| box_matches(box_, [0.25, 0.0, 0.55, 0.75, 0.5, 0.75]))
+        })
+        || unloaded_shape.is_some()
     {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "world collision query did not distinguish solid, empty, and unloaded bounds",
+            "world collision query did not distinguish full, empty, partial, and unloaded block shapes",
         ));
     }
-    Ok("loaded block collision and unloaded-chunk query succeeded".to_owned())
+    Ok("loaded block collision shapes and unloaded-chunk query succeeded".to_owned())
 }
 
 #[command(name = "world.block.custom_state")]
@@ -2118,6 +2197,9 @@ fn inspect_players(arguments: PlayerArguments) -> SjmlResult<String> {
             )
         })?;
     let target_snapshot = player::snapshot(target_player)?;
+    player_air_supply::verify_read_set_read_and_restore(target_player)?;
+    player_movement_state::verify_movement_state_read(target_player)?;
+    player_fall_distance::verify_reset_fall_distance(target_player)?;
     let cooldown_item_id = "minecraft:diamond";
     if player::has_item_cooldown(target_player, cooldown_item_id)? {
         return Err(SjmlError::new(
@@ -2856,6 +2938,7 @@ fn inspect_entities(arguments: EntityArguments) -> SjmlResult<String> {
                 "the entity velocity GameTest pig is missing",
             )
         })?;
+    let pig_bounds = entity::bounds(pig_handle)?;
     let pig_world = world::get(&pig_snapshot.dimension_id)?.ok_or_else(|| {
         SjmlError::new(
             ErrorCode::InvalidArgument,
@@ -2944,6 +3027,15 @@ fn inspect_entities(arguments: EntityArguments) -> SjmlResult<String> {
                 || !snapshot.y.is_finite()
                 || !snapshot.z.is_finite()
         })
+        || pig_bounds.min_x > pig_snapshot.x
+        || pig_bounds.max_x < pig_snapshot.x
+        || pig_bounds.min_y > pig_snapshot.y
+        || pig_bounds.max_y < pig_snapshot.y
+        || pig_bounds.min_z > pig_snapshot.z
+        || pig_bounds.max_z < pig_snapshot.z
+        || pig_bounds.max_x <= pig_bounds.min_x
+        || pig_bounds.max_y <= pig_bounds.min_y
+        || pig_bounds.max_z <= pig_bounds.min_z
         || !snapshots
             .iter()
             .any(|snapshot| snapshot.entity_type_id == "minecraft:pig")
@@ -2955,6 +3047,41 @@ fn inspect_entities(arguments: EntityArguments) -> SjmlResult<String> {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
             "entity read contract failed",
+        ));
+    }
+    entity::set_no_gravity(pig_handle, true)?;
+    entity::set_invulnerable(pig_handle, true)?;
+    let original_air = entity::air_supply(pig_handle)?;
+    if original_air.current < 0 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity inspect pig unexpectedly entered the drowning window",
+        ));
+    }
+    let original_air_ticks = original_air.current as u32;
+    let probe_air_ticks = if original_air_ticks > 0 {
+        original_air_ticks - 1
+    } else if original_air.max > 0 {
+        1
+    } else {
+        0
+    };
+    let changed_air = (|| {
+        entity::set_air_supply(pig_handle, probe_air_ticks)?;
+        entity::air_supply(pig_handle)
+    })();
+    let restored_air = entity::set_air_supply(pig_handle, original_air_ticks);
+    let changed_air = changed_air?;
+    restored_air?;
+    let restored_air = entity::air_supply(pig_handle)?;
+    if changed_air.current != probe_air_ticks as i32
+        || changed_air.max != original_air.max
+        || restored_air.current != original_air.current
+        || restored_air.max != original_air.max
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "entity air-supply write changed the wrong value or altered the maximum",
         ));
     }
     Ok(format!(

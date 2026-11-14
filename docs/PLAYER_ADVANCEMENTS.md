@@ -31,8 +31,25 @@ one criterion changed; `false` means the requested progress was already in that 
 Client modules do not receive these imports. Static content registration also has no live player
 authority, so calls during registration fail with `PermissionDenied`.
 
-To observe each individual criterion grant or revoke, subscribe to
-`player.advancement_progress` with `events.subscribe` and the separate
-`player.advancement.observe` permission. The callback reports operation and
-whether the advancement remains complete after the criterion change. See
-[advancement criterion progress events](PLAYER_ADVANCEMENT_PROGRESS_EVENT.md).
+
+## Criterion-level progress
+
+For finer control, `sjml::player_advancement::progress` returns a detached, sorted snapshot of at
+most 256 criteria for one registered advancement. `grant_criterion` and `revoke_criterion` change
+one exact criterion after validating that key against the active advancement. The host requires
+the same live server player handle and `entity.read`; criterion mutations also require
+`player.advancement.write`. Completing the final criterion can trigger the normal vanilla reward
+path. Revoking a criterion does not undo rewards or dependent advancements.
+
+```rust
+use sjml::player_advancement;
+
+let progress = player_advancement::progress(player_handle, "minecraft:story/root")?;
+if let Some(criterion) = progress.criteria.iter().find(|criterion| !criterion.achieved) {
+    player_advancement::grant_criterion(
+        player_handle,
+        &progress.advancement_id,
+        &criterion.id,
+    )?;
+}
+```

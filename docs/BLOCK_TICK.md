@@ -32,8 +32,9 @@ cannot observe the block's tick or state through this event.
 
 The callback runs synchronously on the logical-server thread and requires the
 module's `events.subscribe` grant. It is emitted only for scheduled ticks of
-SJML-registered blocks; it does not observe vanilla block ticks, random ticks,
-or blocks registered by another module. There is no cancellation result.
+SJML-registered blocks; it does not observe vanilla block ticks or blocks
+registered by another module. Random ticks use the separate opt-in
+`block.random_tick` event described below. There is no cancellation result.
 `world::schedule_block_tick` still requires `world.read` and `world.write` and
 uses Minecraft's normal scheduler. Per module, that scheduling API accepts at
 most 16 requests per server tick; Minecraft de-duplicates matching pending
@@ -46,28 +47,19 @@ work small; the host's callback and scheduler limits do not replace a mod's
 own gameplay-level throttling. Blocks without a `block.tick` subscription keep
 their normal no-op scheduled-tick behavior.
 
-## Opt-in vanilla random ticks
+## Opt-in random ticks
 
-During `#[mod_register]`, a module can enable Minecraft's normal random-tick
-selection for one of its registered blocks:
+A module can opt one of its blocks into Minecraft's random-tick behavior while
+registering content, then subscribe to the separate `block.random_tick` event:
 
 ```rust
-use sjml::{mod_register, registry, BlockDefinition, SjmlResult};
+use sjml::{event, events::{self, BlockRandomTick, EventPriority}, mod_init, mod_register, registry, SjmlResult};
 
 #[mod_register]
-fn register() -> SjmlResult<()> {
+fn register_content() -> SjmlResult<()> {
     registry::register_block("crop", BlockDefinition::default())?;
-    registry::set_block_random_ticking("crop", true)?;
-    Ok(())
+    registry::set_block_random_ticking("crop", true)
 }
-```
-
-Subscribe to the distinct `block.random_tick` event from `#[mod_init]`. Its
-guest export is `sjml_v1_event_block.random_tick` and its callback receives a
-`BlockRandomTick` snapshot:
-
-```rust
-use sjml::{event, events::{self, BlockRandomTick, EventPriority}, mod_init, SjmlResult};
 
 #[mod_init]
 fn initialize() -> SjmlResult<()> {
@@ -77,20 +69,23 @@ fn initialize() -> SjmlResult<()> {
 
 #[event(name = "block.random_tick")]
 fn on_random_tick(event: BlockRandomTick) -> SjmlResult<()> {
-    if event.block_id == "example_pack:main/crop" {
-        let age = event.property("age").unwrap_or("0");
-        // Use separately granted, loaded-world APIs for any mutation.
-        let _ = (event.position, event.dimension_id, age, event.tick_count);
-    }
+    let _ = (event.block_id, event.position, event.dimension_id, event.tick_count);
     Ok(())
 }
 ```
 
-The snapshot has the same bounded schema-v1 field layout as `BlockTick`, with
-up to seven detached state properties. It uses a separate event name and ABI
-export so scheduled and random tick handlers cannot be confused. Callbacks run
-synchronously on the logical-server thread, only for blocks owned by the
-subscribing module, and never on the client. The shared host budget limits the
-combined `block.tick` and `block.random_tick` callbacks to 512 per logical
-server tick. Random ticking is disabled for registered blocks unless the owner
-opts in during registration.
+`registry::set_block_random_ticking` is owner-scoped and applies only to a block
+already staged by the calling module during `mod_register`. The host enables
+the block's vanilla random-tick flag and dispatches only when Minecraft calls
+that registered block's `randomTick` method on the logical server. Modules that
+do not opt in keep their existing block behavior, and clients never invoke the
+guest callback. The synchronous callback requires `events.subscribe`, receives
+the same bounded detached state snapshot as `BlockTick`, and has the distinct
+export `sjml_v1_event_block.random_tick`; it is a notification without a
+cancellation result. Only the declaring module receives it.
+
+Scheduled and random block callbacks share a cap of 512 guest callback
+invocations per logical-server tick. The cap includes only dispatched guest
+handlers for subscribed owner blocks; Minecraft may make a block randomly
+eligible more often than the cap allows. Keep handlers small and add any
+gameplay-specific rate limit needed by the mod.

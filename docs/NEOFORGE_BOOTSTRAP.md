@@ -45,9 +45,7 @@ packages from activating. Non-cancellable server/player/entity lifecycle
 notifications and synchronous cancellable block-break/place, player
 interaction/drop, entity death/damage/target, projectile-impact, and explosion
 attempt callbacks are available through explicit runtime subscriptions. The
-`player.advancement_earned` notification reports completed vanilla progress;
-`player.advancement_progress` reports each criterion grant/revoke and its
-post-change completion state under `player.advancement.observe`.
+`player.advancement_earned` notification reports completed vanilla progress.
 An event macro only exports its callback; a module must call
 `events::subscribe` from its retained server instance. Subscribed handlers run
 on the owning logical-server thread in priority order. Cancellable callbacks
@@ -149,12 +147,6 @@ Rejected scan packages retain their individual diagnostic.
   contains player identity, dimension, advancement ID, and display text. The
   notification requires `events.subscribe`; it cannot grant, revoke, or undo
   advancement progress.
-- `AdvancementEvent.AdvancementProgressEvent` reports one criterion grant or
-  revoke after Minecraft updates its progress. Its detached schema-v1 payload
-  contains the player UUID, canonical advancement ID, criterion name,
-  operation, and completion state after the update. It requires both
-  `events.subscribe` and `player.advancement.observe`; it is non-cancellable
-  and may use the asynchronous notification callback pattern.
 - `ExplosionEvent.Start` dispatches `world.explosion_attempt` on the owning
   server thread before explosion effects are applied. A callback can veto the
   explosion only with both `events.subscribe` and `events.cancel`. Its bounded

@@ -48,4 +48,5 @@ string, optional hover-node list, and ordered child-node list. Color tag `0` is 
 chat palette). Style bits are bold `1`, italic `2`, underline `4`, and strikethrough `8`. Click
 tags are absent `0`, open URL `1`, suggest command `2`, and copy to clipboard `3`.
 
-The host returns the standard ABI status code. See [the SDK example](../sjml-sdk/examples/player_rich_system_message.rs).
+The host returns the standard ABI status code. See [the SDK example](../sjml-cli/sjml-sdk/examples/player_rich_system_message.rs)
+and [plain player system messages](PLAYER_SYSTEM_MESSAGES.md).

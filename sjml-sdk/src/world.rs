@@ -30,10 +30,21 @@ pub const MAX_WORLD_BLOCK_PROPERTIES_RESPONSE_BYTES: usize = 21_257;
 pub const MAX_WORLD_BLOCK_DESTROY_SPEED: f32 = 1_000_000.0;
 /// Maximum encoded response bytes reserved for [`block_destroy_speed`].
 pub const MAX_WORLD_BLOCK_DESTROY_SPEED_RESPONSE_BYTES: usize = 9;
+/// Maximum detached collision boxes returned for one loaded block.
+pub const MAX_WORLD_BLOCK_COLLISION_BOXES: usize = 64;
+/// Maximum encoded response bytes reserved for [`block_collision_boxes`].
+pub const MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES: usize =
+    9 + MAX_WORLD_BLOCK_COLLISION_BOXES * (4 + 6 * 8);
 /// Allowed raw update-bit mask for [`set_block_with_options`].
 pub const WORLD_BLOCK_UPDATE_ALLOWED_MASK: i32 = 0b1_0011;
 /// Maximum output bytes reserved for one fluid-state snapshot.
 pub const MAX_WORLD_FLUID_STATE_RESPONSE_BYTES: usize = 275;
+/// Maximum encoded response bytes reserved for [`fluid_flow_at`].
+pub const MAX_WORLD_FLUID_FLOW_RESPONSE_BYTES: usize = 33;
+/// Maximum accepted absolute component of a normalized vanilla fluid-flow direction.
+pub const MAX_WORLD_FLUID_FLOW_COMPONENT: f64 = 1.0;
+/// Small floating-point tolerance for the length of a normalized fluid-flow direction.
+pub const MAX_WORLD_FLUID_FLOW_LENGTH: f64 = 1.000001;
 /// Maximum length of one raycast segment in blocks.
 pub const MAX_WORLD_RAY_DISTANCE: f64 = 128.0;
 /// Maximum absolute coordinate accepted for a raycast endpoint or hit location.
@@ -456,12 +467,37 @@ pub struct FluidStateSnapshot {
     pub height: f32,
 }
 
+/// Detached vanilla flow direction at one loaded, non-empty fluid cell.
+///
+/// The vector is finite, normalized (or zero), and contains no Minecraft handles or references.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct FluidFlowSnapshot {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
 /// One immutable, detached, canonically named property on a loaded block state.
 #[derive(Debug, Clone, Eq, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
 pub struct BlockProperty {
     pub name: String,
     pub value: String,
+}
+
+/// One detached axis-aligned collision box in block-local coordinates.
+///
+/// Values are finite and bounded to ±16 blocks; each extent is positive and at most 16 blocks.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockCollisionBox {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub min_z: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+    pub max_z: f64,
 }
 
 /// Finite world-space point used by [`raycast`].
@@ -1028,6 +1064,21 @@ struct BlockDestroySpeedResponse {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
+struct BlockCollisionBoxesQuery {
+    world: WorldHandle,
+    position: BlockPos,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct BlockCollisionBoxesResponse {
+    boxes: Option<Vec<BlockCollisionBox>>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
 struct FluidStateQuery {
     world: WorldHandle,
     position: BlockPos,
@@ -1038,6 +1089,21 @@ struct FluidStateQuery {
 #[sjml(version = 1)]
 struct FluidStateResponse {
     state: Option<FluidStateSnapshot>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct FluidFlowQuery {
+    world: WorldHandle,
+    position: BlockPos,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode, StableDecode)]
+#[sjml(version = 1)]
+struct FluidFlowResponse {
+    flow: Option<FluidFlowSnapshot>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -1320,8 +1386,17 @@ extern "C" {
         output: i32,
         capacity: i32,
     ) -> i32;
+    #[link_name = "block_collision_boxes"]
+    fn imported_block_collision_boxes(
+        query: i32,
+        query_length: i32,
+        output: i32,
+        capacity: i32,
+    ) -> i32;
     #[link_name = "fluid_at"]
     fn imported_fluid_at(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "fluid_flow_at"]
+    fn imported_fluid_flow_at(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "raycast"]
     fn imported_raycast(query: i32, query_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "collides"]
@@ -2943,6 +3018,52 @@ pub fn block_destroy_speed(world: WorldHandle, position: BlockPos) -> SjmlResult
     }
 }
 
+/// Reads the detached, block-local collision boxes for one loaded block state.
+///
+/// Returns `None` when the target position is outside build height or its chunk is not already
+/// loaded. It also returns `None` if the shape reads block data from an unloaded neighboring
+/// chunk. The host never loads chunks. A loaded block with no collision shape returns
+/// `Some(vec![])`; non-empty results are sorted by their six coordinates and contain at most
+/// [`MAX_WORLD_BLOCK_COLLISION_BOXES`] boxes. Coordinates are finite and bounded to ±16 blocks.
+/// Requires `world.read` and the logical-server context.
+pub fn block_collision_boxes(
+    world: WorldHandle,
+    position: BlockPos,
+) -> SjmlResult<Option<Vec<BlockCollisionBox>>> {
+    if position.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block x/z coordinates must be within ±30000000",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&BlockCollisionBoxesQuery { world, position })?;
+        let response: BlockCollisionBoxesResponse = read_output(
+            MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: query and bounded output remain live through this synchronous import.
+                unsafe {
+                    imported_block_collision_boxes(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        validate_block_collision_boxes(response.boxes)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
 /// Reads the detached fluid state at one already-loaded block position.
 ///
 /// Returns `None` when the position is outside build height or its chunk is not already loaded;
@@ -2984,6 +3105,45 @@ pub fn fluid_at(world: WorldHandle, position: BlockPos) -> SjmlResult<Option<Flu
     }
 }
 
+/// Reads the vanilla flow direction for one loaded, non-empty fluid cell.
+///
+/// Returns `None` when the target is outside build height, unloaded, or contains no fluid. It also
+/// returns `None` if vanilla flow calculation needs a neighboring block or fluid state from an
+/// unloaded chunk. The host never loads chunks: it passes a loaded-only getter to Minecraft's
+/// `FluidState::getFlow` and discards a result if that getter encountered missing neighbor data.
+/// A present vector is detached, finite, and normalized (or zero). Requires `world.read` and the
+/// logical-server context.
+pub fn fluid_flow_at(
+    world: WorldHandle,
+    position: BlockPos,
+) -> SjmlResult<Option<FluidFlowSnapshot>> {
+    validate_world_position(position)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&FluidFlowQuery { world, position })?;
+        let response: FluidFlowResponse = read_output(
+            MAX_WORLD_FLUID_FLOW_RESPONSE_BYTES as u32,
+            |output, capacity| {
+                // SAFETY: query and bounded response storage live through this synchronous import.
+                unsafe {
+                    imported_fluid_flow_at(
+                        query.as_ptr() as usize as u32 as i32,
+                        query.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        validate_fluid_flow(response.flow)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, position);
+        Err(unsupported_target())
+    }
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn validate_fluid_state(
     state: Option<FluidStateSnapshot>,
@@ -3008,6 +3168,26 @@ fn validate_fluid_state(
         ));
     }
     Ok(Some(state))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_fluid_flow(flow: Option<FluidFlowSnapshot>) -> SjmlResult<Option<FluidFlowSnapshot>> {
+    let Some(flow) = flow else {
+        return Ok(None);
+    };
+    let components = [flow.x, flow.y, flow.z];
+    if components
+        .iter()
+        .any(|component| !component.is_finite() || component.abs() > MAX_WORLD_FLUID_FLOW_COMPONENT)
+        || (flow.x * flow.x + flow.y * flow.y + flow.z * flow.z).sqrt()
+            > MAX_WORLD_FLUID_FLOW_LENGTH
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "host returned a non-finite or unnormalized fluid-flow vector",
+        ));
+    }
+    Ok(Some(flow))
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -3060,6 +3240,66 @@ fn validate_block_destroy_speed(speed: Option<f32>) -> SjmlResult<Option<f32>> {
         ));
     }
     Ok(Some(speed))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_block_collision_boxes(
+    boxes: Option<Vec<BlockCollisionBox>>,
+) -> SjmlResult<Option<Vec<BlockCollisionBox>>> {
+    let Some(boxes) = boxes else {
+        return Ok(None);
+    };
+    if boxes.len() > MAX_WORLD_BLOCK_COLLISION_BOXES {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "host returned more than 64 block collision boxes",
+        ));
+    }
+    let mut previous: Option<&BlockCollisionBox> = None;
+    for box_ in &boxes {
+        let coordinates = [
+            box_.min_x, box_.min_y, box_.min_z, box_.max_x, box_.max_y, box_.max_z,
+        ];
+        if coordinates
+            .iter()
+            .any(|coordinate| !coordinate.is_finite() || coordinate.abs() > 16.0)
+            || box_.min_x >= box_.max_x
+            || box_.min_y >= box_.max_y
+            || box_.min_z >= box_.max_z
+            || box_.max_x - box_.min_x > 16.0
+            || box_.max_y - box_.min_y > 16.0
+            || box_.max_z - box_.min_z > 16.0
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned a non-finite or out-of-bounds block collision box",
+            ));
+        }
+        if previous.is_some_and(|before| {
+            compare_block_collision_boxes(before, box_) == core::cmp::Ordering::Greater
+        }) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned block collision boxes in non-canonical order",
+            ));
+        }
+        previous = Some(box_);
+    }
+    Ok(Some(boxes))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn compare_block_collision_boxes(
+    left: &BlockCollisionBox,
+    right: &BlockCollisionBox,
+) -> core::cmp::Ordering {
+    left.min_x
+        .total_cmp(&right.min_x)
+        .then_with(|| left.min_y.total_cmp(&right.min_y))
+        .then_with(|| left.min_z.total_cmp(&right.min_z))
+        .then_with(|| left.max_x.total_cmp(&right.max_x))
+        .then_with(|| left.max_y.total_cmp(&right.max_y))
+        .then_with(|| left.max_z.total_cmp(&right.max_z))
 }
 
 /// Clips a bounded ray against one loaded dimension. The module must request and receive
@@ -4091,22 +4331,24 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        biome_at, biome_climate_at, biome_ids, block_destroy_speed, block_has_tag,
-        block_properties, collides, day_time, daylight_cycle_enabled, entity_type_tag_members,
-        fluid_at, fluid_tag_members, integer_game_rule, item_has_tag, item_tag_members,
-        loaded_chunks, notify_neighbors_at, play_sound, raycast, schedule_block_tick,
-        schedule_fluid_tick, set_block, set_block_properties, set_block_with_options,
-        set_daylight_cycle_enabled, set_game_time, set_integer_game_rule, set_time, spawn_entity,
-        spawn_item, spawn_particle, spawn_projectile, structures_at, tag_members,
-        validate_biome_ids, validate_block_property_updates, validate_loaded_chunk_query,
-        validate_loaded_chunk_results, validate_structure_ids, validate_tag_member_ids,
-        validate_world_position, Aabb, BiomeClimateQuery, BiomeClimateResponse, BiomeIdsQuery,
-        BiomeIdsResponse, BiomePrecipitation, BiomeTemperatureModifier, BlockDestroySpeedQuery,
-        BlockDestroySpeedResponse, BlockPropertiesMutation, BlockPropertiesQuery,
-        BlockPropertiesResponse, BlockProperty, BlockStateBatch, BlockStateQuery,
-        BlockStateSnapshot, BlockTagQuery, BlockTagResponse, BlockUpdateOptions, ChunkPos,
-        DaylightCycleSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity,
-        ItemTagQuery, ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
+        biome_at, biome_climate_at, biome_ids, block_collision_boxes, block_destroy_speed,
+        block_has_tag, block_properties, collides, day_time, daylight_cycle_enabled,
+        entity_type_tag_members, fluid_at, fluid_flow_at, fluid_tag_members, integer_game_rule,
+        item_has_tag, item_tag_members, loaded_chunks, notify_neighbors_at, play_sound, raycast,
+        schedule_block_tick, schedule_fluid_tick, set_block, set_block_properties,
+        set_block_with_options, set_daylight_cycle_enabled, set_game_time, set_integer_game_rule,
+        set_time, spawn_entity, spawn_item, spawn_particle, spawn_projectile, structures_at,
+        tag_members, validate_biome_ids, validate_block_property_updates, validate_fluid_flow,
+        validate_loaded_chunk_query, validate_loaded_chunk_results, validate_structure_ids,
+        validate_tag_member_ids, validate_world_position, Aabb, BiomeClimateQuery,
+        BiomeClimateResponse, BiomeIdsQuery, BiomeIdsResponse, BiomePrecipitation,
+        BiomeTemperatureModifier, BlockCollisionBox, BlockCollisionBoxesQuery,
+        BlockCollisionBoxesResponse, BlockDestroySpeedQuery, BlockDestroySpeedResponse,
+        BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
+        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse,
+        BlockUpdateOptions, ChunkPos, DaylightCycleSnapshot, FluidFlowQuery, FluidFlowResponse,
+        FluidFlowSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity, ItemTagQuery,
+        ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
         RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery,
         StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
         VanillaProjectileKind, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
@@ -4115,14 +4357,16 @@ mod tests {
         WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot, WorldItemSpawnRequest,
         WorldProjectileSpawnRequest, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
         MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES, MAX_WORLD_BIOME_IDS,
-        MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES, MAX_WORLD_BLOCK_COORDINATE,
-        MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_PROPERTIES,
+        MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
+        MAX_WORLD_BLOCK_COLLISION_BOXES, MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES,
+        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_PROPERTIES,
         MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
         MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
-        MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_FLUID_TICK_DELAY_TICKS,
-        MAX_WORLD_GAME_TIME_TICKS, MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED,
-        MAX_WORLD_ITEM_STACK_COUNT, MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
+        MAX_WORLD_FLUID_FLOW_RESPONSE_BYTES, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES,
+        MAX_WORLD_FLUID_TICK_DELAY_TICKS, MAX_WORLD_GAME_TIME_TICKS,
+        MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED, MAX_WORLD_ITEM_STACK_COUNT,
+        MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
         MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_PROJECTILE_SPEED, MAX_WORLD_STRUCTURES_AT,
         MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES, MAX_WORLD_STRUCTURE_ID_BYTES,
         MAX_WORLD_TAG_ID_BYTES, MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES,
@@ -5855,6 +6099,152 @@ mod tests {
     }
 
     #[test]
+    fn block_collision_boxes_query_and_response_match_the_java_wire_contract() {
+        let query = BlockCollisionBoxesQuery {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            position: BlockPos { x: -3, y: 64, z: 8 },
+        };
+        let mut expected_query = Vec::new();
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&1_u64.to_le_bytes());
+        expected_query.extend_from_slice(&2_u64.to_le_bytes());
+        expected_query.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected_query.extend_from_slice(&64_i32.to_le_bytes());
+        expected_query.extend_from_slice(&8_i32.to_le_bytes());
+        assert_eq!(crate::to_bytes(&query).unwrap(), expected_query);
+
+        let box_ = BlockCollisionBox {
+            min_x: 0.25,
+            min_y: 0.0,
+            min_z: 0.25,
+            max_x: 0.75,
+            max_y: 0.5,
+            max_z: 0.75,
+        };
+        let encoded_box = crate::to_bytes(&box_).unwrap();
+        let mut expected_box = 1_u32.to_le_bytes().to_vec();
+        for coordinate in [0.25_f64, 0.0, 0.25, 0.75, 0.5, 0.75] {
+            expected_box.extend_from_slice(&coordinate.to_le_bytes());
+        }
+        assert_eq!(encoded_box, expected_box);
+
+        let present = BlockCollisionBoxesResponse {
+            boxes: Some(vec![box_]),
+        };
+        let mut expected_present =
+            [1_u32.to_le_bytes().as_slice(), &[1], &1_u32.to_le_bytes()].concat();
+        expected_present.extend_from_slice(&expected_box);
+        assert_eq!(crate::to_bytes(&present).unwrap(), expected_present);
+        assert_eq!(
+            crate::from_bytes::<BlockCollisionBoxesResponse>(&expected_present)
+                .unwrap()
+                .boxes,
+            Some(vec![box_])
+        );
+        let empty = [1_u32.to_le_bytes().as_slice(), &[1], &0_u32.to_le_bytes()].concat();
+        assert_eq!(
+            crate::from_bytes::<BlockCollisionBoxesResponse>(&empty)
+                .unwrap()
+                .boxes,
+            Some(vec![])
+        );
+        let unavailable = [1_u32.to_le_bytes().as_slice(), &[0]].concat();
+        assert_eq!(
+            crate::from_bytes::<BlockCollisionBoxesResponse>(&unavailable)
+                .unwrap()
+                .boxes,
+            None
+        );
+        assert_eq!(
+            9 + 64 * (4 + 6 * 8),
+            MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES
+        );
+    }
+
+    #[test]
+    fn block_collision_boxes_validation_bounds_coordinates_count_and_canonical_order() {
+        let valid = BlockCollisionBox {
+            min_x: 0.0,
+            min_y: 0.0,
+            min_z: 0.0,
+            max_x: 1.0,
+            max_y: 1.0,
+            max_z: 1.0,
+        };
+        assert_eq!(super::validate_block_collision_boxes(None).unwrap(), None);
+        assert_eq!(
+            super::validate_block_collision_boxes(Some(vec![])).unwrap(),
+            Some(vec![])
+        );
+        assert_eq!(
+            super::validate_block_collision_boxes(Some(vec![valid])).unwrap(),
+            Some(vec![valid])
+        );
+        for invalid in [
+            BlockCollisionBox {
+                min_x: f64::NAN,
+                ..valid
+            },
+            BlockCollisionBox {
+                min_x: -17.0,
+                ..valid
+            },
+            BlockCollisionBox {
+                max_x: 0.0,
+                ..valid
+            },
+            BlockCollisionBox {
+                max_y: 17.0,
+                ..valid
+            },
+        ] {
+            assert_eq!(
+                super::validate_block_collision_boxes(Some(vec![invalid]))
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            super::validate_block_collision_boxes(Some(vec![
+                BlockCollisionBox {
+                    min_x: 1.0,
+                    max_x: 2.0,
+                    ..valid
+                },
+                valid,
+            ]))
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            super::validate_block_collision_boxes(Some(vec![
+                valid;
+                MAX_WORLD_BLOCK_COLLISION_BOXES + 1
+            ]))
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            block_collision_boxes(
+                WorldHandle::new(1, 2, 3, 4).unwrap(),
+                BlockPos {
+                    x: i32::MIN,
+                    y: 0,
+                    z: 0
+                },
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
     fn block_property_value_has_a_stable_versioned_schema_and_host_values_are_checked() {
         let property = BlockProperty {
             name: "axis".to_owned(),
@@ -6035,6 +6425,135 @@ mod tests {
         );
         assert_eq!(
             fluid_at(world, BlockPos { x: 0, y: 64, z: 0 })
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn fluid_flow_query_and_response_use_the_bounded_detached_vector_contract() {
+        let query = FluidFlowQuery {
+            world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+            position: BlockPos { x: -3, y: 64, z: 8 },
+        };
+        let mut expected_query = Vec::new();
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&1_u64.to_le_bytes());
+        expected_query.extend_from_slice(&2_u64.to_le_bytes());
+        expected_query.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected_query.extend_from_slice(&1_u32.to_le_bytes());
+        expected_query.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected_query.extend_from_slice(&64_i32.to_le_bytes());
+        expected_query.extend_from_slice(&8_i32.to_le_bytes());
+        assert_eq!(crate::to_bytes(&query).unwrap(), expected_query);
+
+        let flow = FluidFlowSnapshot {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let encoded_response = crate::to_bytes(&FluidFlowResponse { flow: Some(flow) }).unwrap();
+        let mut expected_response = Vec::new();
+        expected_response.extend_from_slice(&1_u32.to_le_bytes());
+        expected_response.push(1);
+        expected_response.extend_from_slice(&1_u32.to_le_bytes());
+        expected_response.extend_from_slice(&1.0_f64.to_le_bytes());
+        expected_response.extend_from_slice(&0.0_f64.to_le_bytes());
+        expected_response.extend_from_slice(&0.0_f64.to_le_bytes());
+        assert_eq!(encoded_response, expected_response);
+        assert_eq!(
+            crate::from_bytes::<FluidFlowResponse>(&encoded_response)
+                .unwrap()
+                .flow,
+            Some(flow)
+        );
+
+        let encoded_zero = crate::to_bytes(&FluidFlowResponse {
+            flow: Some(FluidFlowSnapshot {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }),
+        })
+        .unwrap();
+        assert_eq!(
+            crate::from_bytes::<FluidFlowResponse>(&encoded_zero)
+                .unwrap()
+                .flow,
+            Some(FluidFlowSnapshot {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            })
+        );
+        assert_eq!(
+            crate::to_bytes(&FluidFlowResponse { flow: None }).unwrap(),
+            [1_u32.to_le_bytes().as_slice(), &[0]].concat()
+        );
+        assert_eq!(MAX_WORLD_FLUID_FLOW_RESPONSE_BYTES, 33);
+    }
+
+    #[test]
+    fn fluid_flow_values_are_finite_normalized_and_world_coordinates_are_bounded() {
+        let unit = FluidFlowSnapshot {
+            x: 0.0,
+            y: -1.0,
+            z: 0.0,
+        };
+        assert_eq!(validate_fluid_flow(Some(unit)).unwrap(), Some(unit));
+        assert_eq!(validate_fluid_flow(None).unwrap(), None);
+        assert_eq!(
+            validate_fluid_flow(Some(FluidFlowSnapshot {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }))
+            .unwrap(),
+            Some(FluidFlowSnapshot {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            })
+        );
+        for invalid in [
+            FluidFlowSnapshot {
+                x: f64::NAN,
+                ..unit
+            },
+            FluidFlowSnapshot {
+                x: 1.01,
+                y: 0.0,
+                z: 0.0,
+            },
+            FluidFlowSnapshot {
+                x: 0.8,
+                y: 0.8,
+                z: 0.0,
+            },
+        ] {
+            assert_eq!(
+                validate_fluid_flow(Some(invalid)).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            fluid_flow_at(
+                world,
+                BlockPos {
+                    x: i32::MIN,
+                    y: 0,
+                    z: 0,
+                },
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            fluid_flow_at(world, BlockPos { x: 0, y: 64, z: 0 })
                 .unwrap_err()
                 .code(),
             ErrorCode::UnknownErrorCode

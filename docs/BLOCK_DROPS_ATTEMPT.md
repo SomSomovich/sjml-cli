@@ -26,7 +26,7 @@ fn suppress_sample_ore_drops(attempt: BlockDropsAttempt) -> SjmlResult<bool> {
 }
 ```
 
-Declare both capabilities on a server module and ask the server operator to grant them:
+Declare the event capabilities on a server module and have the server operator grant them:
 
 ```toml
 [[modules]]
@@ -47,8 +47,9 @@ tool snapshot, up to 32 computed item snapshots, the computed experience amount,
 flag. Item snapshots include only registry ID and count, plus optional durability for damageable
 items; they omit item components and NBT. The payload is capped at 16 KiB, each resource ID at 256
 UTF-8 bytes, and each represented item count and durability value at one million. Guest callbacks
-run synchronously on the owning server thread and are capped at 64 per drop event. Async handlers
-are rejected. Both capabilities are
+run synchronously on the owning server
+thread and are capped at 64 per drop event. Async handlers are rejected. Both capabilities are
 required, and the event cannot be subscribed to from a client module.
 
-The standalone SDK example is [`block_drops_attempt.rs`](../sjml-sdk/examples/block_drops_attempt.rs).
+The standalone SDK example is
+[`block_drops_attempt.rs`](../sjml-cli/sjml-sdk/examples/block_drops_attempt.rs).

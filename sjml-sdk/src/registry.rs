@@ -1834,6 +1834,10 @@ extern "C" {
     fn imported_set_item_rarity(path_pointer: i32, path_length: i32, rarity: i32) -> i32;
     #[link_name = "set_item_glint_override"]
     fn imported_set_item_glint_override(path_pointer: i32, path_length: i32, glint: i32) -> i32;
+    #[link_name = "set_item_fire_resistant"]
+    fn imported_set_item_fire_resistant(path_pointer: i32, path_length: i32, enabled: i32) -> i32;
+    #[link_name = "set_item_no_repair"]
+    fn imported_set_item_no_repair(path_pointer: i32, path_length: i32) -> i32;
     #[link_name = "set_item_enchantment_value"]
     fn imported_set_item_enchantment_value(path_pointer: i32, path_length: i32, value: i32) -> i32;
     #[link_name = "set_item_attribute_modifier"]
@@ -2384,6 +2388,61 @@ pub fn set_item_glint_override(item_path: &str, glint: bool) -> SjmlResult<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = glint;
+        Err(unsupported_target())
+    }
+}
+
+/// Enables or disables vanilla fire resistance for an item declared by this module.
+///
+/// Call this from `#[mod_register]`, after `register_item` or after registering a block with an
+/// item form. `true` adds Minecraft's `FIRE_RESISTANT` default component, making dropped item
+/// entities immune to fire damage; `false` removes that default, including when the standalone
+/// item's [`ItemDefinition::fire_resistant`] value is `true`. Items without an override keep their
+/// declared default. The host accepts only standalone items and block items owned by the same
+/// module, and each item accepts one declaration. This only configures the item's default
+/// properties and does not alter existing stacks.
+pub fn set_item_fire_resistant(item_path: &str, enabled: bool) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the boolean wire value.
+        let status = unsafe {
+            imported_set_item_fire_resistant(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+                i32::from(enabled),
+            )
+        };
+        return status_result(status, "host rejected the item fire-resistance override");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = enabled;
+        Err(unsupported_target())
+    }
+}
+
+/// Disables Minecraft's vanilla repairability flag for a damageable item declared by this module.
+///
+/// Call this from `#[mod_register]` after `register_item` and `set_item_max_damage` for the same
+/// standalone item. The item must be owned by this module, have positive max damage, and accept
+/// only one no-repair declaration. This calls Minecraft's `Item.Properties.setNoRepair()` before
+/// the item is constructed; items without this call keep their normal repair behavior.
+pub fn set_item_no_repair(item_path: &str) -> SjmlResult<()> {
+    validate_path(item_path)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates the item owner and damageability.
+        let status = unsafe {
+            imported_set_item_no_repair(
+                item_path.as_ptr() as usize as u32 as i32,
+                item_path.len() as u32 as i32,
+            )
+        };
+        return status_result(status, "host rejected the item no-repair declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
         Err(unsupported_target())
     }
 }
@@ -7306,6 +7365,34 @@ mod tests {
             set_item_glint_override("../ruby", false)
                 .unwrap_err()
                 .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_fire_resistance_validates_paths_before_import() {
+        assert_eq!(
+            set_item_fire_resistant("ruby", true).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_fire_resistant("../ruby", false)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn item_no_repair_validates_paths_before_import() {
+        assert_eq!(
+            set_item_no_repair("tool").unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native calls reach the unsupported-target result"
+        );
+        assert_eq!(
+            set_item_no_repair("../tool").unwrap_err().code(),
             ErrorCode::InvalidArgument
         );
     }

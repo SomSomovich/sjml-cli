@@ -25,10 +25,11 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.100.0
-and core ABI 1.92.0. Live
+unverified. This guide describes the private SDK workspace target 0.101.0
+and core ABI 1.93.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
+SDK 0.101.0 adds loaded-only collision-box and fluid-flow queries, entity bounds and air supply, player movement and air snapshots, guarded air-supply writes, fall-distance resets, entity state setters, and item fire-resistance/no-repair defaults.
 SDK 0.100.0 adds loaded-only biome climate and block destroy-speed reads, a
 seven-flag entity snapshot, synchronous player break-speed actions, vanilla
 sign text access, static redstone output declarations, item glint defaults,
@@ -297,6 +298,12 @@ values require `content.register`. See [player drop attempts](PLAYER_DROP_ATTEMP
 [menu updates](MENU_UPDATES.md), [entity state flags](ENTITY_STATE_FLAGS.md), and
 [item properties](ITEM_RARITY.md).
 
+Registered standalone items and block items can also set vanilla fire resistance
+during `#[mod_register]`. See [item fire resistance](ITEM_FIRE_RESISTANCE.md).
+
+Damageable standalone items can disable vanilla anvil repair during static
+registration. See [item no-repair](ITEM_NO_REPAIR.md).
+
 SDK 0.57.0 adds synchronous cancellable projectile-impact attempts, bounded plain custom names for loaded non-player entities, static food properties for registered items, and editable server menus with role-based input/output slots and transfers of existing stacks. Projectile vetoes require `events.subscribe` and `events.cancel`; custom-name writes require `entity.read` and `entity.custom_name.write`; food declarations require `content.register`; editable-menu reads require `entity.read` and `menu.open`, and transfers also require `menu.transfer`. Menu inputs accept only allowlisted item IDs, closing returns remaining stacks to the player, and each module may issue at most 32 transfers per server tick. See [projectile impact attempts](PROJECTILE_IMPACT_ATTEMPT.md), [entity custom names](ENTITY_CUSTOM_NAMES.md), [item food properties](ITEM_FOOD.md), and [editable menus](EDITABLE_MENUS.md).
 
 SDK 0.60.0 adds loaded-Mob AI control, player respawn-point reads and updates, literal names on existing player-inventory stacks, and vanilla neighboring-redstone-signal reads that never load chunks. AI writes require `entity.read` and `entity.ai.control`; respawn writes require `entity.read` and `player.respawn.write`; player-stack naming requires `entity.read` and `inventory.write`; redstone reads require `world.read`. See [entity AI control](ENTITY_AI_CONTROL.md), [player inventory item names](PLAYER_INVENTORY_CUSTOM_NAMES.md), [player respawn points](PLAYER_RESPAWN_POINT.md), and [redstone signal reads](WORLD_REDSTONE_SIGNAL.md).
@@ -480,7 +487,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.100.0"
+sjml-sdk = "0.101.0"
 ```
 
 For development against this checkout, use

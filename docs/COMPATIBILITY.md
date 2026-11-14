@@ -16,15 +16,30 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.102.0`, Rust SDK/macros `0.100.0`, private CLI
-`0.1.32`, and ABI `1.92.0`. ABI compatibility remains major-version based: host
-0.102.0 accepts ABI `1.0.x` through `1.92.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.92.0` and host range
-`^0.102.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.103.0`, Rust SDK/macros `0.101.0`, private CLI
+`0.1.33`, and ABI `1.93.0`. ABI compatibility remains major-version based: host
+0.103.0 accepts ABI `1.0.x` through `1.93.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.93.0` and host range
+`^0.103.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.93.0
+
+This version adds loaded-only block collision boxes and fluid-flow vectors;
+detached world bounds for loaded non-player entities; living entity air-supply
+reads and guarded writes; player air-supply and movement-state snapshots,
+guarded air writes, and fall-distance reset; separate no-gravity and
+invulnerability controls; and static fire-resistance and no-repair properties
+for module-owned items. The world reads never load chunks. Player and entity
+mutations require separate capabilities and validate the current live handle.
+See [block collision boxes](BLOCK_COLLISION_BOXES.md), [fluid flow](FLUID_FLOW.md),
+[entity bounds](ENTITY_BOUNDS.md), [entity air supply](ENTITY_AIR_SUPPLY.md),
+[entity state writes](ENTITY_STATE_WRITES.md), [player air supply](PLAYER_AIR_SUPPLY.md),
+[player movement state](PLAYER_MOVEMENT_STATE.md), [fall-distance reset](PLAYER_FALL_DISTANCE.md),
+[item fire resistance](ITEM_FIRE_RESISTANCE.md), and [item no-repair](ITEM_NO_REPAIR.md).
 
 ### APIs added in ABI 1.92.0
 
@@ -158,11 +173,13 @@ is not a raw mouse-move event.
 
 `entity::set_glowing` now requires `entity.read` and the dedicated
 `entity.glowing.write` capability. `entity.state.write` continues to authorize
-only `entity::set_silent`. Update both the module's manifest and the server's
-`config/sjml-permissions.toml` grant before upgrading a package that calls
+`entity::set_silent` and `entity::set_no_gravity`; invulnerability changes use
+the separate `entity.invulnerability.write` capability. Update both the
+module's manifest and the server's `config/sjml-permissions.toml` grant before upgrading a package that calls
 `set_glowing`; the host will not bind that import without the new permission.
-Read operations are unchanged. See [entity state flags](ENTITY_STATE_FLAGS.md)
-and [project capability grants](PROJECT_CONFIGURATION.md#capability-requests-and-server-grants).
+Read operations are unchanged. See [entity state flags](ENTITY_STATE_FLAGS.md),
+[entity state writes](ENTITY_STATE_WRITES.md), and [project capability
+grants](PROJECT_CONFIGURATION.md#capability-requests-and-server-grants).
 
 ## Logical side and current API coverage
 

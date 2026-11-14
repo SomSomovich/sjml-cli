@@ -18,7 +18,7 @@ fn check_loaded_fluid_states(arguments: FluidStateCheck) -> SjmlResult<String> {
         z: arguments.z,
     };
     let dry_position = BlockPos {
-        x: arguments.x + 1,
+        x: arguments.x + 2,
         y: arguments.y,
         z: arguments.z,
     };
@@ -34,6 +34,13 @@ fn check_loaded_fluid_states(arguments: FluidStateCheck) -> SjmlResult<String> {
             "the loaded dry position was unavailable",
         )
     })?;
+    let flow = world::fluid_flow_at(overworld, source_position)?.ok_or_else(|| {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "loaded flowing source position returned no flow vector",
+        )
+    })?;
+    let dry_flow = world::fluid_flow_at(overworld, dry_position)?;
 
     if source.fluid_id != "minecraft:water"
         || source.amount != 8
@@ -51,5 +58,11 @@ fn check_loaded_fluid_states(arguments: FluidStateCheck) -> SjmlResult<String> {
             "fluid_at did not return the expected empty-fluid snapshot for a dry block",
         ));
     }
-    Ok("fluid_at returned source water and the empty fluid state".to_owned())
+    if flow.x < 0.999 || flow.y.abs() > 1.0e-6 || flow.z.abs() > 1.0e-6 || dry_flow.is_some() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "fluid_flow_at did not return the expected eastward source flow or empty-cell None",
+        ));
+    }
+    Ok("fluid_at and fluid_flow_at returned the expected loaded water states and flow".to_owned())
 }

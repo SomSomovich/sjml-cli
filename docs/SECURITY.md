@@ -408,9 +408,16 @@ the live module-scoped handle and logical-server thread. Values are limited to
 
 `entity::is_glowing` and `entity::is_silent` read only two fixed vanilla flags
 from live loaded non-player entities under `entity.read`. `set_glowing` also
-requires `entity.glowing.write`; `set_silent` requires `entity.state.write`. The
-host rejects client, static-registration, and stale-handle calls. These flags do
-not expose general entity metadata or NBT.
+requires `entity.glowing.write`; `set_silent` and `set_no_gravity` require
+`entity.state.write`; `set_invulnerable` requires the separate
+`entity.invulnerability.write` capability. All writes also require
+`entity.read`. The host rejects client, static-registration, and stale-handle
+calls. These flags do not expose general entity metadata or NBT.
+
+`entity::air_supply` reads the bounded current and maximum air supply for a live loaded non-player
+living entity. The current value includes vanilla's `-20` drowning window. Changing current air
+requires the separate `entity.air.write` capability as well as `entity.read`; the host requires
+`0..=current maximum` and never changes the maximum.
 
 `entity::is_ai_enabled` and `entity::set_ai_enabled` operate only on loaded
 vanilla `Mob` instances. Reads require `entity.read`; writes additionally
@@ -429,13 +436,6 @@ Setting or clearing a target also requires `entity.target.write`; the Mob
 and target must be live in the same loaded server dimension, and the target must
 be alive and within 128 blocks. Target reads and writes run on the server thread,
 do not load chunks, and do not expose the Mob's goal selector.
-
-`entity::teleport` requires `entity.read` plus `entity.teleport` and accepts
-only a live, unmounted non-player entity. It validates finite bounded
-coordinates, the full destination bounding box, world border, build height,
-and every chunk touched by that box before calling Minecraft's same-dimension
-teleport path. Unloaded destinations fail without chunk loads or tickets. The
-host rechecks the final position and loaded-level membership after the call.
 
 `entity::equipment` reads the six fixed vanilla equipment slots of a live loaded non-player `LivingEntity` under `entity.read`. It returns detached canonical item ID/count/damage/max-damage values only; no NBT, data components, or mutable item handles cross the ABI. The call checks the live module-owned handle and owning server thread without loading chunks. See [loaded entity equipment](ENTITY_EQUIPMENT.md).
 
@@ -460,9 +460,11 @@ Player selected-hotbar reads require `entity.read`; changing the selected index
 also requires `inventory.write`, is limited to slots `0..=8`, and does not
 change stack contents. Active-effect snapshots require `entity.read` and return
 at most 64 detached records from a live loaded living entity. Scoreboard imports
-require `scoreboard.read` or `scoreboard.write`, run only on the owning server
-thread, and operate on existing objectives; writes cannot create objectives or
-change read-only criteria. `player.sleep_attempt` requires both event grants and
+require `scoreboard.read` or `scoreboard.write` and run only on the owning
+server thread. Generic score writes affect only named entries in existing
+writable objectives; separate module-owned dummy-objective calls create/update
+or remove only the objective recorded for the exact package/module/local ID.
+They cannot change foreign objectives or use read-only criteria. `player.sleep_attempt` requires both event grants and
 can only replace an allowed sleep result with a denial; an existing vanilla or
 other-mod denial is preserved.
 

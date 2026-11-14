@@ -11,7 +11,7 @@ The separate [`chat_messages` API](CLIENT_CHAT_MESSAGES.md) exposes detached
 incoming message text, local filtering, and safe local replacement. A mod can
 store these bounded strings in guest-owned state and draw its own HUD feed with
 the general [`render` API](RENDERING.md); the runnable
-[`client-chat example`](../../examples/client-chat/src/lib.rs) hides native HUD
+[`client-chat example`](../examples/client-chat/src/lib.rs) hides native HUD
 messages, draws a bounded scrollable feed, and keeps Minecraft's native chat
 input available when `ChatScreen` opens. `client.chat.filter` and `client.render`
 must be granted independently. Signed content is filtered or replaced only in

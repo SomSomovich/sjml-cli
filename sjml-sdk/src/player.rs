@@ -1,11 +1,12 @@
-//! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, active-effect, team, and game-mode reads require
+//! Scoped access to online player sessions on the owning logical server. Snapshots, vitals, movement-state, active-effect, team, and game-mode reads require
 //! requested and granted `entity.read`; effect application also requires `entity.effect.apply`, teleportation requires
 //! `player.teleport`, game-mode changes require `player.game_mode.write`, vitals changes require
 //! `player.vitals.write`, velocity changes require `player.motion.write`, and flight changes require
 //! `player.abilities.write`; item cooldown changes require `player.cooldown.write`; action-bar messages require `player.ui.actionbar`, system chat messages require `player.chat.system_message`, and title packets
 //! require `player.ui.title`; module-owned tab-list header/footer changes require
 //! `player.ui.tab_list`; advancement changes require `player.advancement.write`; vanilla custom-stat
-//! changes require `player.statistics.write`. Player handles
+//! changes require `player.statistics.write`; resetting a player's fall distance requires
+//! [`FALL_DISTANCE_WRITE_CAPABILITY`]; air-supply writes require [`AIR_SUPPLY_WRITE_CAPABILITY`]. Player handles
 //! survive respawn and dimension changes, and are invalidated when logout begins or the module closes.
 
 #[cfg(target_arch = "wasm32")]
@@ -36,6 +37,10 @@ pub const MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES: usize =
 pub const MAX_PLAYER_TEAM_NAME_BYTES: usize = 64;
 /// Maximum schema-v1 response size for a current player scoreboard-team assignment.
 pub const MAX_PLAYER_TEAM_RESPONSE_BYTES: usize = 4 + 1 + 4 + MAX_PLAYER_TEAM_NAME_BYTES;
+/// Capability required with `entity.read` to change an online player's current air supply.
+pub const AIR_SUPPLY_WRITE_CAPABILITY: &str = "player.air.write";
+/// Capability required with `entity.read` to reset an online player's fall distance.
+pub const FALL_DISTANCE_WRITE_CAPABILITY: &str = "player.fall_distance.write";
 
 #[cfg(any(target_arch = "wasm32", test))]
 const PLAYER_TEAM_RESPONSE_SCHEMA: u32 = 1;
@@ -188,6 +193,60 @@ pub struct PlayerVitals {
     pub experience_level: u32,
     /// Progress toward the next experience level, from zero through one.
     pub experience_progress: f32,
+}
+
+/// Detached current and maximum air supply for an online player.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerAirSupply {
+    /// Current air ticks; vanilla may report a value down to -20 during drowning damage.
+    pub current: i32,
+    /// The current entity-specific maximum air supply.
+    pub max: u32,
+}
+
+impl PlayerAirSupply {
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn validate(self) -> SjmlResult<()> {
+        if self.current < -20 || self.current as i64 > i64::from(self.max) {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned air supply outside the supported current/maximum bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Detached movement flags and fall distance for an online player.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerMovementState {
+    /// Whether vanilla currently considers the player grounded.
+    pub on_ground: bool,
+    /// Whether the player is sprinting.
+    pub sprinting: bool,
+    /// Whether the player is crouching.
+    pub crouching: bool,
+    /// Whether the player is swimming.
+    pub swimming: bool,
+    /// Current fall distance in blocks, bounded to `0..=MAX_PLAYER_FALL_DISTANCE`.
+    pub fall_distance: f32,
+}
+
+impl PlayerMovementState {
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn validate(self) -> SjmlResult<()> {
+        if !self.fall_distance.is_finite()
+            || !(0.0..=MAX_PLAYER_FALL_DISTANCE).contains(&self.fall_distance)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned a non-finite or out-of-range player fall distance",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Maximum number of bytes in a canonical item registry ID returned for equipment.
@@ -346,6 +405,8 @@ pub const MAX_PLAYER_HEALTH: f32 = 1_000_000.0;
 pub const MAX_PLAYER_FOOD_LEVEL: u32 = 20;
 /// Maximum experience level accepted by [`set_experience`].
 pub const MAX_PLAYER_EXPERIENCE_LEVEL: u32 = 20_000;
+/// Maximum fall distance in blocks accepted from the player movement-state snapshot.
+pub const MAX_PLAYER_FALL_DISTANCE: f32 = 1_000_000.0;
 /// Maximum absolute yaw accepted by [`set_rotation`].
 pub const MAX_PLAYER_ROTATION_YAW: f32 = 36_000.0;
 /// Maximum duration accepted for a player item cooldown, in server ticks.
@@ -971,6 +1032,10 @@ extern "C" {
     fn imported_set_flying(handle: i32, length: i32, flying: i32) -> i32;
     #[link_name = "vitals"]
     fn imported_vitals(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "air_supply"]
+    fn imported_air_supply(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "movement_state"]
+    fn imported_movement_state(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "game_mode"]
     fn imported_game_mode(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "selected_hotbar_slot"]
@@ -996,6 +1061,10 @@ extern "C" {
     fn imported_set_food(handle: i32, length: i32, food_level: i32, saturation_bits: i32) -> i32;
     #[link_name = "set_experience"]
     fn imported_set_experience(handle: i32, length: i32, level: i32, progress_bits: i32) -> i32;
+    #[link_name = "set_air_supply"]
+    fn imported_set_air_supply(handle: i32, length: i32, air_supply: i32) -> i32;
+    #[link_name = "reset_fall_distance"]
+    fn imported_reset_fall_distance(handle: i32, length: i32) -> i32;
     #[link_name = "has_item_cooldown"]
     fn imported_has_item_cooldown(
         handle: i32,
@@ -1223,6 +1292,68 @@ pub fn vitals(handle: PlayerHandle) -> SjmlResult<PlayerVitals> {
         })?;
         encoded_vitals.validate()?;
         Ok(encoded_vitals)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads current and maximum air supply for an online server player.
+///
+/// Requires `entity.read` and a live player handle on the owning logical-server
+/// thread. `current` may be negative (down to -20) during vanilla's drowning
+/// damage phase; `max` is read from the current player entity. The returned
+/// value is detached and includes the maximum needed to choose a valid write.
+pub fn air_supply(handle: PlayerHandle) -> SjmlResult<PlayerAirSupply> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let air: PlayerAirSupply = read_output(12, |output, capacity| {
+            // SAFETY: handle and output stay valid for this synchronous host read.
+            unsafe {
+                imported_air_supply(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        air.validate()?;
+        Ok(air)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads detached movement flags and fall distance for an online server player.
+///
+/// Requires `entity.read` and a live player handle on the owning logical-server
+/// thread. Grounded, sprinting, crouching, and swimming values reflect the
+/// current vanilla entity state. Fall distance must be finite and in
+/// `0..=MAX_PLAYER_FALL_DISTANCE`. This API does not change player state.
+pub fn movement_state(handle: PlayerHandle) -> SjmlResult<PlayerMovementState> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let state: PlayerMovementState = read_output(12, |output, capacity| {
+            // SAFETY: the encoded handle and output remain valid through the synchronous host read.
+            unsafe {
+                imported_movement_state(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })?;
+        state.validate()?;
+        Ok(state)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1616,7 +1747,7 @@ fn named_rich_color_wire(color: RichTextColor) -> SjmlResult<u8> {
         RichTextColor::Yellow => 14,
         RichTextColor::White => 15,
         RichTextColor::Rgb(_) => {
-            return Err(rich_text_invalid("RGB color has no named-color code"))
+            return Err(rich_text_invalid("RGB color has no named-color code"));
         }
     };
     Ok(value)
@@ -2133,6 +2264,66 @@ pub fn set_experience(handle: PlayerHandle, level: u32, progress: f32) -> SjmlRe
             )
         };
         status_result(status, "host rejected the player experience change")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the current air supply for an online player without exceeding its maximum.
+///
+/// Requires both `entity.read` and `player.air.write`. The requested value must
+/// be nonnegative and no greater than [`PlayerAirSupply::max`] from the latest
+/// `air_supply` snapshot. The host rechecks the current entity maximum on every
+/// call, validates the live login session, and requires the owning logical-server
+/// thread. Client modules, stale handles, and static registration are denied.
+pub fn set_air_supply(handle: PlayerHandle, air_supply: u32) -> SjmlResult<()> {
+    if air_supply > i32::MAX as u32 {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player air supply exceeds the supported integer range",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the handle and scalar remain valid throughout this synchronous host call.
+        let status = unsafe {
+            imported_set_air_supply(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                air_supply as i32,
+            )
+        };
+        status_result(status, "host rejected the player air-supply change")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Resets fall-distance tracking for an online player to vanilla's zero state.
+///
+/// Requires `entity.read` and `player.fall_distance.write`, a live player handle,
+/// and the owning logical-server thread. The host revalidates the current login
+/// session for every call. This operation exposes no arbitrary fall-distance
+/// value setter and delegates to Minecraft's `Entity::resetFallDistance`.
+pub fn reset_fall_distance(handle: PlayerHandle) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains live for the complete synchronous host call.
+        let status = unsafe {
+            imported_reset_fall_distance(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the player fall-distance reset")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -3011,13 +3202,14 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, apply_effect, clear_team, send_system_message, set_rotation, set_team,
-        team, teleport, teleport_to_world, validate_player_tab_list_pair,
-        validate_player_tab_list_text, validate_player_team_name, validate_player_title_text,
-        validate_system_message_text, vitals, PlayerMotion, PlayerTeamResponse, PlayerTeleport,
-        PlayerTitleTimings, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
-        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_ROTATION_YAW,
-        MAX_PLAYER_STATISTIC_VALUE, MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES,
+        active_effects, air_supply, apply_effect, clear_team, movement_state, reset_fall_distance,
+        send_system_message, set_air_supply, set_rotation, set_team, team, teleport,
+        teleport_to_world, validate_player_tab_list_pair, validate_player_tab_list_text,
+        validate_player_team_name, validate_player_title_text, validate_system_message_text,
+        vitals, PlayerAirSupply, PlayerMotion, PlayerMovementState, PlayerTeamResponse,
+        PlayerTeleport, PlayerTitleTimings, PlayerVitals, MAX_PLAYER_ACTIVE_EFFECTS,
+        MAX_PLAYER_ACTIVE_EFFECTS_RESPONSE_BYTES, MAX_PLAYER_FALL_DISTANCE,
+        MAX_PLAYER_ROTATION_YAW, MAX_PLAYER_STATISTIC_VALUE, MAX_PLAYER_SYSTEM_MESSAGE_TEXT_BYTES,
         MAX_PLAYER_SYSTEM_MESSAGE_TEXT_CODE_POINTS, MAX_PLAYER_TAB_LIST_TEXT_BYTES,
         MAX_PLAYER_TAB_LIST_TEXT_CODE_POINTS, MAX_PLAYER_TEAM_NAME_BYTES,
         MAX_PLAYER_TEAM_RESPONSE_BYTES, MAX_PLAYER_TITLE_TEXT_BYTES, MAX_TELEPORT_COORDINATE,
@@ -3641,6 +3833,123 @@ mod tests {
                 ErrorCode::InvalidArgument
             );
         }
+    }
+
+    #[test]
+    fn air_supply_snapshot_is_detached_and_setter_rejects_unrepresentable_values() {
+        let handle = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        let air = PlayerAirSupply {
+            current: 270,
+            max: 300,
+        };
+        air.validate().unwrap();
+        assert_eq!(
+            crate::to_bytes(&air).unwrap(),
+            [1, 0, 0, 0, 14, 1, 0, 0, 44, 1, 0, 0]
+        );
+        assert!(PlayerAirSupply {
+            current: -20,
+            max: 300
+        }
+        .validate()
+        .is_ok());
+        assert_eq!(
+            PlayerAirSupply {
+                current: -21,
+                max: 300
+            }
+            .validate()
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            PlayerAirSupply {
+                current: 301,
+                max: 300
+            }
+            .validate()
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_air_supply(handle, i32::MAX as u32 + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_air_supply(handle, 300).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "valid values reach the wasm-only host import"
+        );
+        assert_eq!(
+            air_supply(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "live player reads require the wasm-only host import"
+        );
+    }
+
+    #[test]
+    fn movement_state_schema_and_boundaries_are_stable_and_read_only() {
+        let state = PlayerMovementState {
+            on_ground: true,
+            sprinting: false,
+            crouching: true,
+            swimming: false,
+            fall_distance: 1.5,
+        };
+        state.validate().unwrap();
+        assert_eq!(
+            crate::to_bytes(&state).unwrap(),
+            [1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 192, 63]
+        );
+        assert_eq!(MAX_PLAYER_FALL_DISTANCE, 1_000_000.0);
+        for invalid in [
+            f32::NAN,
+            f32::INFINITY,
+            -0.01,
+            MAX_PLAYER_FALL_DISTANCE + 1.0,
+        ] {
+            assert_eq!(
+                PlayerMovementState {
+                    fall_distance: invalid,
+                    ..state
+                }
+                .validate()
+                .unwrap_err()
+                .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+
+        let malformed = [1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            super::Decoder::new(&malformed)
+                .and_then(|mut decoder| PlayerMovementState::decode(&mut decoder))
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidBoolean,
+            "schema booleans accept only canonical zero and one bytes"
+        );
+
+        let handle = PlayerHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            movement_state(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode,
+            "native targets fail closed when a live player import is unavailable"
+        );
+    }
+
+    #[test]
+    fn fall_distance_reset_fails_closed_without_the_server_host() {
+        assert_eq!(
+            reset_fall_distance(PlayerHandle::new(1, 2, 3, 4).unwrap())
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
     }
 
     #[test]

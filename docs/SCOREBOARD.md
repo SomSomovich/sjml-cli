@@ -1,9 +1,9 @@
 # Scoreboard API
 
 SJML exposes bounded reads and writes for entries in existing vanilla
-scoreboard objectives, module-owned dummy objective creation and removal,
-guarded display-slot assignment, and a separate API for teams owned by one
-SJML module. Modules cannot alter vanilla or other-module objectives and teams.
+scoreboard objectives, module-owned dummy objective creation/removal, guarded
+display-slot assignment, and a separate API for teams owned by one SJML module.
+Modules cannot alter vanilla or other-module objectives and teams.
 
 ## Permissions and bounds
 
@@ -34,6 +34,17 @@ SJML module. Modules cannot alter vanilla or other-module objectives and teams.
 writable objective. It does not create objectives or change objective
 criteria, display names, display slots, teams, or other entries.
 
+`set_display_slot` assigns an existing objective to one fixed vanilla display
+slot, replacing the objective currently shown there. `clear_display_slot`
+removes the current objective from that slot and succeeds if it is already
+empty. These calls can select or clear any of the 19 fixed vanilla slots; they
+do not create objectives or alter the objective itself. Slot codes are stable:
+`List` 0, `Sidebar` 1, `BelowName` 2, then `TeamBlack`, `TeamDarkBlue`,
+`TeamDarkGreen`, `TeamDarkAqua`, `TeamDarkRed`, `TeamDarkPurple`, `TeamGold`,
+`TeamGray`, `TeamDarkGray`, `TeamBlue`, `TeamGreen`, `TeamAqua`, `TeamRed`,
+`TeamLightPurple`, `TeamYellow`, and `TeamWhite` (3–18). Display-slot calls use
+the same server-thread and `scoreboard.write` guard as score mutations.
+
 ## Module-owned objectives
 
 `create_objective(id, display_name)` creates a writable dummy objective or
@@ -52,17 +63,6 @@ pointing to it. Arbitrary criteria, custom number formats, and edits to foreign
 objectives remain unavailable through these methods. Ownership data migrates
 the existing team-owner format and fails closed if corrupted. See
 [`SCOREBOARD_OBJECTIVES.md`](SCOREBOARD_OBJECTIVES.md) for the Rust example.
-
-`set_display_slot` assigns an existing objective to one fixed vanilla display
-slot, replacing the objective currently shown there. `clear_display_slot`
-removes the current objective from that slot and succeeds if it is already
-empty. These calls can select or clear any of the 19 fixed vanilla slots; they
-do not create objectives or alter the objective itself. Slot codes are stable:
-`List` 0, `Sidebar` 1, `BelowName` 2, then `TeamBlack`, `TeamDarkBlue`,
-`TeamDarkGreen`, `TeamDarkAqua`, `TeamDarkRed`, `TeamDarkPurple`, `TeamGold`,
-`TeamGray`, `TeamDarkGray`, `TeamBlue`, `TeamGreen`, `TeamAqua`, `TeamRed`,
-`TeamLightPurple`, `TeamYellow`, and `TeamWhite` (3–18). Display-slot calls use
-the same server-thread and `scoreboard.write` guard as score mutations.
 
 ## Module-owned teams
 

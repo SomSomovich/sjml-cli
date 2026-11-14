@@ -50,7 +50,8 @@ entity on the owning server thread. IDs must be canonical `namespace:path` value
 `minecraft:air` are rejected. The guest cannot provide a count, NBT, or custom data components.
 
 The call returns `true` when it equips the stack and `false` when that slot already contains an
-item. An occupied stack is never replaced or discarded.
+item. An occupied stack is never replaced or discarded. This keeps the operation bounded and avoids
+losing equipment; a mod that needs swaps must first implement its own explicit item-return policy.
 
 ```rust
 use sjml::{entity, EntityEquipmentSlot, SjmlResult};
@@ -60,8 +61,8 @@ fn equip_zombie(mob: sjml::EntityHandle) -> SjmlResult<bool> {
 }
 ```
 
-`sjml_entity_v1.set_equipment` requires both capabilities and accepts a schema-v1 request with the
-24-byte entity handle, slot code (`1` main hand, `2` offhand, `3` head, `4` chest, `5` legs, `6`
-feet), and canonical item ID capped at 256 UTF-8 bytes. Its exact five-byte result is schema
-`u32(1)` followed by a `0` or `1` boolean tag. The host checks the output span before mutation.
-Static registration binds the bounded import but denies live mutation.
+`sjml_entity_v1.set_equipment` requires `entity.read` and `entity.equipment.write` and accepts a schema-v1 request containing the 24-byte entity handle,
+slot code (`1` main hand, `2` offhand, `3` head, `4` chest, `5` legs, `6` feet), and a canonical item
+ID capped at 256 UTF-8 bytes. Its exact five-byte result is schema `u32(1)` followed by a `0` or `1`
+boolean tag. The host checks the output span before reaching the entity provider. Static registration
+links the bounded import but denies live mutation.

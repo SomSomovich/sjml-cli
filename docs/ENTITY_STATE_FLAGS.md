@@ -32,6 +32,9 @@ The API uses the existing `sjml_entity_v1` imports:
 Boolean outputs are little-endian `u32` values (`0` or `1`); writes accept only
 `0` or `1`. Read output spans are checked before Minecraft is accessed.
 
+The SDK also exposes no-gravity and invulnerability writes with separate
+capability rules; see [entity state writes](ENTITY_STATE_WRITES.md).
+
 ## Detached movement and visibility snapshot
 
 `entity::state_snapshot(handle)` returns one consistent set of seven read-only

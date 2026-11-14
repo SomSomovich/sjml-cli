@@ -1,23 +1,16 @@
-# Moving player inventory stacks
+# Player inventory stack moves
 
-Use `player_inventory::move_stack` to move an exact count between two slots of one live player:
+The Rust API `player_inventory::move_stack(player, source_slot, destination_slot, count)` moves an
+exact count between two slots in the live player's inventory. It requires `entity.read` and
+`inventory.write`, a valid current player session, a logical-server module, and the owning server
+thread.
 
-```rust
-player_inventory::move_stack(player, 0, 9, 4)?;
-```
+Slots must be different indices in `0..=40`, and the count must be `1..=64`. The source must hold
+the complete requested count. The destination must be empty or contain the same registered item
+with identical components. The resulting count must fit both the item's stack limit and the
+destination slot; armor slots remain limited to one item.
 
-The module must request and receive `entity.read` and `inventory.write`. The call is server-only,
-runs on the owning server thread, and resolves the current live player session for each request.
-Source and destination slots must be different indices in `0..=40`; the count is bounded to
-`1..=64`. The source must contain that many items. The destination must be empty or contain the
-same item with identical components, and the final stack must fit its item and slot limits. The
-armor slots remain limited to one item.
-
-The operation changes only counts and preserves the stack's other components. Both slots are
-preflighted before writes, then checked against the expected result. If a commit fails or violates
-the postcondition, the host restores and verifies both original stacks. No item value, component,
-or NBT crosses the ABI.
-
-The host import is `sjml_inventory_v1.move_player_stack(player_ptr, player_len, source_slot,
-destination_slot, count) -> i32`. See [player inventory slot writes](PLAYER_INVENTORY_WRITES.md) for
-the other bounded write operations.
+The host copies both original stacks, changes only their counts, validates both resulting slots,
+and restores both originals if a write fails or a postcondition is violated. It never creates an
+item or exposes a stack through the ABI. Player inventory synchronization uses the active menu.
+See also [player inventory writes](PLAYER_INVENTORY_WRITES.md).

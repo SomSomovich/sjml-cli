@@ -1,15 +1,17 @@
-# Projectile impact attempt
+# `entity.projectile_impact_attempt`
 
-Use `entity.projectile_impact_attempt` to inspect or veto a server-side projectile impact without
-receiving Minecraft Java objects:
+`entity.projectile_impact_attempt` is a synchronous, cancellable callback for a server-side
+projectile hit. Register a normal `#[event]` handler returning `SjmlResult<bool>` and subscribe with
+both `events.subscribe` and `events.cancel`:
 
 ```rust
-use sjml::prelude::*;
+use sjml::{event, events::{self, EventPriority, ProjectileImpactAttempt}, SjmlResult};
 
 #[event(name = "entity.projectile_impact_attempt")]
-fn cancel_stone_impact(event: ProjectileImpactAttempt) -> SjmlResult<bool> {
-    Ok(event.hit_kind == "block"
-        && event.hit_block_id.as_deref() == Some("minecraft:stone"))
+fn stop_arrows_from_hitting_stone(hit: ProjectileImpactAttempt) -> SjmlResult<bool> {
+    Ok(hit.projectile_type_id == "minecraft:arrow"
+        && hit.hit_kind == "block"
+        && hit.hit_block_id.as_deref() == Some("minecraft:stone"))
 }
 
 fn register_events() -> SjmlResult<()> {
@@ -18,16 +20,20 @@ fn register_events() -> SjmlResult<()> {
 }
 ```
 
-Grant both `events.subscribe` and `events.cancel` to the module. The callback runs synchronously on
-the owning server thread. Return `Ok(true)` to cancel the hit; NeoForge leaves the projectile flying
-when its impact event is cancelled. `hit_kind` is `entity` or `block`. Entity hits set
-`hit_entity_id`/`hit_entity_type_id`; block hits set `hit_block_id`, `block_position`, and
-`block_face`. All other optional target fields are `None`. `x`, `y`, and `z` are the ray's impact
-coordinates.
+Return `Ok(true)` to cancel the impact. In the pinned NeoForge 21.1.265 API,
+`ProjectileImpactEvent` implements `ICancellableEvent`, and `EventHooks.onProjectileImpact(Projectile,
+HitResult)` returns whether it was cancelled. A cancelled hit is not processed and the projectile
+continues flying. SJML dispatches only on the owning server thread and ignores client predictions
+and impacts that another listener has already cancelled.
 
-The host ignores client prediction, already-cancelled events, unsupported hit kinds, and unknown
-registry IDs. It checks that a block-hit chunk is already loaded before reading the block ID, so this
-event never loads chunks. The schema is bounded to 4 KiB with at most 256 UTF-8 bytes per string.
-The pinned NeoForge 21.1.265 `ProjectileImpactEvent` implements `ICancellableEvent`; the vanilla
-hook posts it for arrows, fireballs, fireworks, fishing hooks, llama spit, shulker bullets, and
-throwable projectiles. Custom projectiles need to post the same NeoForge event to be covered.
+The callback record contains `projectile_id`, `projectile_type_id`, `dimension_id`, `hit_kind`
+(`entity` or `block`), the optional target fields, and the hit position (`x`, `y`, `z`). Entity hits
+include `hit_entity_id` and `hit_entity_type_id`. Block hits include `hit_block_id`, `block_position`,
+and `block_face`. Values are detached strings, UUIDs, coordinates, and integers; the guest receives
+no Java object. Each UTF-8 string is limited to 256 bytes and the encoded payload is limited to 4 KiB.
+
+For a block hit, SJML checks `ServerLevel.hasChunkAt` before reading its block ID; it does not load
+chunks. Unrecognized hit types, missing registry IDs, invalid payload values, or unloaded block-hit
+positions are skipped and vanilla continues. The NeoForge hook is used by vanilla projectile classes
+including arrows, fireballs, fireworks, fishing hooks, llama spit, shulker bullets, and throwable
+projectiles. A custom projectile must post NeoForge's `ProjectileImpactEvent` itself to participate.

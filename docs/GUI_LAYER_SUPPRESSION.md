@@ -60,7 +60,8 @@ The host rechecks the suppression capability at each matching pre-render
 event. Revoking it stops cancellation immediately; restoring it reactivates
 any suppression handle the module still owns.
 
-The separate guest example is `sjml-sdk/examples/gui_layer_replacement.rs`.
+The separate guest example is in the CLI workspace at
+`sjml-cli/sjml-sdk/examples/gui_layer_replacement.rs`.
 Build it with the SDK workspace's normal `wasm32-unknown-unknown` target and
 load its client module with both permissions. Visible behavior still needs a
 display-backed Minecraft client run.

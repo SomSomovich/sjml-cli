@@ -7,12 +7,11 @@
 use crate::abi::{allocate_host_input, deallocate_host_input};
 use crate::inventory::BlockPos;
 use crate::world::RaycastPoint;
-#[cfg(any(target_arch = "wasm32", test))]
-use crate::Decoder;
 #[cfg(target_arch = "wasm32")]
 use crate::{to_bytes, MAX_STRING_BYTES};
 use crate::{
-    EntityHandle, ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode, WorldHandle,
+    Decoder, EntityHandle, ErrorCode, SjmlError, SjmlResult, StableDecode, StableEncode,
+    WorldHandle,
 };
 
 /// Maximum number of active status effects returned for one entity.
@@ -38,8 +37,18 @@ pub const MAX_ENTITY_DAMAGE: f32 = 64.0;
 pub const MAX_ENTITY_HEAL_AMOUNT: f32 = 64.0;
 /// Current health, maximum health, or absorption value returned in one bounded snapshot.
 pub const MAX_ENTITY_VITALS_VALUE: f32 = 1_000_000.0;
+/// Lower bound for current air supply during vanilla's drowning damage window.
+pub const MIN_ENTITY_AIR_SUPPLY: i32 = -20;
+/// Maximum current or maximum air supply accepted by the detached entity API.
+pub const MAX_ENTITY_AIR_SUPPLY: u32 = 1_000_000;
+/// Exact schema-v1 response size for current and maximum entity air supply.
+pub const MAX_ENTITY_AIR_SUPPLY_RESPONSE_BYTES: u32 = 12;
 /// Exact schema-v1 response size for seven detached entity state flags.
 pub const MAX_ENTITY_STATE_RESPONSE_BYTES: u32 = 11;
+/// Exact schema-v1 response size for six detached entity bounding-box coordinates.
+pub const MAX_ENTITY_BOUNDS_RESPONSE_BYTES: u32 = 52;
+/// Maximum absolute coordinate accepted in detached world-space entity bounds.
+pub const MAX_ENTITY_BOUNDS_COORDINATE: f64 = 30_000_064.0;
 /// Capability required with `entity.read` to request a bounded heal for a live entity.
 pub const HEALTH_WRITE_CAPABILITY: &str = "entity.health.write";
 /// Maximum UTF-8 byte length of a canonical item registry ID in an entity equipment snapshot.
@@ -56,6 +65,10 @@ pub const EQUIPMENT_WRITE_CAPABILITY: &str = "entity.equipment.write";
 pub const GLOWING_WRITE_CAPABILITY: &str = "entity.glowing.write";
 /// Capability required with `entity.read` to change a loaded entity's silent flag.
 pub const STATE_WRITE_CAPABILITY: &str = "entity.state.write";
+/// Capability required with `entity.read` to toggle a loaded entity's invulnerability flag.
+pub const INVULNERABILITY_WRITE_CAPABILITY: &str = "entity.invulnerability.write";
+/// Capability required with `entity.read` to change a loaded living entity's current air supply.
+pub const AIR_SUPPLY_WRITE_CAPABILITY: &str = "entity.air.write";
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 /// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
@@ -126,6 +139,91 @@ pub struct EntitySnapshot {
     pub y: f64,
     /// Current Z coordinate.
     pub z: f64,
+}
+
+/// Detached world-space axis-aligned bounds for one live loaded non-player entity.
+#[derive(Debug, Clone, Copy, PartialEq, StableEncode)]
+#[sjml(version = 1)]
+pub struct EntityBounds {
+    /// Minimum X coordinate of the entity's bounding box.
+    pub min_x: f64,
+    /// Minimum Y coordinate of the entity's bounding box.
+    pub min_y: f64,
+    /// Minimum Z coordinate of the entity's bounding box.
+    pub min_z: f64,
+    /// Maximum X coordinate of the entity's bounding box.
+    pub max_x: f64,
+    /// Maximum Y coordinate of the entity's bounding box.
+    pub max_y: f64,
+    /// Maximum Z coordinate of the entity's bounding box.
+    pub max_z: f64,
+}
+
+impl EntityBounds {
+    /// Creates bounds after checking finite world-space coordinates and axis ordering.
+    pub fn new(
+        min_x: f64,
+        min_y: f64,
+        min_z: f64,
+        max_x: f64,
+        max_y: f64,
+        max_z: f64,
+    ) -> SjmlResult<Self> {
+        let bounds = Self {
+            min_x,
+            min_y,
+            min_z,
+            max_x,
+            max_y,
+            max_z,
+        };
+        bounds.validate()?;
+        Ok(bounds)
+    }
+
+    /// Validates finite bounded coordinates and `min <= max` on every axis.
+    pub fn validate(self) -> SjmlResult<()> {
+        if !bounded_bounds_coordinate(self.min_x)
+            || !bounded_bounds_coordinate(self.min_y)
+            || !bounded_bounds_coordinate(self.min_z)
+            || !bounded_bounds_coordinate(self.max_x)
+            || !bounded_bounds_coordinate(self.max_y)
+            || !bounded_bounds_coordinate(self.max_z)
+            || self.min_x > self.max_x
+            || self.min_y > self.max_y
+            || self.min_z > self.max_z
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity bounds must be finite, within ±30,000,064 blocks, and ordered min-to-max",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl StableDecode for EntityBounds {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_u32()?;
+        if schema != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported entity bounds schema",
+            ));
+        }
+        Self::new(
+            decoder.read_f64()?,
+            decoder.read_f64()?,
+            decoder.read_f64()?,
+            decoder.read_f64()?,
+            decoder.read_f64()?,
+            decoder.read_f64()?,
+        )
+    }
+}
+
+fn bounded_bounds_coordinate(value: f64) -> bool {
+    value.is_finite() && value.abs() <= MAX_ENTITY_BOUNDS_COORDINATE
 }
 
 /// Detached bounded identity and position of a loaded non-player living Mob target.
@@ -220,6 +318,16 @@ pub struct EntityVitals {
     pub max_health: f32,
     /// Current absorption health, independently bounded by the host response limit.
     pub absorption: f32,
+}
+
+/// Detached current and maximum air supply for one loaded living non-player entity.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityAirSupply {
+    /// Current air ticks. Vanilla may report a value down to -20 during drowning damage.
+    pub current: i32,
+    /// Current entity-specific maximum air supply.
+    pub max: u32,
 }
 
 /// Detached movement and visibility flags for one loaded non-player entity.
@@ -404,6 +512,28 @@ impl EntityVitals {
             return Err(SjmlError::new(
                 ErrorCode::InvalidArgument,
                 "host returned non-finite or out-of-range entity health values",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl EntityAirSupply {
+    /// Constructs a detached air-supply value after validating its bounded vanilla range.
+    pub fn new(current: i32, max: u32) -> SjmlResult<Self> {
+        let air_supply = Self { current, max };
+        air_supply.validate()?;
+        Ok(air_supply)
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if self.current < MIN_ENTITY_AIR_SUPPLY
+            || i64::from(self.current) > i64::from(self.max)
+            || self.max > MAX_ENTITY_AIR_SUPPLY
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned current air outside -20..=maximum or a maximum above 1,000,000",
             ));
         }
         Ok(())
@@ -617,6 +747,8 @@ extern "C" {
     fn imported_snapshot(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "state"]
     fn imported_state(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "bounds"]
+    fn imported_bounds(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "equipment"]
     fn imported_equipment(handle: i32, length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_equipment"]
@@ -683,6 +815,10 @@ extern "C" {
     fn imported_is_silent(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_silent"]
     fn imported_set_silent(handle: i32, handle_length: i32, silent: i32) -> i32;
+    #[link_name = "set_no_gravity"]
+    fn imported_set_no_gravity(handle: i32, handle_length: i32, no_gravity: i32) -> i32;
+    #[link_name = "set_invulnerable"]
+    fn imported_set_invulnerable(handle: i32, handle_length: i32, invulnerable: i32) -> i32;
     #[link_name = "custom_name"]
     fn imported_custom_name(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "set_custom_name"]
@@ -714,6 +850,10 @@ extern "C" {
     fn imported_rotation(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "vitals"]
     fn imported_vitals(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "air_supply"]
+    fn imported_air_supply(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_air_supply"]
+    fn imported_set_air_supply(handle: i32, handle_length: i32, ticks: i32) -> i32;
     #[link_name = "set_rotation"]
     fn imported_set_rotation(
         handle: i32,
@@ -1085,6 +1225,34 @@ pub fn state_snapshot(handle: EntityHandle) -> SjmlResult<EntityStateSnapshot> {
             // SAFETY: the encoded handle and destination stay live through this synchronous import.
             unsafe {
                 imported_state(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads the finite world-space AABB of one live, already-loaded non-player entity.
+///
+/// The module must request and receive `entity.read`. The host validates handle owner, generation,
+/// logical-server side, and server thread; it reads the entity only when its chunk is already
+/// loaded. This returns detached coordinates and never creates another entity handle.
+pub fn bounds(handle: EntityHandle) -> SjmlResult<EntityBounds> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output::<EntityBounds>(MAX_ENTITY_BOUNDS_RESPONSE_BYTES, |output, capacity| {
+            // SAFETY: the encoded handle and destination stay live through this synchronous import.
+            unsafe {
+                imported_bounds(
                     encoded.as_ptr() as usize as u32 as i32,
                     encoded.len() as i32,
                     output,
@@ -1554,6 +1722,73 @@ pub fn vitals(handle: EntityHandle) -> SjmlResult<EntityVitals> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads current and maximum air supply for one loaded living non-player entity.
+///
+/// The module must request `entity.read`. The current value may be as low as `-20` during
+/// vanilla's drowning damage window; the entity-specific maximum is bounded to `0..=1,000,000`.
+/// The host checks the live entity on the owning server thread and never loads chunks.
+pub fn air_supply(handle: EntityHandle) -> SjmlResult<EntityAirSupply> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        let air_supply = read_output::<EntityAirSupply>(
+            MAX_ENTITY_AIR_SUPPLY_RESPONSE_BYTES,
+            |output, capacity| {
+                // SAFETY: read_output owns the destination allocation for this synchronous import.
+                unsafe {
+                    imported_air_supply(
+                        encoded.as_ptr() as usize as u32 as i32,
+                        encoded.len() as i32,
+                        output,
+                        capacity,
+                    )
+                }
+            },
+        )?;
+        air_supply.validate()?;
+        Ok(air_supply)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets current air supply for one loaded living entity without changing its maximum.
+///
+/// Requires `entity.read` and [`AIR_SUPPLY_WRITE_CAPABILITY`]. The host rejects values above the
+/// entity's live maximum. `ticks` is nonnegative and bounded to `0..=1,000,000`; the target must be
+/// a live loaded non-player living entity on the owning server thread.
+pub fn set_air_supply(handle: EntityHandle, ticks: u32) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if ticks > MAX_ENTITY_AIR_SUPPLY {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "entity air-supply ticks must be within 0..=1,000,000",
+            ));
+        }
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: encoded is a live ABI handle for the synchronous imported call.
+        status_result(
+            unsafe {
+                imported_set_air_supply(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    ticks as i32,
+                )
+            },
+            "host rejected the entity air-supply change",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, ticks);
         Err(unsupported_target())
     }
 }
@@ -2078,6 +2313,59 @@ pub fn set_silent(handle: EntityHandle, silent: bool) -> SjmlResult<()> {
     }
 }
 
+/// Sets whether a loaded non-player entity ignores gravity.
+///
+/// The module must request and receive both `entity.read` and
+/// [`STATE_WRITE_CAPABILITY`]. Calls are synchronous on the owning logical-server thread and
+/// revalidate the module-owned live entity handle. This changes only Minecraft's no-gravity flag.
+pub fn set_no_gravity(handle: EntityHandle, no_gravity: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and boolean value remain live during the synchronous host call.
+        let status = unsafe {
+            imported_set_no_gravity(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                i32::from(no_gravity),
+            )
+        };
+        status_result(status, "host rejected the entity no-gravity flag mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, no_gravity);
+        Err(unsupported_target())
+    }
+}
+
+/// Sets whether a loaded non-player entity is invulnerable to ordinary Minecraft damage.
+///
+/// The module must request and receive both `entity.read` and
+/// [`INVULNERABILITY_WRITE_CAPABILITY`]. Calls are synchronous on the owning logical-server
+/// thread and revalidate the module-owned live entity handle. Minecraft's ordinary damage
+/// pipeline still decides which damage sources bypass invulnerability.
+pub fn set_invulnerable(handle: EntityHandle, invulnerable: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle and boolean value remain live during the synchronous host call.
+        let status = unsafe {
+            imported_set_invulnerable(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                i32::from(invulnerable),
+            )
+        };
+        status_result(status, "host rejected the entity invulnerability mutation")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, invulnerable);
+        Err(unsupported_target())
+    }
+}
+
 /// Reads a loaded non-player entity's custom name as plain text, if one exists.
 ///
 /// Requires `entity.read`. Rich styling on an existing vanilla name is
@@ -2434,28 +2722,141 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, apply_effect, clear_custom_name, clear_target, custom_name, damage,
-        fire_ticks, navigate_to, raycast, remove_effect, set_custom_name, set_fire_ticks,
-        set_target, set_velocity, target, target_snapshot, teleport, validate_active_effects,
-        validate_custom_name, validate_entity_raycast, validate_navigation_target,
-        validate_spatial_query, validate_teleport_target, within, ActiveEffect,
-        ActiveEffectsResponse, EntityCustomNameResponse, EntityNavigationRequest,
-        EntityNavigationResult, EntityRaycastQuery, EntityRaycastResult, EntityStateSnapshot,
-        EntityTargetResult, EntityTargetSnapshot, EntityTargetSnapshotResult,
-        EntityTeleportRequest, EntityVelocity, SpatialQuery, SpatialResults,
-        MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES,
-        MAX_ENTITY_CUSTOM_NAME_BYTES, MAX_ENTITY_CUSTOM_NAME_CODE_POINTS,
-        MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES, MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS,
-        MAX_ENTITY_NAVIGATION_RANGE, MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE,
-        MAX_ENTITY_STATE_RESPONSE_BYTES, MAX_ENTITY_TARGET_COORDINATE, MAX_ENTITY_TARGET_ID_BYTES,
-        MAX_ENTITY_TARGET_RANGE, MAX_ENTITY_TARGET_RESPONSE_BYTES,
-        MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES, MAX_ENTITY_TARGET_UUID_BYTES,
-        MAX_ENTITY_TELEPORT_COORDINATE, MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS,
-        MAX_SPATIAL_QUERY_RESULTS, NAVIGATION_WRITE_CAPABILITY,
+        active_effects, air_supply, apply_effect, clear_custom_name, clear_target, custom_name,
+        damage, fire_ticks, navigate_to, raycast, remove_effect, set_air_supply, set_custom_name,
+        set_fire_ticks, set_target, set_velocity, target, target_snapshot, teleport,
+        validate_active_effects, validate_custom_name, validate_entity_raycast,
+        validate_navigation_target, validate_spatial_query, validate_teleport_target, within,
+        ActiveEffect, ActiveEffectsResponse, EntityAirSupply, EntityBounds,
+        EntityCustomNameResponse, EntityNavigationRequest, EntityNavigationResult,
+        EntityRaycastQuery, EntityRaycastResult, EntityStateSnapshot, EntityTargetResult,
+        EntityTargetSnapshot, EntityTargetSnapshotResult, EntityTeleportRequest, EntityVelocity,
+        SpatialQuery, SpatialResults, MAX_ACTIVE_ENTITY_EFFECTS,
+        MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_AIR_SUPPLY,
+        MAX_ENTITY_AIR_SUPPLY_RESPONSE_BYTES, MAX_ENTITY_BOUNDS_COORDINATE,
+        MAX_ENTITY_BOUNDS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
+        MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
+        MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
+        MAX_ENTITY_NAVIGATION_SPEED, MAX_ENTITY_RAYCAST_DISTANCE, MAX_ENTITY_STATE_RESPONSE_BYTES,
+        MAX_ENTITY_TARGET_COORDINATE, MAX_ENTITY_TARGET_ID_BYTES, MAX_ENTITY_TARGET_RANGE,
+        MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES,
+        MAX_ENTITY_TARGET_UUID_BYTES, MAX_ENTITY_TELEPORT_COORDINATE,
+        MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
+        NAVIGATION_WRITE_CAPABILITY,
     };
     use crate::{
         inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
     };
+
+    #[test]
+    fn air_supply_response_matches_schema_and_rejects_out_of_range_values() {
+        let air_supply = EntityAirSupply::new(-20, 320).unwrap();
+        let encoded = to_bytes(&air_supply).unwrap();
+        assert_eq!(
+            encoded,
+            [
+                1_u32.to_le_bytes().as_slice(),
+                &(-20_i32).to_le_bytes(),
+                &320_u32.to_le_bytes(),
+            ]
+            .concat()
+        );
+        assert_eq!(encoded.len(), MAX_ENTITY_AIR_SUPPLY_RESPONSE_BYTES as usize);
+        assert_eq!(
+            crate::from_bytes::<EntityAirSupply>(&encoded).unwrap(),
+            air_supply
+        );
+        assert!(air_supply.validate().is_ok());
+
+        assert_eq!(
+            EntityAirSupply::new(-21, 320).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            EntityAirSupply::new(321, 320).unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            EntityAirSupply::new(0, MAX_ENTITY_AIR_SUPPLY + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let mut wrong_schema = encoded;
+        wrong_schema[..4].copy_from_slice(&2_u32.to_le_bytes());
+        assert_eq!(
+            crate::from_bytes::<EntityAirSupply>(&wrong_schema)
+                .unwrap_err()
+                .code(),
+            ErrorCode::IncompatibleAbiVersion
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn air_supply_host_calls_are_unavailable_on_native_targets() {
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            air_supply(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_air_supply(handle, 1).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
+    fn bounds_wire_schema_matches_host_field_order_and_validates_decoded_values() {
+        let bounds = EntityBounds::new(-1.25, 63.0, 2.5, 0.75, 65.0, 3.5).unwrap();
+        let encoded = to_bytes(&bounds).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        for coordinate in [-1.25_f64, 63.0, 2.5, 0.75, 65.0, 3.5] {
+            expected.extend_from_slice(&coordinate.to_le_bytes());
+        }
+        assert_eq!(encoded, expected);
+        assert_eq!(encoded.len(), MAX_ENTITY_BOUNDS_RESPONSE_BYTES as usize);
+        assert_eq!(crate::from_bytes::<EntityBounds>(&encoded).unwrap(), bounds);
+
+        let invalid = EntityBounds {
+            min_x: 2.0,
+            min_y: 0.0,
+            min_z: 0.0,
+            max_x: 1.0,
+            max_y: 1.0,
+            max_z: 1.0,
+        };
+        assert_eq!(
+            invalid.validate().unwrap_err().code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            EntityBounds::new(0.0, 0.0, 0.0, MAX_ENTITY_BOUNDS_COORDINATE + 1.0, 1.0, 1.0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let mut wrong_schema = encoded.clone();
+        wrong_schema[..4].copy_from_slice(&2_u32.to_le_bytes());
+        assert_eq!(
+            crate::from_bytes::<EntityBounds>(&wrong_schema)
+                .unwrap_err()
+                .code(),
+            ErrorCode::IncompatibleAbiVersion
+        );
+        let mut non_finite = encoded;
+        non_finite[4 + 3 * core::mem::size_of::<f64>()..4 + 4 * core::mem::size_of::<f64>()]
+            .copy_from_slice(&f64::INFINITY.to_le_bytes());
+        assert_eq!(
+            crate::from_bytes::<EntityBounds>(&non_finite)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+    }
 
     #[test]
     fn state_snapshot_wire_schema_matches_host_field_order() {
