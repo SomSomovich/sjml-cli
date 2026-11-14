@@ -11,6 +11,14 @@ struct EntityEquipmentArguments {
 fn reads_only_the_expected_loaded_mob_equipment(
     arguments: EntityEquipmentArguments,
 ) -> SjmlResult<String> {
+    if entity::loaded()?.into_iter().any(|handle| {
+        entity::snapshot(handle).is_ok_and(|snapshot| {
+            snapshot.uuid == arguments.entity_id && snapshot.entity_type_id == "minecraft:pig"
+        })
+    }) {
+        return super::entity_age::reads_and_changes_a_loaded_pig_age(&arguments.entity_id);
+    }
+
     let handle = entity::loaded()?
         .into_iter()
         .find(|handle| {

@@ -49,6 +49,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "block.grow_attempt"
             | "block.fertilize_attempt"
             | "block.farmland_trample_attempt"
+            | "block.fire_spread_attempt"
             | "block.fluid_place_attempt"
             | "player.attack_attempt"
             | "player.experience_change_attempt"
@@ -316,6 +317,23 @@ mod tests {
     }
 
     #[test]
+    fn accepts_non_cancellable_player_enchanting_notifications() {
+        let generated = expand_event_async(
+            quote!(name = "player.enchanted"),
+            quote! {
+                async fn on_enchanted(event: PlayerEnchanted) -> SjmlResult<()> {
+                    let _item = event.item_id;
+                    Ok(())
+                }
+            },
+        )
+        .to_string();
+
+        assert!(generated.contains("sjml_v1_event_player.enchanted"));
+        assert!(generated.contains("task :: spawn"));
+    }
+
+    #[test]
     fn requires_async_unit_result_and_one_typed_argument() {
         diagnostic(
             expand_event_async(
@@ -481,6 +499,13 @@ mod tests {
                 quote! { async fn trample_attempt(_: BlockFarmlandTrampleAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "block.farmland_trample_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "block.fire_spread_attempt"),
+                quote! { async fn fire_spread_attempt(_: BlockFireSpreadAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.fire_spread_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

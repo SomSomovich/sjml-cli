@@ -34,3 +34,22 @@ Particle types are bounded by the same per-module and total content-registration
 quotas as other static content. Invalid texture ownership, path, or scale values
 reject the declaration before it is staged. Package rollback removes the type,
 sprite, and scale together.
+
+## Emitting particle batches
+
+`world::spawn_particle` remains the one-particle convenience call. For a small
+burst, use `world::spawn_particles` with `ParticleSpawnOptions`:
+
+```rust
+let options = world::ParticleSpawnOptions::new(32, 0.25, 0.5, 0.25, 0.2)?;
+world::spawn_particles(world, position, "single_demo:ruby_spark", options)?;
+```
+
+The position is the center of the supplied block. The host emits 1–64 simple
+particles per call, with per-axis random offset spread up to 8 blocks and random
+speed up to 8. A module can emit at most 256 particles per logical-server tick
+across all loaded dimensions. The type must already exist in the server's
+particle registry; custom SJML particles are created during `mod_register`.
+Emission still requires `world.read` and `world.write`, a loaded target chunk,
+and an in-height position. `spawn_particle` uses single-count, zero-spread
+options and keeps its existing Rust signature.

@@ -60,6 +60,30 @@ pub const PLAYER_STATISTIC_CHANGED_EVENT_NAME: &str = "player.statistic_changed"
 pub const MAX_PLAYER_STATISTIC_ID_BYTES: usize = 256;
 /// Maximum schema-v1 payload bytes for a detached player statistic change event.
 pub const MAX_PLAYER_STATISTIC_CHANGED_PAYLOAD_BYTES: usize = 572;
+/// Separate grant required to observe players enchanting items through the vanilla enchanting menu.
+pub const PLAYER_ENCHANTMENTS_OBSERVE_CAPABILITY: &str = "player.enchantments.observe";
+/// Event name for a successful server-side enchanting-menu operation.
+pub const PLAYER_ENCHANTED_EVENT_NAME: &str = "player.enchanted";
+/// Maximum callbacks invoked for one player enchanting operation.
+pub const MAX_PLAYER_ENCHANTED_CALLBACKS: usize = 64;
+/// Maximum enchantment ID or item ID bytes in a detached player enchanting event.
+pub const MAX_PLAYER_ENCHANTED_ID_BYTES: usize = 256;
+/// Maximum enchantments included in one player enchanting event.
+pub const MAX_PLAYER_ENCHANTED_ENCHANTMENTS: usize = 32;
+/// Maximum item count or durability value in a player enchanting event.
+pub const MAX_PLAYER_ENCHANTED_ITEM_VALUE: u32 = 1_000_000;
+/// Maximum applied level of one enchantment in a player enchanting event.
+pub const MAX_PLAYER_ENCHANTED_LEVEL: u32 = 255;
+/// Maximum schema-v1 payload bytes for one player enchanting event.
+pub const MAX_PLAYER_ENCHANTED_PAYLOAD_BYTES: usize = 16 * 1024;
+/// Maximum `FireBlock` age represented by a `block.fire_spread_attempt` event.
+pub const MAX_BLOCK_FIRE_SPREAD_ATTEMPT_AGE: u32 = 15;
+/// Maximum callbacks invoked for one logical-server fire spread attempt.
+pub const MAX_BLOCK_FIRE_SPREAD_ATTEMPT_CALLBACKS: usize = 64;
+/// Maximum fire-spread guest callbacks across one logical-server tick.
+pub const MAX_BLOCK_FIRE_SPREAD_ATTEMPT_CALLBACKS_PER_SERVER_TICK: usize = 512;
+/// Event name for a fire tick trying to spread/replace fire into a target position.
+pub const BLOCK_FIRE_SPREAD_ATTEMPT_EVENT_NAME: &str = "block.fire_spread_attempt";
 /// Maximum count represented by one detached `player.equipment_changed` item snapshot.
 pub const MAX_PLAYER_EQUIPMENT_ITEM_COUNT: u32 = 1_000_000;
 /// Maximum callbacks invoked for one physical-client action attempt.
@@ -434,6 +458,130 @@ fn validate_player_statistic_changed(event: &PlayerStatisticChanged) -> SjmlResu
             ErrorCode::PayloadTooLarge,
             "player statistic registry ID exceeds the 256-byte limit",
         ));
+    }
+    Ok(())
+}
+
+/// Non-cancellable notification for enchantments applied through Minecraft's enchanting menu.
+///
+/// This observes NeoForge's `PlayerEnchantItemEvent`, which fires on the logical server after the
+/// item has been enchanted. It does not observe arbitrary item-component/NBT changes, anvil
+/// operations, loot generation, or plugin/mod code that edits stacks through another path.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerEnchanted {
+    /// Canonical UUID string of the player who used the enchanting menu.
+    pub player_id: String,
+    /// Canonical registry ID of the enchanted item after the operation.
+    pub item_id: String,
+    /// Item count after the operation.
+    pub count: u32,
+    /// Current durability damage after the operation; zero for nondamageable items.
+    pub damage: u32,
+    /// Maximum durability damage; zero for nondamageable items.
+    pub max_damage: u32,
+    /// Registry IDs and levels applied by this enchanting-menu operation.
+    pub enchantments: Vec<PlayerEnchantedEnchantment>,
+}
+
+/// One registry ID and level applied by a successful enchanting-menu operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerEnchantedEnchantment {
+    /// Canonical enchantment registry ID.
+    pub id: String,
+    /// Applied level, between 1 and 255.
+    pub level: u32,
+}
+
+impl StableEncode for PlayerEnchanted {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        validate_player_enchanted(self)?;
+        encoder.write_u32(1)?;
+        encode_bounded_event_string(&self.player_id, encoder)?;
+        encode_bounded_event_string(&self.item_id, encoder)?;
+        encoder.write_u32(self.count)?;
+        encoder.write_u32(self.damage)?;
+        encoder.write_u32(self.max_damage)?;
+        encoder.write_length(self.enchantments.len())?;
+        for enchantment in &self.enchantments {
+            encode_bounded_event_string(&enchantment.id, encoder)?;
+            encoder.write_u32(enchantment.level)?;
+        }
+        Ok(())
+    }
+}
+
+impl StableDecode for PlayerEnchanted {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let version = decoder.read_u32()?;
+        if version != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                format!("PlayerEnchanted schema version {version} is unsupported"),
+            ));
+        }
+        let event = Self {
+            player_id: decode_bounded_event_string(decoder)?,
+            item_id: decode_bounded_event_string(decoder)?,
+            count: decoder.read_u32()?,
+            damage: decoder.read_u32()?,
+            max_damage: decoder.read_u32()?,
+            enchantments: {
+                let count = decoder.read_length(MAX_PLAYER_ENCHANTED_ENCHANTMENTS)?;
+                let mut enchantments = Vec::with_capacity(count);
+                for _ in 0..count {
+                    enchantments.push(PlayerEnchantedEnchantment {
+                        id: decode_bounded_event_string(decoder)?,
+                        level: decoder.read_u32()?,
+                    });
+                }
+                enchantments
+            },
+        };
+        validate_player_enchanted(&event)?;
+        Ok(event)
+    }
+}
+
+fn validate_player_enchanted(event: &PlayerEnchanted) -> SjmlResult<()> {
+    let invalid = || {
+        SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "player.enchanted contains an invalid identity, stack, or applied enchantment",
+        )
+    };
+    if !canonical_uuid(&event.player_id)
+        || !canonical_resource_location(&event.item_id)
+        || event.count == 0
+        || event.count > MAX_PLAYER_ENCHANTED_ITEM_VALUE
+        || event.damage > event.max_damage
+        || event.max_damage > MAX_PLAYER_ENCHANTED_ITEM_VALUE
+        || event.enchantments.is_empty()
+        || event.enchantments.len() > MAX_PLAYER_ENCHANTED_ENCHANTMENTS
+    {
+        return Err(invalid());
+    }
+    if event.item_id.len() > MAX_PLAYER_ENCHANTED_ID_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "player.enchanted item ID exceeds the 256-byte limit",
+        ));
+    }
+    for (index, enchantment) in event.enchantments.iter().enumerate() {
+        if !canonical_resource_location(&enchantment.id)
+            || enchantment.level == 0
+            || enchantment.level > MAX_PLAYER_ENCHANTED_LEVEL
+            || event.enchantments[..index]
+                .iter()
+                .any(|previous| previous.id == enchantment.id)
+        {
+            return Err(invalid());
+        }
+        if enchantment.id.len() > MAX_PLAYER_ENCHANTED_ID_BYTES {
+            return Err(SjmlError::new(
+                ErrorCode::PayloadTooLarge,
+                "player.enchanted enchantment ID exceeds the 256-byte limit",
+            ));
+        }
     }
     Ok(())
 }
@@ -2228,6 +2376,60 @@ pub struct BlockFarmlandTrampleAttempt {
     pub fall_distance: f32,
 }
 
+/// Why vanilla attempted the fire placement represented by `block.fire_spread_attempt`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum BlockFireSpreadCause {
+    /// A random FireBlock tick attempted to ignite an empty position.
+    RandomSpread,
+    /// A flammable block caught fire and vanilla attempted to replace it with fire.
+    BurnoutReplacement,
+}
+
+impl StableEncode for BlockFireSpreadCause {
+    fn encode(&self, encoder: &mut Encoder) -> SjmlResult<()> {
+        encoder.write_u32(match self {
+            Self::RandomSpread => 0,
+            Self::BurnoutReplacement => 1,
+        })
+    }
+}
+
+impl StableDecode for BlockFireSpreadCause {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        match decoder.read_u32()? {
+            0 => Ok(Self::RandomSpread),
+            1 => Ok(Self::BurnoutReplacement),
+            value => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                format!("fire spread cause code {value} is not supported"),
+            )),
+        }
+    }
+}
+
+/// Synchronous cancellable attempt to place fire from a logical-server fire tick.
+///
+/// Return `Ok(true)` from a `block.fire_spread_attempt` handler to prevent this particular fire
+/// block write. Random spread reports an empty-position ignition attempt. A burnout replacement is
+/// captured after the caught block's `onCaughtFire` side effects have already run, so vetoing it
+/// prevents only replacement with fire. Flint-and-steel, lightning, and other non-tick placement
+/// paths are not reported. The snapshot contains only detached dimension and position values, fire
+/// age (`0..=15`), and a typed cause. Both `events.subscribe` and `events.cancel` are required.
+#[derive(Debug, Clone, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockFireSpreadAttempt {
+    /// Resource location of the dimension containing the fire.
+    pub dimension_id: String,
+    /// Position of the FireBlock whose scheduled tick attempted to spread.
+    pub source_position: BlockPos,
+    /// Position where vanilla is about to place fire.
+    pub target_position: BlockPos,
+    /// Whether this is random spread or a burnout replacement.
+    pub cause: BlockFireSpreadCause,
+    /// Age of the source fire block, bounded to `0..=15` by the host.
+    pub fire_age: u32,
+}
+
 /// Synchronous cancellable attempt by a fluid to place or replace a block on the logical server.
 ///
 /// Return `Ok(true)` from a `block.fluid_place_attempt` handler to cancel this one placement.
@@ -3794,6 +3996,51 @@ mod tests {
             from_bytes::<BlockFarmlandTrampleAttempt>(&encoded).unwrap(),
             event
         );
+    }
+
+    #[test]
+    fn block_fire_spread_attempt_matches_host_schema_v1_bytes_for_each_cause() {
+        use super::{BlockFireSpreadAttempt, BlockFireSpreadCause};
+
+        for (cause, code) in [
+            (BlockFireSpreadCause::RandomSpread, 0_u32),
+            (BlockFireSpreadCause::BurnoutReplacement, 1_u32),
+        ] {
+            let event = BlockFireSpreadAttempt {
+                dimension_id: "minecraft:overworld".to_owned(),
+                source_position: BlockPos {
+                    x: -4,
+                    y: 72,
+                    z: 19,
+                },
+                target_position: BlockPos {
+                    x: -3,
+                    y: 73,
+                    z: 20,
+                },
+                cause,
+                fire_age: 15,
+            };
+            let encoded = to_bytes(&event).unwrap();
+            let mut expected = 1_i32.to_le_bytes().to_vec();
+            append_test_string(&mut expected, &event.dimension_id);
+            for position in [event.source_position, event.target_position] {
+                expected.extend_from_slice(&1_i32.to_le_bytes());
+                expected.extend_from_slice(&position.x.to_le_bytes());
+                expected.extend_from_slice(&position.y.to_le_bytes());
+                expected.extend_from_slice(&position.z.to_le_bytes());
+            }
+            expected.extend_from_slice(&code.to_le_bytes());
+            expected.extend_from_slice(&event.fire_age.to_le_bytes());
+            assert_eq!(
+                encoded, expected,
+                "Rust bytes must match host schema-v1 bytes"
+            );
+            assert_eq!(
+                from_bytes::<BlockFireSpreadAttempt>(&encoded).unwrap(),
+                event
+            );
+        }
     }
 
     #[test]

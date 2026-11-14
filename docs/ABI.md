@@ -1,12 +1,24 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.95.0**. This version adds exact-state block piston/fire behavior; a safe `suppress_drops` block-update option; registered-item repair tags and per-stack player-inventory glint writes; bounded loaded-Mob equipment and drop-chance APIs; detached entity head-yaw access; raw physical-client cursor motion; and observational client sound-start events. Existing ABI 1.94.0 contracts remain supported.
+The current ABI is **1.96.0**. This version adds ageable-Mob age reads/writes, bounded runtime villager-offer creation/removal, fluid-type properties, placed ore world-generation features, bounded batch particle spawning, Arrow and Spectral Arrow spawning, post-application enchantment events, random fire-spread attempt events, and package-owned client asset discovery. Existing ABI 1.95.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.96.0 adds `entity::age` snapshots and guarded age writes for loaded
+ageable Mobs; module-owned runtime villager-offer insertion/removal; bounded
+fluid density, temperature, viscosity, and light-level registration; bounded
+placed ore features with biome modifiers; `world::spawn_particles` with
+per-call and per-tick limits; vanilla Arrow and Spectral Arrow spawning;
+observation-only `player.enchanted`; cancellable `block.fire_spread_attempt`;
+and bounded path discovery for the current package's client assets. Server
+imports remain logical-server only, client asset discovery remains on the
+physical client, and all registration/mutation paths validate their phase,
+side, ownership, capability, and quotas. The focused guides define each
+contract and its limits.
 
 ABI 1.93.0 introduced loaded-only block-collision-box and fluid-flow snapshots, bounded world-space bounds for loaded non-player entities, player movement and air-supply snapshots, guarded player/entity air-supply writes and player fall-distance reset, explicit no-gravity and invulnerability setters for loaded non-player entities, and static registered-item fire-resistance and no-repair properties. ABI 1.92.0 adds loaded-only biome-climate and block-destroy-speed queries, a detached seven-flag snapshot for loaded non-player entities, and synchronous logical-server `player.break_speed` callbacks that can pass, cancel, or request a bounded replacement. Vanilla signs expose bounded literal text reads and writes for both faces; writes reject waxed signs and preserve dye and glow settings. Registered items can declare a default foil/glint override, while exact block states can declare static weak, direct, and comparator signals in the block-behavior schema v3. Exact-type `LookAtEntityType` adds one bounded vanilla goal to registered mobs. Client screens and forms can include up to four passive progress bars in schema v8; existing versions remain accepted, and owner-scoped screen updates keep using schema v7. Active screens gain an opt-in mouse-drag callback on the client main thread. Loaded-only world queries never load chunks; sign access checks side, thread, permissions, and write limits; registration APIs enforce phase and ownership. ABI 1.91.0 adds four vertical contracts: `player.item_broken` is a schema-v1 observational server event carrying canonical player, dimension, item, and hand identifiers; `set_item_use_behavior` declares a bounded vanilla use animation and duration for an owned registered item; module-owned bounded finite-f32 data components can be declared and set as item defaults, then read or changed on existing loaded block/player inventory stacks; and schema-v7 client-screen updates replace the full definition of the active screen only when its owner and stable ID match. Each host boundary checks registration phase or live inventory ownership, bounds, permissions, side, and thread. ABI 1.90.0 adds the non-cancellable server `world.tick` event after each logical-server level tick, carrying dimension ID, game time, and day time. Its schema-v1 payload is a length-prefixed canonical dimension ID followed by a non-negative little-endian 64-bit game-time value and a signed little-endian 64-bit day-time value; subscriptions support a bounded interval from 1 to 1,200 ticks. ABI 1.89.0 adds `register_entity_ai_goal_v3`, a static registration import for exact-type avoid/target goals on declared SJML mobs. It carries a canonical fully qualified entity type ID and keeps target selection within living entity types. Existing v1 and v2 entity-goal imports remain unchanged. ABI 1.88.0 adds synchronous cancellable logical-server `entity.drops_attempt`, which can veto the bounded item-drop list from a living entity's death without preventing the death. ABI 1.87.0 adds synchronous cancellable logical-server `entity.mount_attempt`, which can veto an entity mount or dismount before Minecraft changes the riding relationship. ABI 1.86.0 adds synchronous cancellable logical-server `block.farmland_trample_attempt` and `entity.fall_attempt` events. A true farmland-trample result preserves the block; a true fall result prevents fall damage from being applied. ABI 1.85.0 adds synchronous cancellable logical-server `player.totem_use_attempt`, `entity.shield_block_attempt`, and `entity.teleport_attempt` callbacks. The shield callback runs only for vanilla-eligible shield blocks and a veto lets damage continue; the totem callback can veto the saving effect; the teleport callback captures server `EntityTeleportEvent` subclasses without loading destination chunks. All require synchronous guest callbacks and `events.subscribe` plus `events.cancel`, with bounded detached payloads. ABI 1.84.0 adds bounded multi-box registered-block shapes formed from 1–8 normalized AABBs; detached `entity::target_snapshot` results while preserving the legacy `entity::target` handle API; synchronous cancellable `player.potion_use_attempt` events; and opt-in veto of mouse releases delivered to an active screen. Bounds, callback counts, ownership, registration phase, live-world access, side/thread, and capabilities remain enforced; global mouse releases remain observational. ABI 1.83.0 adds bounded count and durability writes for existing block-inventory stacks, count changes and atomic slot-to-slot moves for player inventories, loaded-only non-player entity teleportation, entity custom-name visibility control, and static vanilla spawn eggs for registered mobs. It adds the synchronous `block.drops_attempt` event, mutable/cancellable player XP-point and level-change events, and bounded rich unsigned system-chat components with safe hover and click actions. ABI 1.82.0 added bounded enchantment read/set/remove imports for existing stacks in loaded block inventories, owner-routed synchronous `item.attack_attempt` veto callbacks for registered main-hand items, and a versioned villager-trade registration import that carries bounded initial demand. Entity-scope storage now rejects nonexistent, removed, or unloaded entities with `STALE_HANDLE` without loading chunks. ABI 1.80.0 adds per-state friction for registered blocks, loaded-only fluid-tick scheduling, and sampled physical-client cursor-movement callbacks. ABI 1.79.0 adds player criterion-progress notifications, safe loaded-world game-event dispatch, and a dedicated glowing-write capability. A host supports
 a requested ABI when the major versions match and the host version is greater
@@ -409,6 +421,20 @@ observation-only: the callback cannot cancel or modify progress. Subscription
 requires both `events.subscribe` and the separate `player.advancement.observe`
 grant. The callback may use `#[event_async]` because it is non-cancellable.
 
+The non-cancellable `sjml_v1_event_player.enchanted` callback receives schema-v1
+`PlayerEnchanted`: little-endian `u32(1)`, length-prefixed UTF-8 `player_id`
+(canonical UUID) and `item_id` (canonical resource location), little-endian
+`u32` item count, current damage, max damage, and enchantment count, followed by
+that many length-prefixed canonical enchantment IDs and little-endian `u32`
+levels. IDs are limited to 256 bytes, the list to 32 entries, count and damage
+values to 1,000,000, and levels to `1..=255`; the payload is limited to 16 KiB.
+NeoForge 21.1.265 fires this notification on the logical server after
+`IItemExtension.applyEnchantments` through its `PlayerEnchantItemEvent`. It
+covers the enchanting-menu operation only, not arbitrary ItemStack/NBT writes,
+anvils, or loot generation. Subscription requires `events.subscribe` and the
+separate `player.enchantments.observe` grant. The callback may use
+`#[event_async]` because it is non-cancellable.
+
 The synchronous cancellable `sjml_v1_event_world.explosion_attempt` callback
 receives schema-v1 `ExplosionAttempt`: little-endian `u32(1)`, a
 length-prefixed `dimension_id`, optional `source_entity_id` and
@@ -759,12 +785,12 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 `.`, `_`, or `-`, and starts with a letter or digit. The accepted event names
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`, `player.advancement_earned`,
-`player.advancement_progress`,
+`player.advancement_progress`, `player.enchanted`,
 `player.sleep_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
-`block.break_attempt`, `block.place`, `block.place_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.farmland_trample_attempt`, `block.fluid_place_attempt`, `player.interacted`,
+`block.break_attempt`, `block.place`, `block.place_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.farmland_trample_attempt`, `block.fire_spread_attempt`, `block.fluid_place_attempt`, `player.interacted`,
 `player.interaction`, `player.drop_attempt`, `player.item_pickup_attempt`, `entity.damaged`, `world.loaded`,
 `world.unloaded`, `world.tick`, `world.explosion_attempt`, `server.tick`,
 `inventory.changed`, `player.item_broken`, `resources.reloaded`, `menu.action`, `player.tick`,
@@ -779,7 +805,7 @@ Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.fall_attempt`, `entity.mount_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
-`entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.farmland_trample_attempt`,
+`entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.farmland_trample_attempt`, `block.fire_spread_attempt`,
 `block.fluid_place_attempt`, `player.fished_attempt`, `player.attack_attempt`, or `world.explosion_attempt` additionally
 requires the module to request and receive the separate `events.cancel`
 capability. Static registration instances cannot subscribe. Server event
@@ -3222,6 +3248,10 @@ and owner-scoped; canceled events are not dispatched.
 ## Farmland trampling attempt
 
 The synchronous cancellable `sjml_v1_event_block.farmland_trample_attempt` callback requires both `events.subscribe` and `events.cancel`. Its bounded schema-v1 `BlockFarmlandTrampleAttempt` snapshot carries only detached dimension/block/entity IDs, a `BlockPos`, and fall distance. A true result cancels NeoForge's `FarmlandTrampleEvent`, preventing farmland degradation for that landing; false preserves the current result. The event runs on the logical-server owner thread and cannot use `#[event_async]`. See [farmland trampling attempts](BLOCK_FARMLAND_TRAMPLE_ATTEMPT.md).
+
+## Fire spread attempt
+
+The synchronous cancellable `sjml_v1_event_block.fire_spread_attempt` callback requires `events.subscribe` and `events.cancel`. Its schema-v1 `BlockFireSpreadAttempt` payload is little-endian `u32(1)`, a length-prefixed canonical dimension ID, nested schema-v1 source and target `BlockPos` values, a little-endian `u32` cause (`0` random spread, `1` burnout replacement), then a little-endian `u32` fire age in `0..=15`. IDs are limited to 256 UTF-8 bytes and the complete payload is capped at 1 KiB. The event covers only fire placements from the vanilla logical-server `FireBlock.tick` path; it does not report flint-and-steel, lightning, or other direct ignition. A true result cancels only that fire-state placement. For burnout replacement, vanilla's `onCaughtFire` side effects have already run, so the callback prevents the replacement with fire only. The host runs at most 64 callbacks per attempt and 512 across a logical-server tick, on the owner thread without loading chunks; asynchronous handlers are rejected.
 
 ## Living-entity fall attempt
 

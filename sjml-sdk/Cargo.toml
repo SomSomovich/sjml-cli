@@ -101,5 +101,9 @@ crate-type = ["cdylib"]
 name = "player_statistic_changed"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "client_asset_discovery"
+crate-type = ["cdylib"]
+
 [dependencies]
 sjml-macros.workspace = true

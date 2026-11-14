@@ -34,6 +34,8 @@ mod block_state_light;
 mod block_tick;
 #[path = "gametest/block_use.rs"]
 mod block_use;
+#[path = "gametest/entity_age.rs"]
+mod entity_age;
 #[path = "gametest/entity_ai_control.rs"]
 mod entity_ai_control;
 #[path = "gametest/entity_attribute_modifiers.rs"]
@@ -568,7 +570,15 @@ fn register_test_content() -> SjmlResult<()> {
             speed: 0.5,
         },
     )?;
-    registry::register_fluid("gametest_fluid", FluidDefinition::default())?;
+    registry::register_fluid_with_type_properties(
+        "gametest_fluid",
+        FluidDefinition::default(),
+        FluidTypeProperties::new()
+            .density(420)?
+            .temperature(800)?
+            .viscosity(1_300)?
+            .light_level(7)?,
+    )?;
     registry::register_particle("gametest_particle")?;
     registry::register_sound("gametest_sound")?;
     registry::register_attribute_effect(
@@ -1940,10 +1950,12 @@ fn spawn_test_projectile(arguments: ProjectileSpawnArguments) -> SjmlResult<Stri
     let projectile = match arguments.kind.as_str() {
         "snowball" => VanillaProjectileKind::Snowball,
         "egg" => VanillaProjectileKind::Egg,
+        "arrow" => VanillaProjectileKind::Arrow,
+        "spectral_arrow" => VanillaProjectileKind::SpectralArrow,
         _ => {
             return Err(SjmlError::new(
                 ErrorCode::InvalidArgument,
-                "projectile kind must be snowball or egg",
+                "projectile kind must be snowball, egg, arrow, or spectral_arrow",
             ));
         }
     };

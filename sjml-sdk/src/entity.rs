@@ -79,6 +79,14 @@ pub const AIR_SUPPLY_WRITE_CAPABILITY: &str = "entity.air.write";
 pub const PERSISTENCE_WRITE_CAPABILITY: &str = "entity.persistence.write";
 /// Capability required with `entity.read` to change a loaded Mob's item-pickup flag.
 pub const LOOT_PICKUP_WRITE_CAPABILITY: &str = "entity.loot_pickup.write";
+/// Capability required with `entity.read` to set the age of a loaded vanilla AgeableMob.
+pub const AGE_WRITE_CAPABILITY: &str = "entity.age.write";
+/// The youngest age in ticks accepted by the bounded ageable-entity API.
+pub const MIN_ENTITY_AGE_TICKS: i32 = -24_000;
+/// The greatest positive age in ticks accepted by the bounded ageable-entity API.
+pub const MAX_ENTITY_AGE_TICKS: i32 = 24_000;
+/// Exact schema-v1 response size for an age or baby-state read.
+pub const MAX_ENTITY_AGE_RESPONSE_BYTES: u32 = 8;
 /// Maximum active fire duration that an entity fire-tick API call accepts or returns.
 pub const MAX_ENTITY_FIRE_TICKS: u32 = 72_000;
 /// Capability required, together with `entity.read`, to read or control a loaded Mob's AI state.
@@ -154,6 +162,22 @@ pub const MAX_VILLAGER_TRADE_RESPONSE_BYTES: usize = 8 + MAX_VILLAGER_TRADE_OFFE
         + (4 + MAX_VILLAGER_TRADE_ID_BYTES + 4)
         + (4 + MAX_VILLAGER_TRADE_ID_BYTES + 4)
         + 4 * 4);
+/// Maximum number of runtime offers one module may add to one loaded merchant.
+pub const MAX_VILLAGER_RUNTIME_OFFERS_PER_MERCHANT: usize = 32;
+/// Maximum number of runtime offers a module may keep live across all loaded merchants.
+pub const MAX_VILLAGER_RUNTIME_OFFERS_PER_MODULE: usize = 256;
+/// Maximum UTF-8 byte length of a module-relative runtime offer path.
+pub const MAX_VILLAGER_RUNTIME_OFFER_PATH_BYTES: usize = 128;
+/// Maximum item count in a newly created runtime offer stack before item-specific stack-limit checks.
+pub const MAX_VILLAGER_RUNTIME_OFFER_ITEM_COUNT: u32 = 64;
+/// Maximum experience reward configured for a newly created runtime offer.
+pub const MAX_VILLAGER_RUNTIME_OFFER_XP: u32 = 1_000;
+/// Maximum price multiplier configured for a newly created runtime offer.
+pub const MAX_VILLAGER_RUNTIME_OFFER_PRICE_MULTIPLIER: f32 = 1.0;
+/// Maximum absolute initial demand configured for a newly created runtime offer.
+pub const MAX_VILLAGER_RUNTIME_OFFER_DEMAND: i32 = 1_000;
+/// Maximum encoded bytes for one schema-v1 runtime offer creation request.
+pub const MAX_VILLAGER_RUNTIME_OFFER_REQUEST_BYTES: usize = 945;
 /// Capability required with `entity.read` to mutate a registered offer on a loaded villager.
 pub const VILLAGER_TRADE_WRITE_CAPABILITY: &str = "villager.trade.write";
 
@@ -211,6 +235,77 @@ pub struct VillagerOffer {
     pub demand: i32,
     /// Current `specialPriceDiff` value.
     pub special_price: i32,
+}
+
+/// Bounded definition for adding a module-owned offer to one currently loaded merchant.
+///
+/// The host creates fresh vanilla `ItemCost`, `ItemStack`, and `MerchantOffer` values using only
+/// canonical live registry IDs. No arbitrary item components are accepted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VillagerTradeOfferDefinition {
+    /// Base first cost.
+    pub cost_a: VillagerOfferItem,
+    /// Optional second cost.
+    pub cost_b: Option<VillagerOfferItem>,
+    /// Result item and count.
+    pub result: VillagerOfferItem,
+    /// Maximum number of completed trades before the offer is out of stock.
+    pub max_uses: u32,
+    /// Experience awarded to the villager when the offer is used.
+    pub xp_reward: u32,
+    /// Bounded vanilla price modifier coefficient.
+    pub price_multiplier: f32,
+    /// Initial vanilla demand value.
+    pub initial_demand: i32,
+}
+
+impl VillagerTradeOfferDefinition {
+    /// Creates a single-cost offer with conservative vanilla defaults.
+    pub fn new(
+        cost_a: VillagerOfferItem,
+        result: VillagerOfferItem,
+        max_uses: u32,
+    ) -> SjmlResult<Self> {
+        let definition = Self {
+            cost_a,
+            cost_b: None,
+            result,
+            max_uses,
+            xp_reward: 0,
+            price_multiplier: 0.05,
+            initial_demand: 0,
+        };
+        validate_runtime_villager_offer_definition(&definition)?;
+        Ok(definition)
+    }
+
+    /// Adds an optional second input cost.
+    pub fn with_second_cost(mut self, cost: VillagerOfferItem) -> SjmlResult<Self> {
+        validate_runtime_villager_offer_item(&cost)?;
+        self.cost_b = Some(cost);
+        Ok(self)
+    }
+
+    /// Sets the villager experience reward.
+    pub fn with_xp_reward(mut self, xp_reward: u32) -> SjmlResult<Self> {
+        self.xp_reward = xp_reward;
+        validate_runtime_villager_offer_definition(&self)?;
+        Ok(self)
+    }
+
+    /// Sets the vanilla price multiplier in `0.0..=1.0`.
+    pub fn with_price_multiplier(mut self, price_multiplier: f32) -> SjmlResult<Self> {
+        self.price_multiplier = price_multiplier;
+        validate_runtime_villager_offer_definition(&self)?;
+        Ok(self)
+    }
+
+    /// Sets initial demand in `-1,000..=1,000`.
+    pub fn with_initial_demand(mut self, demand: i32) -> SjmlResult<Self> {
+        self.initial_demand = demand;
+        validate_runtime_villager_offer_definition(&self)?;
+        Ok(self)
+    }
 }
 
 /// Detached world-space axis-aligned bounds for one live loaded non-player entity.
@@ -831,6 +926,51 @@ impl StableDecode for ActiveEffectsResponse {
 
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug)]
+struct AgeTicksResponse(i32);
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for AgeTicksResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_i32()?;
+        if schema != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported AgeableMob age response schema",
+            ));
+        }
+        let age_ticks = decoder.read_i32()?;
+        validate_age_ticks(age_ticks)?;
+        Ok(Self(age_ticks))
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
+struct BabyStateResponse(bool);
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl StableDecode for BabyStateResponse {
+    fn decode(decoder: &mut Decoder<'_>) -> SjmlResult<Self> {
+        let schema = decoder.read_i32()?;
+        if schema != 1 {
+            return Err(SjmlError::new(
+                ErrorCode::IncompatibleAbiVersion,
+                "unsupported AgeableMob baby-state response schema",
+            ));
+        }
+        match decoder.read_i32()? {
+            0 => Ok(Self(false)),
+            1 => Ok(Self(true)),
+            _ => Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "host returned an invalid AgeableMob baby-state flag",
+            )),
+        }
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug)]
 struct VillagerOffersResponse {
     offers: Vec<VillagerOffer>,
 }
@@ -971,6 +1111,107 @@ fn validate_villager_trade_offers(offers: &[VillagerOffer]) -> SjmlResult<()> {
         }
     }
     Ok(())
+}
+
+fn validate_runtime_villager_offer_path(path: &str) -> SjmlResult<()> {
+    if path.is_empty()
+        || path.len() > MAX_VILLAGER_RUNTIME_OFFER_PATH_BYTES
+        || !path.is_ascii()
+        || path.starts_with('/')
+        || path.ends_with('/')
+        || path.contains("//")
+        || path.split('/').count() > 8
+        || path.split('/').any(|segment| {
+            segment.is_empty()
+                || segment == "."
+                || segment == ".."
+                || !segment.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
+                })
+        })
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "runtime villager offer ID must be a bounded module-relative path",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_runtime_villager_offer_item(item: &VillagerOfferItem) -> SjmlResult<()> {
+    if !is_canonical_villager_resource_id(&item.item_id)
+        || item.count == 0
+        || item.count > MAX_VILLAGER_RUNTIME_OFFER_ITEM_COUNT
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "runtime villager offer item ID or count is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_runtime_villager_offer_definition(
+    definition: &VillagerTradeOfferDefinition,
+) -> SjmlResult<()> {
+    validate_runtime_villager_offer_item(&definition.cost_a)?;
+    if let Some(cost_b) = &definition.cost_b {
+        validate_runtime_villager_offer_item(cost_b)?;
+    }
+    validate_runtime_villager_offer_item(&definition.result)?;
+    if definition.max_uses == 0
+        || definition.max_uses > MAX_VILLAGER_TRADE_USES
+        || definition.xp_reward > MAX_VILLAGER_RUNTIME_OFFER_XP
+        || !definition.price_multiplier.is_finite()
+        || !(0.0..=MAX_VILLAGER_RUNTIME_OFFER_PRICE_MULTIPLIER)
+            .contains(&definition.price_multiplier)
+        || !(-MAX_VILLAGER_RUNTIME_OFFER_DEMAND..=MAX_VILLAGER_RUNTIME_OFFER_DEMAND)
+            .contains(&definition.initial_demand)
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "runtime villager offer stock or pricing fields are outside their bounds",
+        ));
+    }
+    Ok(())
+}
+
+fn encode_runtime_villager_offer(
+    local_id: &str,
+    definition: &VillagerTradeOfferDefinition,
+) -> SjmlResult<Vec<u8>> {
+    validate_runtime_villager_offer_path(local_id)?;
+    validate_runtime_villager_offer_definition(definition)?;
+    let mut bytes = Vec::with_capacity(MAX_VILLAGER_RUNTIME_OFFER_REQUEST_BYTES);
+    bytes.extend_from_slice(&1_u32.to_le_bytes());
+    push_villager_runtime_string(&mut bytes, local_id);
+    push_villager_runtime_item(&mut bytes, &definition.cost_a);
+    bytes.push(u8::from(definition.cost_b.is_some()));
+    if let Some(cost_b) = &definition.cost_b {
+        push_villager_runtime_item(&mut bytes, cost_b);
+    }
+    push_villager_runtime_item(&mut bytes, &definition.result);
+    bytes.extend_from_slice(&definition.max_uses.to_le_bytes());
+    bytes.extend_from_slice(&definition.xp_reward.to_le_bytes());
+    bytes.extend_from_slice(&definition.price_multiplier.to_bits().to_le_bytes());
+    bytes.extend_from_slice(&definition.initial_demand.to_le_bytes());
+    if bytes.len() > MAX_VILLAGER_RUNTIME_OFFER_REQUEST_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "runtime villager offer request exceeds its byte limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn push_villager_runtime_string(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(value.as_bytes());
+}
+
+fn push_villager_runtime_item(bytes: &mut Vec<u8>, item: &VillagerOfferItem) {
+    push_villager_runtime_string(bytes, &item.item_id);
+    bytes.extend_from_slice(&item.count.to_le_bytes());
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -1133,6 +1374,20 @@ extern "C" {
         offer_id: i32,
         offer_id_length: i32,
     ) -> i32;
+    #[link_name = "add_villager_offer"]
+    fn imported_add_villager_offer(
+        handle: i32,
+        handle_length: i32,
+        request: i32,
+        request_length: i32,
+    ) -> i32;
+    #[link_name = "remove_villager_offer"]
+    fn imported_remove_villager_offer(
+        handle: i32,
+        handle_length: i32,
+        local_id: i32,
+        local_id_length: i32,
+    ) -> i32;
     #[link_name = "set_target"]
     fn imported_set_target(mob: i32, mob_length: i32, target: i32, target_length: i32) -> i32;
     #[link_name = "clear_target"]
@@ -1196,6 +1451,14 @@ extern "C" {
     ) -> i32;
     #[link_name = "set_can_pick_up_loot"]
     fn imported_set_can_pick_up_loot(handle: i32, handle_length: i32, enabled: i32) -> i32;
+    #[link_name = "age_ticks"]
+    fn imported_age_ticks(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "is_baby"]
+    fn imported_is_baby(handle: i32, handle_length: i32, output: i32, capacity: i32) -> i32;
+    #[link_name = "set_age_ticks"]
+    fn imported_set_age_ticks(handle: i32, handle_length: i32, age_ticks: i32) -> i32;
+    #[link_name = "set_baby"]
+    fn imported_set_baby(handle: i32, handle_length: i32, baby: i32) -> i32;
     #[link_name = "navigate_to"]
     fn imported_navigate_to(request: i32, request_length: i32, output: i32, capacity: i32) -> i32;
     #[link_name = "is_glowing"]
@@ -1749,6 +2012,69 @@ pub fn update_villager_offer_demand(merchant: EntityHandle, offer_id: &str) -> S
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = merchant;
+        Err(unsupported_target())
+    }
+}
+
+/// Adds one runtime offer to a loaded villager or wandering trader.
+///
+/// The offer ID is a module-relative path such as `daily/emerald`. The host qualifies it as
+/// `<package>:<module>/<path>` and only the owning module can subsequently mutate or remove it.
+/// Requires `entity.read` and [`VILLAGER_TRADE_WRITE_CAPABILITY`]. Counts and fields are bounded by
+/// [`VillagerTradeOfferDefinition`], the host additionally checks actual item stack limits, and
+/// each module is limited to 32 runtime offers per merchant and 256 live offers overall. The
+/// operation is synchronous, server-thread-only, and does not load chunks or accept item components.
+pub fn add_villager_offer(
+    merchant: EntityHandle,
+    local_id: &str,
+    definition: &VillagerTradeOfferDefinition,
+) -> SjmlResult<()> {
+    let request = encode_runtime_villager_offer(local_id, definition)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&merchant)?;
+        // SAFETY: the fixed-width handle and validated request remain live through this import.
+        let status = unsafe {
+            imported_add_villager_offer(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                request.as_ptr() as usize as u32 as i32,
+                request.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the runtime villager offer")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (merchant, request);
+        Err(unsupported_target())
+    }
+}
+
+/// Removes one live offer identified by a module-relative path.
+///
+/// Requires `entity.read` and [`VILLAGER_TRADE_WRITE_CAPABILITY`]. It removes only a currently
+/// tracked offer owned by this package and module; vanilla and other modules' offers remain
+/// unchanged. The merchant must be loaded and the call runs synchronously on its server thread.
+pub fn remove_villager_offer(merchant: EntityHandle, local_id: &str) -> SjmlResult<()> {
+    validate_runtime_villager_offer_path(local_id)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&merchant)?;
+        // SAFETY: handle and path buffers remain live through the synchronous host call.
+        let status = unsafe {
+            imported_remove_villager_offer(
+                encoded.as_ptr() as usize as u32 as i32,
+                encoded.len() as i32,
+                local_id.as_ptr() as usize as u32 as i32,
+                local_id.len() as i32,
+            )
+        };
+        status_result(status, "host rejected the runtime villager offer removal")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (merchant, local_id);
         Err(unsupported_target())
     }
 }
@@ -2971,6 +3297,117 @@ pub fn set_can_pick_up_loot(handle: EntityHandle, enabled: bool) -> SjmlResult<(
     }
 }
 
+/// Reads the signed age ticks of a loaded, living non-player vanilla `AgeableMob`.
+///
+/// The read requires `entity.read`. Negative ages represent babies, zero is adult age, and
+/// positive ages represent vanilla post-breeding cooldown. Values are bounded to
+/// [`MIN_ENTITY_AGE_TICKS`] through [`MAX_ENTITY_AGE_TICKS`].
+pub fn age_ticks(handle: EntityHandle) -> SjmlResult<i32> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output::<AgeTicksResponse>(MAX_ENTITY_AGE_RESPONSE_BYTES, |output, capacity| {
+            // SAFETY: the handle bytes and bounded output allocation live through this call.
+            unsafe {
+                imported_age_ticks(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+        .map(|response| response.0)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Reads whether a loaded, living non-player vanilla `AgeableMob` is currently a baby.
+///
+/// Requires `entity.read`. The host queries Minecraft's `AgeableMob.isBaby()` state.
+pub fn is_baby(handle: EntityHandle) -> SjmlResult<bool> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        read_output::<BabyStateResponse>(MAX_ENTITY_AGE_RESPONSE_BYTES, |output, capacity| {
+            // SAFETY: the handle bytes and bounded output allocation live through this call.
+            unsafe {
+                imported_is_baby(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    output,
+                    capacity,
+                )
+            }
+        })
+        .map(|response| response.0)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets the bounded vanilla age of a loaded non-player `AgeableMob`.
+///
+/// Requires `entity.read` and [`AGE_WRITE_CAPABILITY`], and runs on the logical-server thread.
+/// Use a negative age for a baby, zero for an adult, or a positive value for breeding cooldown.
+pub fn set_age_ticks(handle: EntityHandle, age_ticks: i32) -> SjmlResult<()> {
+    validate_age_ticks(age_ticks)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains live for this synchronous import.
+        status_result(
+            unsafe {
+                imported_set_age_ticks(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    age_ticks,
+                )
+            },
+            "host rejected the AgeableMob age update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = handle;
+        Err(unsupported_target())
+    }
+}
+
+/// Sets a loaded non-player `AgeableMob` to baby or adult age.
+///
+/// Requires `entity.read` and [`AGE_WRITE_CAPABILITY`]. Setting `baby` to true selects the bounded
+/// baby age; false sets age to zero. Use [`set_age_ticks`] when a precise age or cooldown is needed.
+pub fn set_baby(handle: EntityHandle, baby: bool) -> SjmlResult<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let encoded = to_bytes(&handle)?;
+        // SAFETY: the encoded handle remains live for this synchronous import.
+        status_result(
+            unsafe {
+                imported_set_baby(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    i32::from(baby),
+                )
+            },
+            "host rejected the AgeableMob baby-state update",
+        )
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (handle, baby);
+        Err(unsupported_target())
+    }
+}
+
 /// Starts a bounded vanilla navigation path for one loaded non-player Mob.
 ///
 /// Requires `entity.read` and [`NAVIGATION_WRITE_CAPABILITY`]. The target must
@@ -3525,6 +3962,16 @@ fn validate_active_effects(effects: &[ActiveEffect]) -> SjmlResult<()> {
     Ok(())
 }
 
+fn validate_age_ticks(age_ticks: i32) -> SjmlResult<()> {
+    if !(MIN_ENTITY_AGE_TICKS..=MAX_ENTITY_AGE_TICKS).contains(&age_ticks) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "AgeableMob age ticks must be within -24,000..=24,000",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn status_result(status: i32, message: &str) -> SjmlResult<()> {
     if status == 0 {
@@ -3576,19 +4023,20 @@ fn unsupported_target() -> SjmlError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_effects, air_supply, apply_effect, can_pick_up_loot, clear_custom_name,
-        clear_target, custom_name, damage, fire_ticks, is_persistence_required, navigate_to,
-        raycast, remove_effect, set_air_supply, set_can_pick_up_loot, set_custom_name,
-        set_fire_ticks, set_persistence_required, set_target, set_velocity, target,
-        target_snapshot, teleport, validate_active_effects, validate_custom_name,
-        validate_entity_raycast, validate_navigation_target, validate_spatial_query,
-        validate_teleport_target, within, ActiveEffect, ActiveEffectsResponse, EntityAirSupply,
+        active_effects, age_ticks, air_supply, apply_effect, can_pick_up_loot, clear_custom_name,
+        clear_target, custom_name, damage, fire_ticks, is_baby, is_persistence_required,
+        navigate_to, raycast, remove_effect, set_age_ticks, set_air_supply, set_baby,
+        set_can_pick_up_loot, set_custom_name, set_fire_ticks, set_persistence_required,
+        set_target, set_velocity, target, target_snapshot, teleport, validate_active_effects,
+        validate_age_ticks, validate_custom_name, validate_entity_raycast,
+        validate_navigation_target, validate_spatial_query, validate_teleport_target, within,
+        ActiveEffect, ActiveEffectsResponse, AgeTicksResponse, BabyStateResponse, EntityAirSupply,
         EntityBounds, EntityCustomNameResponse, EntityNavigationRequest, EntityNavigationResult,
         EntityRaycastQuery, EntityRaycastResult, EntityStateSnapshot, EntityTargetResult,
         EntityTargetSnapshot, EntityTargetSnapshotResult, EntityTeleportRequest, EntityVelocity,
-        SpatialQuery, SpatialResults, LOOT_PICKUP_WRITE_CAPABILITY, MAX_ACTIVE_ENTITY_EFFECTS,
-        MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_AIR_SUPPLY,
-        MAX_ENTITY_AIR_SUPPLY_RESPONSE_BYTES, MAX_ENTITY_BOUNDS_COORDINATE,
+        SpatialQuery, SpatialResults, AGE_WRITE_CAPABILITY, LOOT_PICKUP_WRITE_CAPABILITY,
+        MAX_ACTIVE_ENTITY_EFFECTS, MAX_ACTIVE_ENTITY_EFFECTS_RESPONSE_BYTES, MAX_ENTITY_AGE_TICKS,
+        MAX_ENTITY_AIR_SUPPLY, MAX_ENTITY_AIR_SUPPLY_RESPONSE_BYTES, MAX_ENTITY_BOUNDS_COORDINATE,
         MAX_ENTITY_BOUNDS_RESPONSE_BYTES, MAX_ENTITY_CUSTOM_NAME_BYTES,
         MAX_ENTITY_CUSTOM_NAME_CODE_POINTS, MAX_ENTITY_CUSTOM_NAME_RESPONSE_BYTES,
         MAX_ENTITY_DAMAGE, MAX_ENTITY_FIRE_TICKS, MAX_ENTITY_NAVIGATION_RANGE,
@@ -3597,18 +4045,23 @@ mod tests {
         MAX_ENTITY_TARGET_RESPONSE_BYTES, MAX_ENTITY_TARGET_SNAPSHOT_RESPONSE_BYTES,
         MAX_ENTITY_TARGET_UUID_BYTES, MAX_ENTITY_TELEPORT_COORDINATE,
         MAX_ENTITY_VELOCITY_COMPONENT, MAX_SPATIAL_QUERY_RADIUS, MAX_SPATIAL_QUERY_RESULTS,
-        NAVIGATION_WRITE_CAPABILITY, PERSISTENCE_WRITE_CAPABILITY,
+        MIN_ENTITY_AGE_TICKS, NAVIGATION_WRITE_CAPABILITY, PERSISTENCE_WRITE_CAPABILITY,
     };
     use crate::{
-        inventory::BlockPos, to_bytes, world::RaycastPoint, EntityHandle, ErrorCode, WorldHandle,
+        inventory::BlockPos, to_bytes, world::RaycastPoint, Decoder, EntityHandle, ErrorCode,
+        StableDecode, WorldHandle,
     };
 
     use super::{
+        add_villager_offer, encode_runtime_villager_offer, remove_villager_offer,
         set_villager_offer_special_price, set_villager_offer_uses, update_villager_offer_demand,
+        validate_runtime_villager_offer_definition, validate_runtime_villager_offer_path,
         validate_villager_trade_offers, villager_offers, VillagerOffer, VillagerOfferItem,
-        VillagerOffersResponse, MAX_VILLAGER_TRADE_DEMAND, MAX_VILLAGER_TRADE_OFFERS,
-        MAX_VILLAGER_TRADE_RESPONSE_BYTES, MAX_VILLAGER_TRADE_SPECIAL_PRICE,
-        MAX_VILLAGER_TRADE_USES, VILLAGER_TRADE_WRITE_CAPABILITY,
+        VillagerOffersResponse, VillagerTradeOfferDefinition,
+        MAX_VILLAGER_RUNTIME_OFFERS_PER_MERCHANT, MAX_VILLAGER_RUNTIME_OFFERS_PER_MODULE,
+        MAX_VILLAGER_RUNTIME_OFFER_ITEM_COUNT, MAX_VILLAGER_RUNTIME_OFFER_REQUEST_BYTES,
+        MAX_VILLAGER_TRADE_DEMAND, MAX_VILLAGER_TRADE_OFFERS, MAX_VILLAGER_TRADE_RESPONSE_BYTES,
+        MAX_VILLAGER_TRADE_SPECIAL_PRICE, MAX_VILLAGER_TRADE_USES, VILLAGER_TRADE_WRITE_CAPABILITY,
     };
 
     fn push_u32(bytes: &mut Vec<u8>, value: u32) {
@@ -3797,6 +4250,134 @@ mod tests {
     }
 
     #[test]
+    fn runtime_villager_offer_creation_encodes_bounded_owner_relative_definition() {
+        assert_eq!(MAX_VILLAGER_RUNTIME_OFFERS_PER_MERCHANT, 32);
+        assert_eq!(MAX_VILLAGER_RUNTIME_OFFERS_PER_MODULE, 256);
+        let definition = VillagerTradeOfferDefinition::new(
+            VillagerOfferItem {
+                item_id: "minecraft:emerald".into(),
+                count: 4,
+            },
+            VillagerOfferItem {
+                item_id: "minecraft:diamond".into(),
+                count: 1,
+            },
+            12,
+        )
+        .unwrap()
+        .with_second_cost(VillagerOfferItem {
+            item_id: "minecraft:book".into(),
+            count: 1,
+        })
+        .unwrap()
+        .with_xp_reward(3)
+        .unwrap()
+        .with_price_multiplier(0.2)
+        .unwrap()
+        .with_initial_demand(-2)
+        .unwrap();
+        let encoded = encode_runtime_villager_offer("daily/library", &definition).unwrap();
+        let mut expected = Vec::new();
+        push_u32(&mut expected, 1);
+        push_trade_string(&mut expected, "daily/library");
+        push_trade_string(&mut expected, "minecraft:emerald");
+        push_u32(&mut expected, 4);
+        expected.push(1);
+        push_trade_string(&mut expected, "minecraft:book");
+        push_u32(&mut expected, 1);
+        push_trade_string(&mut expected, "minecraft:diamond");
+        push_u32(&mut expected, 1);
+        push_u32(&mut expected, 12);
+        push_u32(&mut expected, 3);
+        expected.extend_from_slice(&0.2_f32.to_bits().to_le_bytes());
+        push_i32(&mut expected, -2);
+        assert_eq!(encoded, expected);
+        assert!(encoded.len() <= MAX_VILLAGER_RUNTIME_OFFER_REQUEST_BYTES);
+    }
+
+    #[test]
+    fn runtime_villager_offer_paths_and_fields_validate_before_import() {
+        let definition = VillagerTradeOfferDefinition::new(
+            VillagerOfferItem {
+                item_id: "minecraft:emerald".into(),
+                count: 1,
+            },
+            VillagerOfferItem {
+                item_id: "minecraft:bread".into(),
+                count: 1,
+            },
+            8,
+        )
+        .unwrap();
+        for path in [
+            "",
+            "../trade",
+            "foo//bar",
+            "/trade",
+            "trade/",
+            "Trade",
+            "other:trade",
+        ] {
+            assert_eq!(
+                validate_runtime_villager_offer_path(path)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument,
+                "path {path:?} must be rejected"
+            );
+        }
+        assert!(validate_runtime_villager_offer_path("daily/trade_1").is_ok());
+        assert_eq!(
+            definition
+                .clone()
+                .with_price_multiplier(f32::NAN)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            definition
+                .clone()
+                .with_initial_demand(i32::MAX)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let mut oversized = definition.clone();
+        oversized.cost_a.count = MAX_VILLAGER_RUNTIME_OFFER_ITEM_COUNT + 1;
+        assert_eq!(
+            validate_runtime_villager_offer_definition(&oversized)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let handle = EntityHandle::new(1, 2, 3, 4).unwrap();
+        assert_eq!(
+            add_villager_offer(handle, "../trade", &definition)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            remove_villager_offer(handle, "other:trade")
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            add_villager_offer(handle, "trade", &definition)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid native operations must fail closed without a WASM host"
+        );
+        assert_eq!(
+            remove_villager_offer(handle, "trade").unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+    }
+
+    #[test]
     fn air_supply_response_matches_schema_and_rejects_out_of_range_values() {
         let air_supply = EntityAirSupply::new(-20, 320).unwrap();
         let encoded = to_bytes(&air_supply).unwrap();
@@ -3877,6 +4458,68 @@ mod tests {
         );
         assert_eq!(PERSISTENCE_WRITE_CAPABILITY, "entity.persistence.write");
         assert_eq!(LOOT_PICKUP_WRITE_CAPABILITY, "entity.loot_pickup.write");
+        assert_eq!(
+            age_ticks(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            is_baby(handle).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_age_ticks(handle, 0).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            set_baby(handle, true).unwrap_err().code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(AGE_WRITE_CAPABILITY, "entity.age.write");
+    }
+
+    #[test]
+    fn age_ticks_are_bounded_and_responses_are_schema_checked() {
+        assert!(validate_age_ticks(MIN_ENTITY_AGE_TICKS).is_ok());
+        assert!(validate_age_ticks(MAX_ENTITY_AGE_TICKS).is_ok());
+        assert_eq!(
+            validate_age_ticks(MIN_ENTITY_AGE_TICKS - 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_age_ticks(MAX_ENTITY_AGE_TICKS + 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+
+        let bytes = [1_i32.to_le_bytes(), (-12_000_i32).to_le_bytes()].concat();
+        let response = AgeTicksResponse::decode(&mut Decoder::new(&bytes).unwrap()).unwrap();
+        assert_eq!(response.0, -12_000);
+
+        let baby_bytes = [1_i32.to_le_bytes(), 1_i32.to_le_bytes()].concat();
+        let baby = BabyStateResponse::decode(&mut Decoder::new(&baby_bytes).unwrap()).unwrap();
+        assert!(baby.0);
+
+        let invalid = [
+            1_i32.to_le_bytes(),
+            (MAX_ENTITY_AGE_TICKS + 1).to_le_bytes(),
+        ]
+        .concat();
+        assert_eq!(
+            AgeTicksResponse::decode(&mut Decoder::new(&invalid).unwrap())
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        let invalid_baby = [1_i32.to_le_bytes(), 2_i32.to_le_bytes()].concat();
+        assert_eq!(
+            BabyStateResponse::decode(&mut Decoder::new(&invalid_baby).unwrap())
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
     }
 
     #[test]

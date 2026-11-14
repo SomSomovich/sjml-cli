@@ -16,15 +16,25 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.105.0`, Rust SDK/macros `0.103.0`, private CLI
-`0.1.35`, and ABI `1.95.0`. ABI compatibility remains major-version based: host
-0.105.0 accepts ABI `1.0.x` through `1.95.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.95.0` and host range
-`^0.105.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.106.0`, Rust SDK/macros `0.104.0`, private CLI
+`0.1.36`, and ABI `1.96.0`. ABI compatibility remains major-version based: host
+0.106.0 accepts ABI `1.0.x` through `1.96.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.96.0` and host range
+`^0.106.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.96.0
+
+This version adds age reads/writes for loaded ageable Mobs, live module-owned
+villager-offer CRUD, bounded fluid-type properties and placed ore worldgen,
+batch particle spawning, Arrow and Spectral Arrow spawning, post-application
+enchantment notifications, cancellable random fire-spread attempts, and
+physical-client discovery of package-owned asset paths. These operations stay
+bounded and use their documented registration phase, side, ownership, and
+capability checks. See the focused guides and API coverage matrix for limits.
 
 ### APIs added in ABI 1.95.0
 

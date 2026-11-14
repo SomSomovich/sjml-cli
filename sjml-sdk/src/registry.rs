@@ -71,6 +71,7 @@ pub const MIN_BLOCK_INTEGER_PROPERTY_VALUE: i32 = -128;
 /// Maximum value in a bounded integer block-state property.
 pub const MAX_BLOCK_INTEGER_PROPERTY_VALUE: i32 = 127;
 const MAX_FLUID_PATH_BYTES: usize = MAX_CONTENT_PATH_BYTES - "_flowing".len();
+const MAX_ORE_GENERATION_PATH_BYTES: usize = MAX_CONTENT_PATH_BYTES - "_biome_modifier".len();
 const MAX_FLUID_TEXTURE_ID_BYTES: usize = 256;
 const MAX_COMPONENT_VALUE_BYTES: usize = 4096;
 const MAX_RECIPE_ITEM_ID_BYTES: usize = 256;
@@ -1571,6 +1572,163 @@ pub struct FluidDefinition {
     pub explosion_resistance: f32,
 }
 
+/// Static physical properties for a registered fluid's NeoForge `FluidType`.
+///
+/// These values use NeoForge's documented arbitrary scales. They do not add custom flow code or
+/// callbacks; fluid movement still follows the bounded vanilla `FluidDefinition` settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FluidTypeProperties {
+    density: i32,
+    temperature: i32,
+    viscosity: i32,
+    light_level: i32,
+}
+
+impl FluidTypeProperties {
+    /// Creates water-like NeoForge defaults: density 1000, temperature 300, viscosity 1000,
+    /// and no emitted light.
+    pub const fn new() -> Self {
+        Self {
+            density: 1000,
+            temperature: 300,
+            viscosity: 1000,
+            light_level: 0,
+        }
+    }
+
+    /// Sets fluid density to a bounded signed value; negative values are lighter than air.
+    pub fn density(mut self, value: i32) -> SjmlResult<Self> {
+        if !(-10_000..=10_000).contains(&value) {
+            return Err(invalid_argument(
+                "fluid density must be between -10000 and 10000",
+            ));
+        }
+        self.density = value;
+        Ok(self)
+    }
+
+    /// Sets fluid temperature to a bounded arbitrary NeoForge temperature scale.
+    pub fn temperature(mut self, value: i32) -> SjmlResult<Self> {
+        if !(0..=10_000).contains(&value) {
+            return Err(invalid_argument(
+                "fluid temperature must be between 0 and 10000",
+            ));
+        }
+        self.temperature = value;
+        Ok(self)
+    }
+
+    /// Sets fluid viscosity; higher values represent a thicker fluid and zero is allowed.
+    pub fn viscosity(mut self, value: i32) -> SjmlResult<Self> {
+        if !(0..=10_000).contains(&value) {
+            return Err(invalid_argument(
+                "fluid viscosity must be between 0 and 10000",
+            ));
+        }
+        self.viscosity = value;
+        Ok(self)
+    }
+
+    /// Sets the fluid type's light level from zero through fifteen.
+    ///
+    /// NeoForge uses this value for fluid bucket luminosity; it does not set block-world light.
+    pub fn light_level(mut self, value: i32) -> SjmlResult<Self> {
+        if !(0..=15).contains(&value) {
+            return Err(invalid_argument(
+                "fluid type light level must be between 0 and 15",
+            ));
+        }
+        self.light_level = value;
+        Ok(self)
+    }
+
+    fn abi_values(self) -> [i32; 4] {
+        [
+            self.density,
+            self.temperature,
+            self.viscosity,
+            self.light_level,
+        ]
+    }
+}
+
+impl Default for FluidTypeProperties {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Vanilla block tag used by a generated ore feature to decide which terrain it can replace.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(i32)]
+pub enum OreReplaceableBlocks {
+    /// Ordinary stone and granite/diorite/andesite ore hosts.
+    #[default]
+    Stone = 0,
+    /// Deepslate and tuff ore hosts.
+    Deepslate = 1,
+    /// Netherrack ore hosts.
+    Netherrack = 2,
+}
+
+/// Bounded vanilla ore world-generation settings for a block declared by this module.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OreGenerationDefinition {
+    block_path: String,
+    biome_tag: String,
+    replaceable_blocks: OreReplaceableBlocks,
+    vein_size: u32,
+    count_per_chunk: u32,
+    min_y: i32,
+    max_y: i32,
+}
+
+impl OreGenerationDefinition {
+    /// Targets a module-owned block and a fully qualified biome tag such as
+    /// `minecraft:is_overworld`.
+    pub fn new(block_path: impl Into<String>, biome_tag: impl Into<String>) -> SjmlResult<Self> {
+        let definition = Self {
+            block_path: block_path.into(),
+            biome_tag: biome_tag.into(),
+            replaceable_blocks: OreReplaceableBlocks::Stone,
+            vein_size: 8,
+            count_per_chunk: 6,
+            min_y: -64,
+            max_y: 64,
+        };
+        validate_ore_generation(&definition)?;
+        Ok(definition)
+    }
+
+    /// Selects the vanilla terrain blocks that ore generation may replace.
+    pub fn replaceable_blocks(mut self, value: OreReplaceableBlocks) -> Self {
+        self.replaceable_blocks = value;
+        self
+    }
+
+    /// Sets the maximum ore vein size from 1 through 64 blocks.
+    pub fn vein_size(mut self, value: u32) -> SjmlResult<Self> {
+        self.vein_size = value;
+        validate_ore_generation(&self)?;
+        Ok(self)
+    }
+
+    /// Sets the number of placement attempts per chunk from 1 through 64.
+    pub fn count_per_chunk(mut self, value: u32) -> SjmlResult<Self> {
+        self.count_per_chunk = value;
+        validate_ore_generation(&self)?;
+        Ok(self)
+    }
+
+    /// Sets the inclusive absolute Y range. Both endpoints must be in `-64..=319`.
+    pub fn y_range(mut self, min_y: i32, max_y: i32) -> SjmlResult<Self> {
+        self.min_y = min_y;
+        self.max_y = max_y;
+        validate_ore_generation(&self)?;
+        Ok(self)
+    }
+}
+
 /// Package-owned still and flowing texture IDs for a registered fluid.
 ///
 /// IDs use Minecraft's texture resource convention, for example
@@ -2065,6 +2223,50 @@ extern "C" {
         still_texture_length: i32,
         flowing_texture_pointer: i32,
         flowing_texture_length: i32,
+    ) -> i32;
+    #[link_name = "register_fluid_with_type_properties"]
+    fn imported_register_fluid_with_type_properties(
+        path_pointer: i32,
+        path_length: i32,
+        tick_rate: i32,
+        level_decrease_per_block: i32,
+        slope_find_distance: i32,
+        explosion_resistance_bits: i32,
+        density: i32,
+        temperature: i32,
+        viscosity: i32,
+        light_level: i32,
+    ) -> i32;
+    #[link_name = "register_fluid_with_visuals_and_type_properties"]
+    fn imported_register_fluid_with_visuals_and_type_properties(
+        path_pointer: i32,
+        path_length: i32,
+        tick_rate: i32,
+        level_decrease_per_block: i32,
+        slope_find_distance: i32,
+        explosion_resistance_bits: i32,
+        still_texture_pointer: i32,
+        still_texture_length: i32,
+        flowing_texture_pointer: i32,
+        flowing_texture_length: i32,
+        density: i32,
+        temperature: i32,
+        viscosity: i32,
+        light_level: i32,
+    ) -> i32;
+    #[link_name = "register_ore_generation"]
+    fn imported_register_ore_generation(
+        path_pointer: i32,
+        path_length: i32,
+        block_path_pointer: i32,
+        block_path_length: i32,
+        biome_tag_pointer: i32,
+        biome_tag_length: i32,
+        replacement_tag: i32,
+        vein_size: i32,
+        count_per_chunk: i32,
+        min_y: i32,
+        max_y: i32,
     ) -> i32;
     #[link_name = "register_particle"]
     fn imported_register_particle(path_pointer: i32, path_length: i32) -> i32;
@@ -3434,6 +3636,161 @@ pub fn register_fluid_with_visuals(
     }
 }
 
+/// Stages a flowing fluid with explicit bounded NeoForge density, temperature, viscosity, and
+/// bucket luminosity values. The vanilla water visual defaults are retained.
+pub fn register_fluid_with_type_properties(
+    path: &str,
+    definition: FluidDefinition,
+    properties: FluidTypeProperties,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    if path.len() > MAX_FLUID_PATH_BYTES {
+        return Err(invalid_argument(
+            "fluid path must leave room for generated registry suffixes",
+        ));
+    }
+    validate_fluid_definition(definition)?;
+    validate_fluid_type_properties(properties)?;
+    let values = properties.abi_values();
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies this bounded path and validates fixed-width flow/type properties.
+        let status = unsafe {
+            imported_register_fluid_with_type_properties(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                definition.tick_rate as i32,
+                definition.level_decrease_per_block as i32,
+                definition.slope_find_distance as i32,
+                definition.explosion_resistance.to_bits() as i32,
+                values[0],
+                values[1],
+                values[2],
+                values[3],
+            )
+        };
+        return status_result(status, "host rejected the fluid type properties");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (definition, values);
+        Err(unsupported_target())
+    }
+}
+
+/// Stages a flowing fluid with package-owned textures and explicit bounded NeoForge type
+/// properties.
+pub fn register_fluid_with_visuals_and_type_properties(
+    path: &str,
+    definition: FluidDefinition,
+    visuals: FluidVisualDefinition,
+    properties: FluidTypeProperties,
+) -> SjmlResult<()> {
+    validate_path(path)?;
+    if path.len() > MAX_FLUID_PATH_BYTES {
+        return Err(invalid_argument(
+            "fluid path must leave room for generated registry suffixes",
+        ));
+    }
+    validate_fluid_definition(definition)?;
+    validate_fluid_texture(&visuals.still_texture)?;
+    validate_fluid_texture(&visuals.flowing_texture)?;
+    validate_fluid_type_properties(properties)?;
+    let values = properties.abi_values();
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies both package texture IDs and validates all bounded scalar values.
+        let status = unsafe {
+            imported_register_fluid_with_visuals_and_type_properties(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                definition.tick_rate as i32,
+                definition.level_decrease_per_block as i32,
+                definition.slope_find_distance as i32,
+                definition.explosion_resistance.to_bits() as i32,
+                visuals.still_texture.as_ptr() as usize as u32 as i32,
+                visuals.still_texture.len() as u32 as i32,
+                visuals.flowing_texture.as_ptr() as usize as u32 as i32,
+                visuals.flowing_texture.len() as u32 as i32,
+                values[0],
+                values[1],
+                values[2],
+                values[3],
+            )
+        };
+        return status_result(
+            status,
+            "host rejected the fluid type properties and visuals",
+        );
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (definition, visuals, values);
+        Err(unsupported_target())
+    }
+}
+
+/// Stages a bounded vanilla ore feature for a block registered by this module.
+///
+/// Minecraft consumes the generated configured feature, placed feature, and NeoForge biome
+/// modifier as static data-pack resources. Registration does not place blocks immediately, load
+/// chunks, or run during world ticks. The biome tag selects eligible dimensions/biomes; the
+/// replacement tag selects stone, deepslate, or netherrack targets.
+pub fn register_ore_generation(path: &str, definition: OreGenerationDefinition) -> SjmlResult<()> {
+    validate_path(path)?;
+    if path.len() > MAX_ORE_GENERATION_PATH_BYTES {
+        return Err(invalid_argument(
+            "ore generation path must leave room for generated worldgen resource suffixes",
+        ));
+    }
+    validate_ore_generation(&definition)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // SAFETY: the host copies the two bounded paths and biome tag, then validates all scalar bounds.
+        let status = unsafe {
+            imported_register_ore_generation(
+                path.as_ptr() as usize as u32 as i32,
+                path.len() as u32 as i32,
+                definition.block_path.as_ptr() as usize as u32 as i32,
+                definition.block_path.len() as u32 as i32,
+                definition.biome_tag.as_ptr() as usize as u32 as i32,
+                definition.biome_tag.len() as u32 as i32,
+                definition.replaceable_blocks as i32,
+                definition.vein_size as i32,
+                definition.count_per_chunk as i32,
+                definition.min_y,
+                definition.max_y,
+            )
+        };
+        return status_result(status, "host rejected the ore generation declaration");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = definition;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_ore_generation(definition: &OreGenerationDefinition) -> SjmlResult<()> {
+    validate_path(&definition.block_path)?;
+    validate_registry_id(
+        &definition.biome_tag,
+        "ore biome tag ID",
+        MAX_CONTENT_PATH_BYTES,
+    )?;
+    if !(1..=64).contains(&definition.vein_size)
+        || !(1..=64).contains(&definition.count_per_chunk)
+        || !(-64..=319).contains(&definition.min_y)
+        || !(-64..=319).contains(&definition.max_y)
+        || definition.min_y > definition.max_y
+    {
+        return Err(invalid_argument(
+            "ore generation values require vein/count 1..=64 and an ordered Y range inside -64..=319",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_fluid_definition(definition: FluidDefinition) -> SjmlResult<()> {
     if !(1..=1200).contains(&definition.tick_rate)
         || !(1..=8).contains(&definition.level_decrease_per_block)
@@ -3443,6 +3800,19 @@ fn validate_fluid_definition(definition: FluidDefinition) -> SjmlResult<()> {
     {
         return Err(invalid_argument(
             "fluid flow settings are outside their supported bounds",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_fluid_type_properties(properties: FluidTypeProperties) -> SjmlResult<()> {
+    if !(-10_000..=10_000).contains(&properties.density)
+        || !(0..=10_000).contains(&properties.temperature)
+        || !(0..=10_000).contains(&properties.viscosity)
+        || !(0..=15).contains(&properties.light_level)
+    {
+        return Err(invalid_argument(
+            "fluid density, temperature, viscosity, or light level is outside its supported bounds",
         ));
     }
     Ok(())
@@ -7020,6 +7390,112 @@ mod tests {
             .unwrap_err()
             .code(),
             ErrorCode::InvalidArgument,
+        );
+    }
+
+    #[test]
+    fn fluid_type_properties_are_bounded_and_fail_closed_without_a_wasm_host() {
+        let defaults = FluidTypeProperties::default();
+        assert_eq!(defaults.density, 1000);
+        assert_eq!(defaults.temperature, 300);
+        assert_eq!(defaults.viscosity, 1000);
+        assert_eq!(defaults.light_level, 0);
+
+        let properties = FluidTypeProperties::new()
+            .density(-500)
+            .unwrap()
+            .temperature(900)
+            .unwrap()
+            .viscosity(4_000)
+            .unwrap()
+            .light_level(15)
+            .unwrap();
+        assert_eq!(properties.abi_values(), [-500, 900, 4_000, 15]);
+
+        assert!(FluidTypeProperties::new().density(-10_001).is_err());
+        assert!(FluidTypeProperties::new().density(10_001).is_err());
+        assert!(FluidTypeProperties::new().temperature(-1).is_err());
+        assert!(FluidTypeProperties::new().temperature(10_001).is_err());
+        assert!(FluidTypeProperties::new().viscosity(-1).is_err());
+        assert!(FluidTypeProperties::new().viscosity(10_001).is_err());
+        assert!(FluidTypeProperties::new().light_level(-1).is_err());
+        assert!(FluidTypeProperties::new().light_level(16).is_err());
+
+        assert_eq!(
+            register_fluid_with_type_properties(
+                "ruby_fluid",
+                FluidDefinition::default(),
+                properties,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode,
+            "valid registration fails closed on native targets without WASM host imports",
+        );
+        assert_eq!(
+            register_fluid_with_visuals_and_type_properties(
+                "ruby_fluid",
+                FluidDefinition::default(),
+                FluidVisualDefinition::new("ruby_pack:block/still", "ruby_pack:block/flowing",)
+                    .unwrap(),
+                properties,
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::UnknownErrorCode,
+        );
+    }
+
+    #[test]
+    fn ore_generation_settings_are_validated_before_host_access() {
+        let default = OreGenerationDefinition::new("ruby_ore", "minecraft:is_overworld").unwrap();
+        assert_eq!(default.vein_size, 8);
+        assert_eq!(default.count_per_chunk, 6);
+        assert_eq!((default.min_y, default.max_y), (-64, 64));
+        assert_eq!(default.replaceable_blocks, OreReplaceableBlocks::Stone);
+
+        let configured = OreGenerationDefinition::new("ruby_ore", "minecraft:is_overworld")
+            .unwrap()
+            .replaceable_blocks(OreReplaceableBlocks::Deepslate)
+            .vein_size(12)
+            .unwrap()
+            .count_per_chunk(8)
+            .unwrap()
+            .y_range(-48, 32)
+            .unwrap();
+        assert_eq!(
+            configured.replaceable_blocks,
+            OreReplaceableBlocks::Deepslate
+        );
+        assert_eq!(configured.vein_size, 12);
+        assert_eq!((configured.min_y, configured.max_y), (-48, 32));
+
+        for (block_path, biome_tag) in [
+            ("../ruby_ore", "minecraft:is_overworld"),
+            ("ruby_ore", "is_overworld"),
+            ("ruby_ore", "minecraft:../overworld"),
+        ] {
+            assert!(OreGenerationDefinition::new(block_path, biome_tag).is_err());
+        }
+        let base = OreGenerationDefinition::new("ruby_ore", "minecraft:is_overworld").unwrap();
+        assert!(base.clone().vein_size(0).is_err());
+        assert!(base.clone().vein_size(65).is_err());
+        assert!(base.clone().count_per_chunk(0).is_err());
+        assert!(base.clone().count_per_chunk(65).is_err());
+        assert!(base.clone().y_range(64, -64).is_err());
+        assert!(base.clone().y_range(-65, 64).is_err());
+        assert!(base.clone().y_range(-64, 320).is_err());
+        assert_eq!(
+            register_ore_generation("ruby_veins", configured)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            register_ore_generation(&"v".repeat(MAX_ORE_GENERATION_PATH_BYTES + 1), base)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
         );
     }
 

@@ -65,6 +65,14 @@ pub const MAX_WORLD_PROJECTILES_PER_TICK: usize = 4;
 pub const MAX_WORLD_ITEM_SPAWNS_PER_TICK: usize = 16;
 /// Maximum stack count accepted by [`spawn_item`] before the host checks the item's own limit.
 pub const MAX_WORLD_ITEM_STACK_COUNT: u32 = 64;
+/// Maximum particles accepted in one [`spawn_particles`] request.
+pub const MAX_WORLD_PARTICLES_PER_CALL: u32 = 64;
+/// Maximum particles one module may emit during one logical-server tick.
+pub const MAX_WORLD_PARTICLES_PER_TICK: u32 = 256;
+/// Maximum axis spread accepted by [`ParticleSpawnOptions`], in blocks.
+pub const MAX_WORLD_PARTICLE_SPREAD: f32 = 8.0;
+/// Maximum random particle speed accepted by [`ParticleSpawnOptions`].
+pub const MAX_WORLD_PARTICLE_SPEED: f32 = 8.0;
 /// Maximum UTF-8 bytes accepted for a registered game-event ID.
 pub const MAX_WORLD_GAME_EVENT_ID_BYTES: usize = 256;
 /// Maximum game events one module may emit per logical-server tick.
@@ -509,15 +517,17 @@ pub struct RaycastPoint {
     pub z: f64,
 }
 
-/// One supported built-in throwable. Vanilla collision behavior is preserved.
+/// One allowlisted, non-explosive vanilla projectile. Vanilla collision behavior is preserved.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum VanillaProjectileKind {
     Snowball = 0,
     Egg = 1,
+    Arrow = 2,
+    SpectralArrow = 3,
 }
 
-/// Per-tick launch velocity for a vanilla snowball or egg.
+/// Per-tick launch velocity for a supported vanilla projectile.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProjectileVelocity {
     pub x: f64,
@@ -534,6 +544,74 @@ pub struct ItemSpawnVelocity {
     pub y: f64,
     /// Initial Z velocity in blocks per tick.
     pub z: f64,
+}
+
+/// Bounded count and random position/velocity spread for a batch of simple particles.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParticleSpawnOptions {
+    count: u32,
+    spread_x: f32,
+    spread_y: f32,
+    spread_z: f32,
+    max_speed: f32,
+}
+
+impl ParticleSpawnOptions {
+    /// Creates options for 1–64 particles with finite spreads and speed in `0..=8`.
+    pub fn new(
+        count: u32,
+        spread_x: f32,
+        spread_y: f32,
+        spread_z: f32,
+        max_speed: f32,
+    ) -> SjmlResult<Self> {
+        let value = Self {
+            count,
+            spread_x,
+            spread_y,
+            spread_z,
+            max_speed,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    /// Creates options that preserve the former one-particle, no-spread behavior.
+    pub const fn single() -> Self {
+        Self {
+            count: 1,
+            spread_x: 0.0,
+            spread_y: 0.0,
+            spread_z: 0.0,
+            max_speed: 0.0,
+        }
+    }
+
+    fn validate(self) -> SjmlResult<()> {
+        if self.count == 0 || self.count > MAX_WORLD_PARTICLES_PER_CALL {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "particle count must be within 1..=64",
+            ));
+        }
+        for spread in [self.spread_x, self.spread_y, self.spread_z] {
+            if !spread.is_finite() || !(0.0..=MAX_WORLD_PARTICLE_SPREAD).contains(&spread) {
+                return Err(SjmlError::new(
+                    ErrorCode::InvalidArgument,
+                    "particle spreads must be finite and within 0..=8",
+                ));
+            }
+        }
+        if !self.max_speed.is_finite()
+            || !(0.0..=MAX_WORLD_PARTICLE_SPEED).contains(&self.max_speed)
+        {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "particle speed must be finite and within 0..=8",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl ItemSpawnVelocity {
@@ -1246,6 +1324,20 @@ struct WorldItemSpawnRequest {
     velocity_z: f64,
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct WorldParticleSpawnRequest {
+    world: WorldHandle,
+    position: BlockPos,
+    particle_id: String,
+    count: u32,
+    spread_x_bits: u32,
+    spread_y_bits: u32,
+    spread_z_bits: u32,
+    max_speed_bits: u32,
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
@@ -1407,6 +1499,8 @@ extern "C" {
     fn imported_spawn_projectile(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_item"]
     fn imported_spawn_item(query: i32, query_length: i32) -> i32;
+    #[link_name = "spawn_particles"]
+    fn imported_spawn_particles(query: i32, query_length: i32) -> i32;
     #[link_name = "emit_game_event"]
     fn imported_emit_game_event(query: i32, query_length: i32) -> i32;
     #[link_name = "set_block"]
@@ -3449,12 +3543,13 @@ pub fn spawn_entity(
     }
 }
 
-/// Launches one vanilla snowball or egg in an already-loaded server-world position.
+/// Launches one allowlisted vanilla projectile in an already-loaded server-world position.
 ///
 /// The module must request and receive `world.read` and the separate
-/// `projectile.spawn` administrator capability. Only vanilla snowballs and eggs
-/// are accepted; their normal collision behavior remains unchanged. Positions
-/// must be finite, inside build height and the world border, and in loaded
+/// `projectile.spawn` administrator capability. The allowlist contains snowballs,
+/// eggs, ordinary arrows, and spectral arrows. Arrows are spawned without a
+/// shooter or enchantment attribution and use their ordinary pickup item.
+/// Positions must be finite, inside build height and the world border, and in loaded
 /// chunks. Velocity components must be finite and their magnitude must be
 /// between 0.1 and 4.0 blocks per tick. Each module can launch at most four per
 /// logical-server tick. No call loads a chunk.
@@ -4115,24 +4210,68 @@ pub fn notify_neighbors_at(world: WorldHandle, position: BlockPos) -> SjmlResult
 
 /// Spawns one registered simple particle at the center of a loaded block position.
 ///
-/// The module must request and receive `world.read` and `world.write`. The host
-/// resolves the world handle on the owning server thread and never loads a chunk.
+/// This compatibility wrapper uses [`ParticleSpawnOptions::single`]. The module
+/// must request and receive `world.read` and `world.write`; the host never loads
+/// a chunk.
 pub fn spawn_particle(world: WorldHandle, position: BlockPos, particle_id: &str) -> SjmlResult<()> {
+    spawn_particles(world, position, particle_id, ParticleSpawnOptions::single())
+}
+
+/// Emits a bounded batch of current-registry simple particles around a loaded block position.
+///
+/// The module must request and receive `world.read` and `world.write`. `count` is
+/// 1–64 per call and 256 particles per module per server tick. Each axis spread
+/// and random speed is finite and within `0..=8`; Minecraft supplies the random
+/// offsets and velocity. The requested block must be loaded. The host exposes
+/// neither Minecraft objects nor chunk-loading operations.
+pub fn spawn_particles(
+    world: WorldHandle,
+    position: BlockPos,
+    particle_id: &str,
+    options: ParticleSpawnOptions,
+) -> SjmlResult<()> {
     validate_particle_id(particle_id)?;
+    options.validate()?;
+    if position.x.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.y.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+        || position.z.unsigned_abs() > MAX_WORLD_BLOCK_COORDINATE as u32
+    {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "particle coordinates must be within ±30000000",
+        ));
+    }
     #[cfg(target_arch = "wasm32")]
     {
-        let encoded = to_bytes(&world)?;
-        // SAFETY: the host copies the handle and bounded UTF-8 ID before returning.
-        let status = unsafe {
-            imported_spawn_particle(
-                encoded.as_ptr() as usize as u32 as i32,
-                encoded.len() as i32,
-                position.x,
-                position.y,
-                position.z,
-                particle_id.as_ptr() as usize as u32 as i32,
-                particle_id.len() as i32,
-            )
+        let status = if options == ParticleSpawnOptions::single() {
+            let encoded = to_bytes(&world)?;
+            // SAFETY: the host copies the handle and bounded UTF-8 ID before returning.
+            unsafe {
+                imported_spawn_particle(
+                    encoded.as_ptr() as usize as u32 as i32,
+                    encoded.len() as i32,
+                    position.x,
+                    position.y,
+                    position.z,
+                    particle_id.as_ptr() as usize as u32 as i32,
+                    particle_id.len() as i32,
+                )
+            }
+        } else {
+            let query = to_bytes(&WorldParticleSpawnRequest {
+                world,
+                position,
+                particle_id: particle_id.to_owned(),
+                count: options.count,
+                spread_x_bits: options.spread_x.to_bits(),
+                spread_y_bits: options.spread_y.to_bits(),
+                spread_z_bits: options.spread_z.to_bits(),
+                max_speed_bits: options.max_speed.to_bits(),
+            })?;
+            // SAFETY: the encoded request remains allocated and readable for this synchronous import.
+            unsafe {
+                imported_spawn_particles(query.as_ptr() as usize as u32 as i32, query.len() as i32)
+            }
         };
         if status == 0 {
             Ok(())
@@ -4145,7 +4284,7 @@ pub fn spawn_particle(world: WorldHandle, position: BlockPos, particle_id: &str)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = (world, position);
+        let _ = (world, position, options);
         Err(unsupported_target())
     }
 }
@@ -5890,6 +6029,28 @@ mod tests {
         expected.extend_from_slice(&0.5_f64.to_le_bytes());
         expected.extend_from_slice(&(-0.25_f64).to_le_bytes());
         assert_eq!(crate::to_bytes(&request).unwrap(), expected);
+    }
+
+    #[test]
+    fn projectile_kinds_keep_stable_wire_discriminants() {
+        for (projectile, expected) in [
+            (VanillaProjectileKind::Snowball, 0),
+            (VanillaProjectileKind::Egg, 1),
+            (VanillaProjectileKind::Arrow, 2),
+            (VanillaProjectileKind::SpectralArrow, 3),
+        ] {
+            let request = WorldProjectileSpawnRequest {
+                world: WorldHandle::new(1, 2, 3, 4).unwrap(),
+                projectile: projectile as u8,
+                x: 1.5,
+                y: 64.0,
+                z: -2.25,
+                velocity_x: 1.25,
+                velocity_y: 0.5,
+                velocity_z: -0.25,
+            };
+            assert_eq!(crate::to_bytes(&request).unwrap()[28], expected);
+        }
     }
 
     #[test]

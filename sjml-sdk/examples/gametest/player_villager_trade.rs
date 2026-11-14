@@ -56,8 +56,58 @@ fn run_villager_trade_test(arguments: VillagerTradeTestArguments) -> SjmlResult<
     match arguments.operation.as_str() {
         "arm" => arm_villager_trade(&arguments),
         "check" => check_villager_trade(),
-        _ => Err(failure("operation must be either arm or check")),
+        "crud" => add_read_remove_runtime_offer(&arguments.merchant_id),
+        _ => Err(failure("operation must be arm, check, or crud")),
     }
+}
+
+fn add_read_remove_runtime_offer(merchant_id: &str) -> SjmlResult<String> {
+    if merchant_id.len() != 36 {
+        return Err(failure("GameTest supplied a non-canonical merchant UUID"));
+    }
+    let merchant = find_merchant(merchant_id)?;
+    let original_count = entity::villager_offers(merchant)?.len();
+    let definition = entity::VillagerTradeOfferDefinition::new(
+        entity::VillagerOfferItem {
+            item_id: "minecraft:emerald".to_owned(),
+            count: 3,
+        },
+        entity::VillagerOfferItem {
+            item_id: "minecraft:book".to_owned(),
+            count: 1,
+        },
+        5,
+    )?;
+    let local_id = "gametest/runtime_book";
+    entity::add_villager_offer(merchant, local_id, &definition)?;
+
+    let offers = entity::villager_offers(merchant)?;
+    let expected_id = "sjml_game_test:content/gametest/runtime_book";
+    let added = offers
+        .iter()
+        .find(|offer| offer.id == expected_id && offer.registered)
+        .ok_or_else(|| failure("runtime offer is missing or was not marked as module-owned"))?;
+    if offers.len() != original_count + 1
+        || added.input_a.item_id != "minecraft:emerald"
+        || added.input_a.count != 3
+        || added.result.item_id != "minecraft:book"
+        || added.result.count != 1
+        || added.uses != 0
+        || added.max_uses != 5
+    {
+        return Err(failure(
+            "runtime offer snapshot differs from its bounded definition",
+        ));
+    }
+
+    entity::remove_villager_offer(merchant, local_id)?;
+    let remaining = entity::villager_offers(merchant)?;
+    if remaining.len() != original_count || remaining.iter().any(|offer| offer.id == expected_id) {
+        return Err(failure(
+            "runtime offer removal did not restore the original merchant offers",
+        ));
+    }
+    Ok("guest added, read, and removed its module-owned live villager offer".to_owned())
 }
 
 fn arm_villager_trade(arguments: &VillagerTradeTestArguments) -> SjmlResult<String> {

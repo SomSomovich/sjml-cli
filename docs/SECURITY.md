@@ -260,11 +260,13 @@ queues a normal Minecraft scheduled tick and limits each module to 16 requests
 per server tick; it never forces chunk loading.
 
 `world::spawn_projectile` requires `world.read` and `projectile.spawn`, a live
-module-owned world handle, and the server thread. It accepts only vanilla eggs
-and snowballs, finite positions inside the build height and world border, and
-velocity between 0.1 and 4 blocks per tick. Every intersected chunk must already
-be loaded. A module may launch at most four projectiles per server tick across
-all dimensions. Vanilla egg hatching and snowball Blaze damage remain enabled.
+module-owned world handle, and the server thread. It accepts only vanilla eggs,
+snowballs, ordinary arrows, and spectral arrows; positions must be finite and
+inside the build height and world border, and velocity must be between 0.1 and
+4 blocks per tick. Every intersected chunk must already be loaded. A module may
+launch at most four projectiles per server tick across all dimensions. Vanilla
+egg hatching, snowball Blaze damage, arrow pickup, and spectral-arrow effects
+remain enabled. Spawned arrows have no shooter or player attribution.
 
 `world::spawn_item` requires both `world.read` and `world.write`. IDs resolve
 only through the current item registry, stack count must fit the item's

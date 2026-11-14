@@ -25,10 +25,11 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.103.0
-and core ABI 1.95.0. Live
+unverified. This guide describes the private SDK workspace target 0.104.0
+and core ABI 1.96.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
+SDK 0.104.0 adds ageable-Mob age control, runtime villager-offer CRUD, fluid-type properties, placed ore generation, batch particles, Arrow and Spectral Arrow spawning, enchantment and fire-spread events, and package-owned client asset discovery. See the focused guides and [ABI compatibility](COMPATIBILITY.md).
 SDK 0.103.0 adds exact-state piston/fire behavior for registered blocks, bounded drop suppression during block updates, item repair tags and player-stack glint controls, non-player entity orientation/equipment/drop-chance APIs, raw client cursor motion, and observational sound-start callbacks.
 SDK 0.102.0 adds player ability writes, mob persistence and loot-pickup controls, chunk lifecycle notifications, client resource-reload and chat-history APIs, world-save and entity-left-level events, live villager trade access, and player statistic-change notifications.
 SDK 0.100.0 adds loaded-only biome climate and block destroy-speed reads, a
@@ -491,7 +492,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.103.0"
+sjml-sdk = "0.104.0"
 ```
 
 For development against this checkout, use
@@ -931,6 +932,14 @@ dimension ID, block position, and block ID. See
 vanilla behavior unchanged. `BlockFarmlandTrampleAttempt` exposes detached block,
 dimension, entity, position, and fall-distance values. Both event capabilities are
 required. See [farmland trampling attempts](BLOCK_FARMLAND_TRAMPLE_ATTEMPT.md).
+
+`block.fire_spread_attempt` synchronously vetoes a fire placement attempted by
+the vanilla logical-server fire tick. Its detached `BlockFireSpreadAttempt`
+includes source and target positions, dimension, fire age, and whether this is
+random spread or a burnout replacement. A burnout callback runs after the
+caught block's `onCaughtFire` side effects, so vetoing it prevents only the fire
+replacement. Flint-and-steel and other direct ignition paths are not reported.
+Both event capabilities are required, and handlers must be synchronous.
 
 `entity.fall_attempt` synchronously vetoes fall damage before Minecraft applies it.
 The detached `EntityFallAttempt` includes entity identity, position, fall distance,
@@ -1518,6 +1527,33 @@ metadata. The bucket model currently uses Minecraft's filled-water-bucket
 icon; the still and flowing textures skin the fluid in the world. Package
 assets under `assets/<package-id>/` are mounted automatically. The
 content-registration grant is required.
+
+To set a fluid type's physical metadata, build `FluidTypeProperties` and call
+`register_fluid_with_type_properties`; combine it with package textures using
+`register_fluid_with_visuals_and_type_properties`:
+
+```rust
+let properties = FluidTypeProperties::new()
+    .density(1200)?
+    .temperature(900)?
+    .viscosity(2400)?
+    .light_level(4)?;
+registry::register_fluid_with_type_properties(
+    "molten_salt",
+    FluidDefinition::default(),
+    properties,
+)?;
+```
+
+Defaults match NeoForge's usual values (density 1000, temperature 300,
+viscosity 1000, and light level 0). Density is limited to -10,000..=10,000;
+temperature and viscosity to 0..=10,000; and light level to 0..=15. NeoForge
+uses density, temperature, and viscosity as fluid-type values for its own and
+other mod integrations. The light setting affects the fluid bucket's
+luminosity rendering, not the liquid block's world light emission. These
+properties do not add custom flow callbacks; `FluidDefinition` still controls
+the source/flowing fluid's bounded vanilla tick behavior. See
+[static fluid type properties](FLUID_TYPE_PROPERTIES.md).
 
 Shaped and shapeless recipes can be staged from the same `#[mod_register]` callback:
 
