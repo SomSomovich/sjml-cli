@@ -1,7 +1,7 @@
 # Minecraft API coverage
 
-This is a source-based coverage matrix for the current target checkout at host **0.99.0**,
-SDK/macros **0.97.0**, private CLI **0.1.29**, ABI **1.89.0**, Minecraft **1.21.1**, and NeoForge
+This is a source-based coverage matrix for the current target checkout at host **0.100.0**,
+SDK/macros **0.98.0**, private CLI **0.1.30**, ABI **1.90.0**, Minecraft **1.21.1**, and NeoForge
 **21.1.265**. It records the public surface that exists in this tree, its path
 from a Minecraft hook to Rust/WASM, and the limits that remain. It is not a
 roadmap or a claim of complete Minecraft mod compatibility. The matrix tracks
@@ -16,6 +16,10 @@ bound and encode the byte boundary; domain-specific schemas/codecs are cited
 where present. Rust `extern` imports and public wrappers are in the cited SDK
 files. Registration callbacks and event-export callbacks use their own
 documented ABI paths rather than a host import for every operation.
+
+## Current ABI 1.90.0 addition
+
+The new server `world.tick` notification runs after each logical-server level tick and includes the canonical dimension ID, game time, and day time. The callback is non-cancellable and supports per-module intervals from 1 to 1,200 ticks. See [`WORLD_TICK.md`](WORLD_TICK.md) and [`WorldTickGameTests`](../src/main/java/dev/somuch/sjml/neoforge/gametest/WorldTickGameTests.java).
 
 ## Current ABI 1.89.0 addition
 

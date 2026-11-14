@@ -16,15 +16,22 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.99.0`, Rust SDK/macros `0.97.0`, private CLI
-`0.1.29`, and ABI `1.89.0`. ABI compatibility remains major-version based: host
-0.99.0 accepts ABI `1.0.x` through `1.89.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.89.0` and host range
-`^0.99.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.100.0`, Rust SDK/macros `0.98.0`, private CLI
+`0.1.30`, and ABI `1.90.0`. ABI compatibility remains major-version based: host
+0.100.0 accepts ABI `1.0.x` through `1.90.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.90.0` and host range
+`^0.100.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.90.0
+
+`world.tick` reports each logical server level after its tick, including the
+dimension ID, game time, and day time. It is non-cancellable and supports
+subscriptions every 1–1,200 game ticks. It requires `events.subscribe` and
+never loads chunks. See [world ticks](WORLD_TICK.md).
 
 ### APIs added in ABI 1.89.0
 

@@ -25,11 +25,11 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.97.0
-and core ABI 1.89.0. Live
+unverified. This guide describes the private SDK workspace target 0.98.0
+and core ABI 1.90.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
-SDK 0.97.0 adds exact-type `AvoidEntityType` and `TargetEntityType` goals for
+SDK 0.98.0 adds per-level `world.tick` notifications with bounded intervals; see [world ticks](WORLD_TICK.md). SDK 0.97.0 adds exact-type `AvoidEntityType` and `TargetEntityType` goals for
 registered SJML mobs. These goals use a canonical entity registry ID and retain
 vanilla pathfinding and target checks; see [registered entity AI goals](ENTITY_AI_GOALS.md).
 SDK 0.96.0 adds synchronous cancellable `entity.drops_attempt` for
@@ -473,7 +473,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.97.0"
+sjml-sdk = "0.98.0"
 ```
 
 For development against this checkout, use
@@ -509,7 +509,7 @@ workspace adds the entity AI goals and event types described above.
 | [`entity`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity/) | Loaded non-player entity snapshots and detached Mob target snapshots, same-dimension teleports that stay inside already-loaded chunks, custom names and their vanilla visibility flag, six-slot equipment snapshots, enumeration, spatial queries, bounded raycasts, active effects, fire ticks, glowing/silent flags, Mob AI toggles, and bounded mount relationships; effect apply/removal, non-forced mount/dismount, discard, and generic damage. |
 | [`entity_attributes`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity_attributes/) | Bounded reads and base-value writes for 31 built-in vanilla living-entity and server-player attributes, plus module-owned transient modifiers on loaded non-player living entities with automatic owner cleanup. |
 | [`entity_data`](https://docs.rs/sjml-sdk/0.92.0/sjml/entity_data/) | Bounded module-owned opaque bytes attached to non-player entities. |
-| [`events`](https://docs.rs/sjml-sdk/0.92.0/sjml/events/) | Typed lifecycle, world, player/client/entity tick, player movement/interaction/drop/respawn/advancement/sleep, registered-block/item callbacks, cancellable `block.drops_attempt` and `entity.drops_attempt`, mutable/cancellable player XP-point and level-change attempts, cancellable potion, totem, shield-block, and entity-teleport attempts, item tooltip and outgoing-chat callbacks, and crafting/inventory/resource events. |
+| [`events`](https://docs.rs/sjml-sdk/0.92.0/sjml/events/) | Typed lifecycle and per-level world, player, client, and entity tick, player movement/interaction/drop/respawn/advancement/sleep, registered-block/item callbacks, cancellable `block.drops_attempt` and `entity.drops_attempt`, mutable/cancellable player XP-point and level-change attempts, cancellable potion, totem, shield-block, and entity-teleport attempts, item tooltip and outgoing-chat callbacks, and crafting/inventory/resource events. |
 | [`gl`](https://docs.rs/sjml-sdk/0.92.0/sjml/gl/) | Typed OpenGL resources, bounded command submission, and GUI textures. |
 | [`host`](https://docs.rs/sjml-sdk/0.92.0/sjml/host/) | ABI version query and host logging. |
 | [`inventory`](https://docs.rs/sjml-sdk/0.92.0/sjml/inventory/) | Detached item/block-inventory snapshots, bounded player slot writes, integer/boolean component updates, and slot transfers. Block inventories support custom names, bounded count and durability writes, preflighted moves, and enchantment reads/writes/removal on loaded stacks. |
@@ -1060,7 +1060,7 @@ active runtime subscription. It dispatches the unit-valued `server.started`
 and `server.stopping` exports, the `player.joined`, `player.left`,
 `player.moved`, `player.respawned`, `entity.death`, `entity.spawned`, and `entity.effect.tick` exports, the
 `block.place`, `player.interacted`, `entity.damaged`, `world.loaded`, and
-`world.unloaded`, `server.tick`, `inventory.changed`, and `resources.reloaded`
+`world.unloaded`, `world.tick`, `server.tick`, `inventory.changed`, and `resources.reloaded`
 exports, and the
 cancellable `block.break` export. The player
 events accept the SDK's schema-v1 `PlayerJoined` or `PlayerLeft` record with
@@ -1101,6 +1101,11 @@ sent after NeoForge applies damage to a living entity and cannot change it.
 and signed `i64` game time. Initial server levels are reported after runtime
 activation; subsequent level loads and unloads are reported as they occur, with
 unload notification sent before world-scoped handles are revoked.
+`world.tick` accepts schema-v1 `WorldTick` with a canonical `dimension_id`,
+non-negative `game_time`, and signed `day_time`. It runs after each
+logical-server level tick, defaults to every 20 level ticks, and accepts
+intervals from 1 to 1,200 through `subscribe_with_interval`. It is
+observation-only and never loads chunks. See [world ticks](WORLD_TICK.md).
 `server.tick` accepts schema-v1 `ServerTick` with a non-negative `i64`
 `tick_count`; it runs after the server tick and cannot cancel it. A plain
 `events::subscribe("server.tick", priority)` delivers every 20 ticks, while

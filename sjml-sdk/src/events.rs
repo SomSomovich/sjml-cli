@@ -1701,6 +1701,18 @@ pub struct ServerTick {
     pub tick_count: i64,
 }
 
+/// Synchronous, non-cancellable snapshot emitted after each logical-server level tick.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct WorldTick {
+    /// Canonical registry ID of the level that completed this tick.
+    pub dimension_id: String,
+    /// Logical world tick count after the level tick.
+    pub game_time: i64,
+    /// Day time after the level tick. It may be negative when changed by host commands.
+    pub day_time: i64,
+}
+
 /// Synchronous, non-cancellable snapshot of a logical-server player tick.
 #[derive(Debug, PartialEq, StableEncode, StableDecode)]
 #[sjml(version = 1)]
@@ -2590,7 +2602,7 @@ pub fn subscribe(event_name: &str, priority: EventPriority) -> SjmlResult<EventS
     }
 }
 
-/// Registers a server, player, entity, or client tick callback at the requested cadence
+/// Registers a server, world, player, entity, or client tick callback at the requested cadence
 /// (1–1,200 ticks).
 pub fn subscribe_with_interval(
     event_name: &str,
@@ -2600,11 +2612,11 @@ pub fn subscribe_with_interval(
     validate_event_name(event_name)?;
     if !matches!(
         event_name,
-        "server.tick" | "player.tick" | "entity.tick" | "client.tick"
+        "server.tick" | "world.tick" | "player.tick" | "entity.tick" | "client.tick"
     ) {
         return Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "interval subscriptions are only supported for server.tick, player.tick, entity.tick and client.tick",
+            "interval subscriptions are only supported for server.tick, world.tick, player.tick, entity.tick and client.tick",
         ));
     }
     if !(1..=MAX_SERVER_TICK_INTERVAL).contains(&interval_ticks) {
@@ -2751,12 +2763,12 @@ mod tests {
         PlayerMoved, PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned,
         PlayerSleepAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
         PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        WorldLifecycle, MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
-        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
-        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
-        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        WorldLifecycle, WorldTick, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
+        MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
+        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
+        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -5020,6 +5032,27 @@ mod tests {
     }
 
     #[test]
+    fn world_tick_snapshot_round_trips_dimension_and_times() {
+        let event = WorldTick {
+            dimension_id: "minecraft:the_nether".to_owned(),
+            game_time: 1234,
+            day_time: -6000,
+        };
+        let encoded = to_bytes(&event).unwrap();
+        assert_eq!(from_bytes::<WorldTick>(&encoded).unwrap(), event);
+
+        let mut unsupported_schema = encoded.clone();
+        unsupported_schema[..4].copy_from_slice(&2_u32.to_le_bytes());
+        assert_eq!(
+            from_bytes::<WorldTick>(&unsupported_schema)
+                .unwrap_err()
+                .code(),
+            ErrorCode::IncompatibleAbiVersion
+        );
+        assert!(from_bytes::<WorldTick>(&encoded[..encoded.len() - 1]).is_err());
+    }
+
+    #[test]
     fn player_tick_snapshot_round_trips_its_player_dimension_and_tick_count() {
         let event = PlayerTick {
             player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
@@ -5177,6 +5210,34 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            subscribe_with_interval("world.tick", EventPriority::Normal, 0)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            subscribe_with_interval(
+                "world.tick",
+                EventPriority::Normal,
+                MAX_SERVER_TICK_INTERVAL + 1
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            subscribe_with_interval("world.tick", EventPriority::Normal, 1)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(
+            subscribe_with_interval("world.tick", EventPriority::Normal, 1_200)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
         );
         assert_eq!(
             subscribe_with_interval(

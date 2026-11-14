@@ -158,6 +158,7 @@ static SAW_ENTITY_DAMAGED: AtomicBool = AtomicBool::new(false);
 static SAW_ENTITY_DAMAGE_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SAW_WORLD_LOADED: AtomicBool = AtomicBool::new(false);
 static SAW_SERVER_TICK: AtomicBool = AtomicBool::new(false);
+static SAW_WORLD_TICK: AtomicBool = AtomicBool::new(false);
 static SAW_INVENTORY_PICKUP: AtomicBool = AtomicBool::new(false);
 static SAW_MENU_ACTION: AtomicBool = AtomicBool::new(false);
 static SAW_PLAYER_DROP_ATTEMPT: AtomicBool = AtomicBool::new(false);
@@ -631,6 +632,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     events::subscribe("world.loaded", EventPriority::Normal)?;
     events::subscribe("world.unloaded", EventPriority::Normal)?;
     events::subscribe_with_interval("server.tick", EventPriority::Normal, 20)?;
+    events::subscribe_with_interval("world.tick", EventPriority::Normal, 2)?;
     events::subscribe("inventory.changed", EventPriority::Normal)?;
     events::subscribe("resources.reloaded", EventPriority::Normal)?;
     events::subscribe("menu.action", EventPriority::Normal)?;
@@ -844,6 +846,14 @@ fn observe_world_unloaded(_: WorldLifecycle) -> SjmlResult<()> {
 fn observe_server_tick(event: ServerTick) -> SjmlResult<()> {
     if event.tick_count >= 0 {
         SAW_SERVER_TICK.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[event(name = "world.tick")]
+fn observe_world_tick(event: WorldTick) -> SjmlResult<()> {
+    if event.dimension_id == "minecraft:overworld" && event.game_time >= 0 && event.day_time >= 0 {
+        SAW_WORLD_TICK.store(true, Ordering::Relaxed);
     }
     Ok(())
 }
@@ -1076,12 +1086,16 @@ fn check_world_loaded(_: EntityDeathCheckArguments) -> SjmlResult<String> {
 
 #[command(name = "server.tick.check")]
 fn check_server_tick(_: EntityDeathCheckArguments) -> SjmlResult<String> {
-    if SAW_SERVER_TICK.swap(false, Ordering::Relaxed) {
-        Ok("scheduled server.tick callback delivered".to_owned())
+    let saw_server_tick = SAW_SERVER_TICK.swap(false, Ordering::Relaxed);
+    let saw_world_tick = SAW_WORLD_TICK.swap(false, Ordering::Relaxed);
+    if saw_server_tick && saw_world_tick {
+        Ok("scheduled server.tick and world.tick callbacks delivered".to_owned())
     } else {
         Err(SjmlError::new(
             ErrorCode::InvalidArgument,
-            "server.tick callback was not delivered at the subscribed interval",
+            format!(
+                "scheduled tick callbacks missing: server.tick={saw_server_tick}, world.tick={saw_world_tick}"
+            ),
         ))
     }
 }

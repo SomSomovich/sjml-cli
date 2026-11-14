@@ -52,7 +52,7 @@ sjml-cli init mymod --sdk-path /path/to/sjml-cli/sjml-sdk
 ```
 
 Without `--sdk-path`, the generated Cargo manifest depends on `sjml-sdk =
-"0.97.0"`; that crate must be available from a configured Cargo registry. This
+"0.98.0"`; that crate must be available from a configured Cargo registry. This
 private target version is not published yet, so use `--sdk-path` to compile the
 generated project until the matching SDK crates are released.
 
