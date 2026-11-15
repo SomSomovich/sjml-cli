@@ -1,16 +1,25 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.105.0**. This version adds ten more logical-server
-notification and veto callbacks covering anvil repairs, dropped-item expiry,
-Enderman anger, sleep time skip, main/off-hand item swaps, bow nocking and
-release, note blocks, phantom spawns, and registry tag reloads. Existing ABI
-1.104.0 contracts remain supported.
+The current ABI is **1.106.0**. This version adds ten more logical-server
+notification and veto callbacks covering fluid sources, feature growth, mob
+block breaking, explosion knockback, grindstone output, sleep continuation,
+projectile ammo, operator permissions, chunk ticket levels, and village
+sieges. Existing ABI 1.105.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.106.0 adds ten logical-server callbacks. Nine are synchronous vetoes
+that require `events.subscribe` and `events.cancel`:
+`world.fluid_source_attempt`, `world.block_grow_feature_attempt`,
+`entity.destroy_block_attempt`, `world.explosion_knockback_attempt`,
+`player.grindstone_take_attempt`, `player.continue_sleeping_attempt`,
+`entity.projectile_ammo_attempt`, `player.permissions_change_attempt`, and
+`world.village_siege_attempt`. One is an observation notification:
+`world.chunk_ticket_level`.
 
 ABI 1.105.0 adds ten logical-server callbacks. Seven are synchronous vetoes
 that require `events.subscribe` and `events.cancel`:
@@ -19,6 +28,56 @@ that require `events.subscribe` and `events.cancel`:
 `player.arrow_loose_attempt`, `block.note_block_attempt`, and
 `player.spawn_phantoms_attempt`. Three are observation notifications:
 `player.anvil_repair`, `world.sleep_finished_time`, and `world.tags_updated`.
+
+ABI 1.106.0 adds ten more logical-server callbacks. Each payload starts with a
+little-endian `i32` schema version `1`:
+
+- `world.fluid_source_attempt` encodes the dimension, `i32` block x/y/z, the
+  canonical fluid ID, and a Boolean vanilla-result byte. NeoForge fires it from
+  `CreateFluidSourceEvent`; a veto calls `setCanConvert(false)`.
+- `world.block_grow_feature_attempt` encodes the dimension, block x/y/z, and an
+  optional canonical feature ID. NeoForge fires it from
+  `BlockGrowFeatureEvent`; a veto cancels the growth.
+- `entity.destroy_block_attempt` encodes the entity UUID and type, dimension,
+  block x/y/z, block ID, and bounded block-state text. NeoForge fires it from
+  `LivingDestroyBlockEvent`; a veto cancels the break.
+- `world.explosion_knockback_attempt` encodes the dimension, entity UUID and
+  type, `i32` affected-block count, and three finite `f64` velocity
+  components. NeoForge fires it from `ExplosionKnockbackEvent`; a veto sets the
+  velocity to zero.
+- `player.grindstone_take_attempt` encodes the player UUID, dimension, four
+  nested item snapshots (top, bottom, new top, new bottom), and `i32`
+  experience. NeoForge fires it from `GrindstoneEvent.OnTakeItem`; a veto
+  cancels the take.
+- `player.continue_sleeping_attempt` encodes the player UUID, dimension, the
+  lowercase `BedSleepingProblem` name or an empty string, and the current
+  continue-sleeping flag. A veto calls `setContinueSleeping(false)`.
+- `entity.projectile_ammo_attempt` encodes the entity UUID and type, dimension,
+  and two nested item snapshots (weapon, ammo). A veto clears the ammo stack.
+- `player.permissions_change_attempt` encodes the player UUID, dimension, and
+  the new and old `i32` permission levels in `0..=4`. A veto cancels the
+  operator change.
+- `world.village_siege_attempt` encodes the dimension, player UUID, and three
+  finite `f64` attempted-spawn coordinates. A veto cancels the siege.
+- `world.chunk_ticket_level` is an observation notification encoding the
+  dimension, `i32` chunk x/z, old and new ticket levels, and a Boolean
+  chunk-holder presence flag. It is delivered from
+  `ChunkTicketLevelUpdatedEvent`.
+
+The nine vetoes run synchronously on the owning logical-server thread, invoke
+at most 64 callbacks per attempt, and reject `#[event_async]`. Strings are
+bounded to 256 UTF-8 bytes and payloads to 0.5–4 KiB.
+
+See [fluid source attempts](WORLD_FLUID_SOURCE_ATTEMPTS.md),
+[feature growth attempts](BLOCK_GROW_FEATURE_ATTEMPTS.md),
+[mob block-destruction attempts](ENTITY_DESTROY_BLOCK_ATTEMPTS.md),
+[explosion knockback attempts](WORLD_EXPLOSION_KNOCKBACK_ATTEMPTS.md),
+[grindstone take attempts](PLAYER_GRINDSTONE_TAKE_ATTEMPTS.md),
+[sleep continuation attempts](PLAYER_CONTINUE_SLEEPING_ATTEMPTS.md),
+[projectile ammo attempts](ENTITY_PROJECTILE_AMMO_ATTEMPTS.md),
+[permissions change attempts](PLAYER_PERMISSIONS_CHANGE_ATTEMPTS.md),
+[chunk ticket level notifications](WORLD_CHUNK_TICKET_LEVEL.md), and
+[village siege attempts](WORLD_VILLAGE_SIEGE_ATTEMPTS.md).
 
 ABI 1.104.0 adds ten logical-server callbacks. Seven of them are synchronous
 vetoes that require `events.subscribe` and `events.cancel`:

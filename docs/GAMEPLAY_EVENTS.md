@@ -129,6 +129,37 @@ Three observation notifications complete the wave: `player.anvil_repair`
 (`WorldSleepFinishedTime`) from `SleepFinishedTimeEvent`, and
 `world.tags_updated` (`WorldTagsUpdated`) from `TagsUpdatedEvent`.
 
+- `world.fluid_source_attempt` (`WorldFluidSourceAttempt`) runs from
+  `CreateFluidSourceEvent`. A veto prevents infinite-source formation. See
+  [fluid source attempts](WORLD_FLUID_SOURCE_ATTEMPTS.md).
+- `world.block_grow_feature_attempt` (`BlockGrowFeatureAttempt`) runs from
+  `BlockGrowFeatureEvent`. A veto cancels the feature growth. See
+  [feature growth attempts](BLOCK_GROW_FEATURE_ATTEMPTS.md).
+- `entity.destroy_block_attempt` (`EntityDestroyBlockAttempt`) runs from
+  `LivingDestroyBlockEvent`. A veto stops a mob from breaking the block. See
+  [mob block-destruction attempts](ENTITY_DESTROY_BLOCK_ATTEMPTS.md).
+- `world.explosion_knockback_attempt` (`WorldExplosionKnockbackAttempt`) runs
+  from `ExplosionKnockbackEvent`. A veto zeroes the knockback velocity. See
+  [explosion knockback attempts](WORLD_EXPLOSION_KNOCKBACK_ATTEMPTS.md).
+- `player.grindstone_take_attempt` (`PlayerGrindstoneTakeAttempt`) runs from
+  `GrindstoneEvent.OnTakeItem`. A veto cancels taking the output. See
+  [grindstone take attempts](PLAYER_GRINDSTONE_TAKE_ATTEMPTS.md).
+- `player.continue_sleeping_attempt` (`PlayerContinueSleepingAttempt`) runs from
+  `CanContinueSleepingEvent`. A veto forces the sleeper to wake. See
+  [sleep continuation attempts](PLAYER_CONTINUE_SLEEPING_ATTEMPTS.md).
+- `entity.projectile_ammo_attempt` (`EntityProjectileAmmoAttempt`) runs from
+  `LivingGetProjectileEvent`. A veto clears the selected ammo. See
+  [projectile ammo attempts](ENTITY_PROJECTILE_AMMO_ATTEMPTS.md).
+- `player.permissions_change_attempt` (`PlayerPermissionsChangeAttempt`) runs
+  from `PermissionsChangedEvent`. A veto cancels the operator change. See
+  [permissions change attempts](PLAYER_PERMISSIONS_CHANGE_ATTEMPTS.md).
+- `world.village_siege_attempt` (`WorldVillageSiegeAttempt`) runs from
+  `VillageSiegeEvent`. A veto cancels the siege. See
+  [village siege attempts](WORLD_VILLAGE_SIEGE_ATTEMPTS.md).
+
+The `world.chunk_ticket_level` notification (`WorldChunkTicketLevel`) is
+delivered from `ChunkTicketLevelUpdatedEvent` and cannot change the level.
+
 Five observation notifications share the same bounded schema-v1 transport:
 `player.container_open` and `player.container_close` (`PlayerContainerOpened`,
 `PlayerContainerClosed`) require `player.container.observe` in addition to
