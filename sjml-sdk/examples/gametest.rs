@@ -33,6 +33,8 @@ mod block_inventory_lore;
 mod block_inventory_move;
 #[path = "gametest/block_note_block_attempt.rs"]
 mod block_note_block_attempt;
+#[path = "gametest/block_note_block_change_attempt.rs"]
+mod block_note_block_change_attempt;
 #[path = "gametest/block_piston_attempt.rs"]
 mod block_piston_attempt;
 #[path = "gametest/block_random_tick.rs"]
@@ -49,6 +51,8 @@ mod entity_age;
 mod entity_ai_control;
 #[path = "gametest/entity_attribute_modifiers.rs"]
 mod entity_attribute_modifiers;
+#[path = "gametest/entity_breathe.rs"]
+mod entity_breathe;
 #[path = "gametest/entity_breed_attempt.rs"]
 mod entity_breed_attempt;
 #[path = "gametest/entity_convert_attempt.rs"]
@@ -59,6 +63,8 @@ mod entity_despawn_attempt;
 mod entity_destroy_block_attempt;
 #[path = "gametest/entity_drops_attempt.rs"]
 mod entity_drops_attempt;
+#[path = "gametest/entity_drown_attempt.rs"]
+mod entity_drown_attempt;
 #[path = "gametest/entity_effect_application.rs"]
 mod entity_effect_application;
 #[path = "gametest/entity_enderman_anger_attempt.rs"]
@@ -135,6 +141,8 @@ mod player_attack_attempt;
 mod player_bossbar;
 #[path = "gametest/player_chat_attempt.rs"]
 mod player_chat_attempt;
+#[path = "gametest/player_client_information.rs"]
+mod player_client_information;
 #[path = "gametest/player_command_attempt.rs"]
 mod player_command_attempt;
 #[path = "gametest/player_container_events.rs"]
@@ -151,6 +159,10 @@ mod player_experience_change;
 mod player_fall_distance;
 #[path = "gametest/player_fished_attempt.rs"]
 mod player_fished_attempt;
+#[path = "gametest/player_flyable_fall.rs"]
+mod player_flyable_fall;
+#[path = "gametest/player_grindstone_place_attempt.rs"]
+mod player_grindstone_place_attempt;
 #[path = "gametest/player_grindstone_take_attempt.rs"]
 mod player_grindstone_take_attempt;
 #[path = "gametest/player_inventory_custom_name.rs"]
@@ -161,6 +173,8 @@ mod player_inventory_enchantment;
 mod player_inventory_give;
 #[path = "gametest/player_inventory_lore.rs"]
 mod player_inventory_lore;
+#[path = "gametest/player_item_stacked_attempt.rs"]
+mod player_item_stacked_attempt;
 #[path = "gametest/player_item_use_attempt.rs"]
 mod player_item_use_attempt;
 #[path = "gametest/player_movement_state.rs"]
@@ -203,14 +217,20 @@ mod sound_play_attempt;
 mod world_block_tag;
 #[path = "gametest/world_blocks.rs"]
 mod world_blocks;
+#[path = "gametest/world_chunk_data_save.rs"]
+mod world_chunk_data_save;
 #[path = "gametest/world_chunk_lifecycle.rs"]
 mod world_chunk_lifecycle;
 #[path = "gametest/world_chunk_ticket_level.rs"]
 mod world_chunk_ticket_level;
 #[path = "gametest/world_chunk_watch.rs"]
 mod world_chunk_watch;
+#[path = "gametest/world_chunk_watch_sent.rs"]
+mod world_chunk_watch_sent;
 #[path = "gametest/world_difficulty.rs"]
 mod world_difficulty;
+#[path = "gametest/world_difficulty_change.rs"]
+mod world_difficulty_change;
 #[path = "gametest/world_explosion_knockback_attempt.rs"]
 mod world_explosion_knockback_attempt;
 #[path = "gametest/world_fluid_source_attempt.rs"]
@@ -877,6 +897,16 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     world_explosion_knockback_attempt::initialize()?;
     world_fluid_source_attempt::initialize()?;
     world_village_siege_attempt::initialize()?;
+    block_note_block_change_attempt::initialize()?;
+    entity_breathe::initialize()?;
+    entity_drown_attempt::initialize()?;
+    player_client_information::initialize()?;
+    player_flyable_fall::initialize()?;
+    player_grindstone_place_attempt::initialize()?;
+    player_item_stacked_attempt::initialize()?;
+    world_chunk_data_save::initialize()?;
+    world_chunk_watch_sent::initialize()?;
+    world_difficulty_change::initialize()?;
     player_anvil_update_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;

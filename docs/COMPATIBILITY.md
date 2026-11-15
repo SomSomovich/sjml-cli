@@ -16,15 +16,25 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.116.0`, Rust SDK/macros `0.114.0`, private CLI
-`0.1.46`, and ABI `1.106.0`. ABI compatibility remains major-version based: host
-0.116.0 accepts ABI `1.0.x` through `1.106.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.106.0` and host range
-`^0.116.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.117.0`, Rust SDK/macros `0.115.0`, private CLI
+`0.1.47`, and ABI `1.107.0`. ABI compatibility remains major-version based: host
+0.117.0 accepts ABI `1.0.x` through `1.107.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.107.0` and host range
+`^0.117.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.107.0
+
+This version adds four synchronous cancellable logical-server callbacks
+(`entity.drown_attempt`, `block.note_block_change_attempt`,
+`player.grindstone_place_attempt`, `player.item_stacked_attempt`) plus six
+observation notifications (`world.chunk_watch_sent`,
+`player.client_information`, `entity.breathe`, `player.flyable_fall`,
+`world.difficulty_change`, `world.chunk_data_save`). All payloads are bounded
+schema-v1 records; the vetoes reject asynchronous handlers.
 
 ### APIs added in ABI 1.106.0
 

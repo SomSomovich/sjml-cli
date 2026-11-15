@@ -96,6 +96,7 @@ pub mod block_brew_attempt;
 pub mod block_entity;
 pub mod block_grow_feature_attempt;
 pub mod block_note_block_attempt;
+pub mod block_note_block_change_attempt;
 pub mod chat_messages;
 pub mod client_assets;
 pub mod client_audio;
@@ -114,9 +115,11 @@ pub mod client_sound_started;
 pub mod command_suggestions;
 pub mod entity;
 pub mod entity_attributes;
+pub mod entity_breathe;
 pub mod entity_data;
 pub mod entity_despawn_attempt;
 pub mod entity_destroy_block_attempt;
+pub mod entity_drown_attempt;
 pub mod entity_enderman_anger_attempt;
 pub mod entity_finalize_spawn_attempt;
 pub mod entity_left_level;
@@ -140,11 +143,15 @@ pub mod player_anvil_repair;
 pub mod player_arrow_loose_attempt;
 pub mod player_arrow_nock_attempt;
 pub mod player_bossbar;
+pub mod player_client_information;
 pub mod player_container_events;
 pub mod player_continue_sleeping_attempt;
 pub mod player_critical_hit_attempt;
+pub mod player_flyable_fall;
+pub mod player_grindstone_place_attempt;
 pub mod player_grindstone_take_attempt;
 pub mod player_inventory;
+pub mod player_item_stacked_attempt;
 pub mod player_permissions_change_attempt;
 pub mod player_spawn_phantoms_attempt;
 pub mod player_statistics;
@@ -161,9 +168,12 @@ pub mod storage;
 pub mod task;
 pub mod widgets;
 pub mod world;
+pub mod world_chunk_data_save;
 pub mod world_chunk_lifecycle;
 pub mod world_chunk_ticket_level;
 pub mod world_chunk_watch;
+pub mod world_chunk_watch_sent;
+pub mod world_difficulty_change;
 pub mod world_explosion_knockback_attempt;
 pub mod world_fluid_source_attempt;
 pub mod world_save_events;
@@ -187,6 +197,7 @@ pub use block_entity::{
 };
 pub use block_grow_feature_attempt::BlockGrowFeatureAttempt;
 pub use block_note_block_attempt::BlockNoteBlockAttempt;
+pub use block_note_block_change_attempt::BlockNoteBlockChangeAttempt;
 pub use chat_messages::{
     ChatClickAction, ChatMessage, ChatMessageAction, ChatMessageSource,
     ChatMessageSubscriptionHandle, ChatSpan, ChatText, MAX_CHAT_INTERACTION_BYTES,
@@ -304,8 +315,10 @@ pub use entity_attributes::{
     AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
     MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
 };
+pub use entity_breathe::EntityBreathe;
 pub use entity_despawn_attempt::EntityDespawnAttempt;
 pub use entity_destroy_block_attempt::EntityDestroyBlockAttempt;
+pub use entity_drown_attempt::EntityDrownAttempt;
 pub use entity_enderman_anger_attempt::EntityEndermanAngerAttempt;
 pub use entity_finalize_spawn_attempt::EntityFinalizeSpawnAttempt;
 pub use entity_left_level::{
@@ -446,9 +459,14 @@ pub use player_advancement::{
 pub use player_anvil_repair::{AnvilRepairItemSnapshot, PlayerAnvilRepair};
 pub use player_arrow_loose_attempt::PlayerArrowLooseAttempt;
 pub use player_arrow_nock_attempt::PlayerArrowNockAttempt;
+pub use player_client_information::PlayerClientInformation;
 pub use player_container_events::{PlayerContainerClosed, PlayerContainerOpened};
 pub use player_continue_sleeping_attempt::PlayerContinueSleepingAttempt;
 pub use player_critical_hit_attempt::PlayerCriticalHitAttempt;
+pub use player_flyable_fall::PlayerFlyableFall;
+pub use player_grindstone_place_attempt::{
+    GrindstonePlaceItemSnapshot, PlayerGrindstonePlaceAttempt,
+};
 pub use player_grindstone_take_attempt::{GrindstoneItemSnapshot, PlayerGrindstoneTakeAttempt};
 pub use player_inventory::{
     clear_item_glint_override as clear_player_inventory_item_glint_override,
@@ -459,6 +477,7 @@ pub use player_inventory::{
     MAX_PLAYER_INVENTORY_MOVE_COUNT, MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
     MAX_PLAYER_INVENTORY_SLOT_INDEX,
 };
+pub use player_item_stacked_attempt::{PlayerItemStackedAttempt, StackedItemSnapshot};
 pub use player_permissions_change_attempt::PlayerPermissionsChangeAttempt;
 pub use player_spawn_phantoms_attempt::PlayerSpawnPhantomsAttempt;
 pub use player_statistics::{
@@ -553,6 +572,7 @@ pub use world::{
     MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES, MAX_WORLD_TAG_MEMBERS_QUERY_BYTES,
     MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES, WORLD_BLOCK_UPDATE_ALLOWED_MASK,
 };
+pub use world_chunk_data_save::WorldChunkDataSave;
 pub use world_chunk_lifecycle::{
     WorldChunkLifecycle, MAX_WORLD_CHUNK_COORDINATE, MAX_WORLD_CHUNK_DIMENSION_ID_BYTES,
     MAX_WORLD_CHUNK_LIFECYCLE_CALLBACKS, MAX_WORLD_CHUNK_LIFECYCLE_PAYLOAD_BYTES,
@@ -560,6 +580,8 @@ pub use world_chunk_lifecycle::{
 };
 pub use world_chunk_ticket_level::WorldChunkTicketLevel;
 pub use world_chunk_watch::{WorldChunkUnwatched, WorldChunkWatched};
+pub use world_chunk_watch_sent::WorldChunkWatchSent;
+pub use world_difficulty_change::WorldDifficultyChange;
 pub use world_explosion_knockback_attempt::WorldExplosionKnockbackAttempt;
 pub use world_fluid_source_attempt::WorldFluidSourceAttempt;
 pub use world_save_events::{
@@ -587,6 +609,7 @@ pub mod prelude {
     };
     pub use crate::block_grow_feature_attempt::BlockGrowFeatureAttempt;
     pub use crate::block_note_block_attempt::BlockNoteBlockAttempt;
+    pub use crate::block_note_block_change_attempt::BlockNoteBlockChangeAttempt;
     pub use crate::chat_messages;
     pub use crate::chat_messages::{
         ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
@@ -720,12 +743,14 @@ pub mod prelude {
         AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
         MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
     };
+    pub use crate::entity_breathe::EntityBreathe;
     pub use crate::entity_data;
     pub use crate::entity_data::{
         ENTITY_DATA_MISSING, MAX_ENTITY_DATA_KEY_BYTES, MAX_ENTITY_DATA_VALUE_BYTES,
     };
     pub use crate::entity_despawn_attempt::EntityDespawnAttempt;
     pub use crate::entity_destroy_block_attempt::EntityDestroyBlockAttempt;
+    pub use crate::entity_drown_attempt::EntityDrownAttempt;
     pub use crate::entity_enderman_anger_attempt::EntityEndermanAngerAttempt;
     pub use crate::entity_finalize_spawn_attempt::EntityFinalizeSpawnAttempt;
     pub use crate::entity_left_level;
@@ -878,9 +903,14 @@ pub mod prelude {
     pub use crate::player_anvil_repair::{AnvilRepairItemSnapshot, PlayerAnvilRepair};
     pub use crate::player_arrow_loose_attempt::PlayerArrowLooseAttempt;
     pub use crate::player_arrow_nock_attempt::PlayerArrowNockAttempt;
+    pub use crate::player_client_information::PlayerClientInformation;
     pub use crate::player_container_events::{PlayerContainerClosed, PlayerContainerOpened};
     pub use crate::player_continue_sleeping_attempt::PlayerContinueSleepingAttempt;
     pub use crate::player_critical_hit_attempt::PlayerCriticalHitAttempt;
+    pub use crate::player_flyable_fall::PlayerFlyableFall;
+    pub use crate::player_grindstone_place_attempt::{
+        GrindstonePlaceItemSnapshot, PlayerGrindstonePlaceAttempt,
+    };
     pub use crate::player_grindstone_take_attempt::{
         GrindstoneItemSnapshot, PlayerGrindstoneTakeAttempt,
     };
@@ -897,6 +927,7 @@ pub mod prelude {
         MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
         MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
+    pub use crate::player_item_stacked_attempt::{PlayerItemStackedAttempt, StackedItemSnapshot};
     pub use crate::player_permissions_change_attempt::PlayerPermissionsChangeAttempt;
     pub use crate::player_spawn_phantoms_attempt::PlayerSpawnPhantomsAttempt;
     pub use crate::player_statistics;
@@ -1019,6 +1050,7 @@ pub mod prelude {
         MAX_WORLD_REDSTONE_SIGNAL, MAX_WORLD_SPAWN_POINT_BYTES, MIN_WORLD_PROJECTILE_SPEED,
         WORLD_BLOCK_UPDATE_ALLOWED_MASK,
     };
+    pub use crate::world_chunk_data_save::WorldChunkDataSave;
     pub use crate::world_chunk_lifecycle;
     pub use crate::world_chunk_lifecycle::{
         WorldChunkLifecycle, MAX_WORLD_CHUNK_COORDINATE, MAX_WORLD_CHUNK_DIMENSION_ID_BYTES,
@@ -1027,6 +1059,8 @@ pub mod prelude {
     };
     pub use crate::world_chunk_ticket_level::WorldChunkTicketLevel;
     pub use crate::world_chunk_watch::{WorldChunkUnwatched, WorldChunkWatched};
+    pub use crate::world_chunk_watch_sent::WorldChunkWatchSent;
+    pub use crate::world_difficulty_change::WorldDifficultyChange;
     pub use crate::world_explosion_knockback_attempt::WorldExplosionKnockbackAttempt;
     pub use crate::world_fluid_source_attempt::WorldFluidSourceAttempt;
     pub use crate::world_save_events;

@@ -157,6 +157,25 @@ Three observation notifications complete the wave: `player.anvil_repair`
   `VillageSiegeEvent`. A veto cancels the siege. See
   [village siege attempts](WORLD_VILLAGE_SIEGE_ATTEMPTS.md).
 
+- `entity.drown_attempt` (`EntityDrownAttempt`) runs from `LivingDrownEvent`.
+  A veto cancels drowning damage and bubble loss for that tick. See
+  [drowning attempts](ENTITY_DROWN_ATTEMPTS.md).
+- `block.note_block_change_attempt` (`BlockNoteBlockChangeAttempt`) runs from
+  `NoteBlockEvent.Change`. A veto keeps the old note. See
+  [note-change attempts](BLOCK_NOTE_BLOCK_CHANGE_ATTEMPTS.md).
+- `player.grindstone_place_attempt` (`PlayerGrindstonePlaceAttempt`) runs from
+  `GrindstoneEvent.OnPlaceItem`. A veto empties the output. See
+  [grindstone input attempts](PLAYER_GRINDSTONE_PLACE_ATTEMPTS.md).
+- `player.item_stacked_attempt` (`PlayerItemStackedAttempt`) runs from
+  `ItemStackedOnOtherEvent`. A veto rejects the stacking click. See
+  [item stacking attempts](PLAYER_ITEM_STACKED_ATTEMPTS.md).
+
+The wave also adds six observation notifications: `world.chunk_watch_sent`
+(`WorldChunkWatchSent`), `player.client_information`
+(`PlayerClientInformation`), `entity.breathe` (`EntityBreathe`),
+`player.flyable_fall` (`PlayerFlyableFall`), `world.difficulty_change`
+(`WorldDifficultyChange`), and `world.chunk_data_save` (`WorldChunkDataSave`).
+
 The `world.chunk_ticket_level` notification (`WorldChunkTicketLevel`) is
 delivered from `ChunkTicketLevelUpdatedEvent` and cannot change the level.
 

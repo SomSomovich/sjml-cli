@@ -1,16 +1,24 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.106.0**. This version adds ten more logical-server
-notification and veto callbacks covering fluid sources, feature growth, mob
-block breaking, explosion knockback, grindstone output, sleep continuation,
-projectile ammo, operator permissions, chunk ticket levels, and village
-sieges. Existing ABI 1.105.0 contracts remain supported.
+The current ABI is **1.107.0**. This version adds ten more logical-server
+notification and veto callbacks covering drowning, note changes, grindstone
+inputs, slot stacking, chunk delivery, client settings, breathing, flyable
+falls, difficulty changes, and chunk-data saves. Existing ABI 1.106.0
+contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.107.0 adds ten logical-server callbacks. Four are synchronous vetoes
+that require `events.subscribe` and `events.cancel`:
+`entity.drown_attempt`, `block.note_block_change_attempt`,
+`player.grindstone_place_attempt`, and `player.item_stacked_attempt`. Six are
+observation notifications: `world.chunk_watch_sent`,
+`player.client_information`, `entity.breathe`, `player.flyable_fall`,
+`world.difficulty_change`, and `world.chunk_data_save`.
 
 ABI 1.106.0 adds ten logical-server callbacks. Nine are synchronous vetoes
 that require `events.subscribe` and `events.cancel`:
@@ -20,6 +28,58 @@ that require `events.subscribe` and `events.cancel`:
 `entity.projectile_ammo_attempt`, `player.permissions_change_attempt`, and
 `world.village_siege_attempt`. One is an observation notification:
 `world.chunk_ticket_level`.
+
+ABI 1.107.0 adds ten more logical-server callbacks. Each payload starts with a
+little-endian `i32` schema version `1`:
+
+- `entity.drown_attempt` encodes the entity UUID and type, dimension, the
+  drowning flag, finite `f32` damage in `0..=1,000`, and the `i32` bubble
+  count. NeoForge fires it from `LivingDrownEvent`; a veto cancels the damage
+  and bubble loss for that tick.
+- `block.note_block_change_attempt` encodes the dimension, block x/y/z, and
+  the old note/octave plus the new note. NeoForge fires it from
+  `NoteBlockEvent.Change`; a veto keeps the old note.
+- `player.grindstone_place_attempt` encodes two nested item snapshots (top,
+  bottom) and `i32` experience. NeoForge fires it from
+  `GrindstoneEvent.OnPlaceItem`; a veto empties the output.
+- `player.item_stacked_attempt` encodes the player UUID, dimension, two nested
+  item snapshots (carried, stacked-on), the lowercase click action, and the
+  `i32` slot index. NeoForge fires it from `ItemStackedOnOtherEvent`; a veto
+  rejects the stacking click.
+- `world.chunk_watch_sent` encodes the dimension, player UUID, and `i32` chunk
+  x/z. It is delivered from `ChunkWatchEvent.Sent` after the chunk reaches the
+  client.
+- `player.client_information` encodes the player UUID, dimension, language,
+  `i32` view distance, lowercase chat visibility, Boolean chat colors, `i32`
+  model customisation, lowercase main hand, and the text-filtering and
+  listing Boolean flags. It is delivered from
+  `ClientInformationUpdatedEvent`.
+- `entity.breathe` encodes the entity UUID and type, dimension, the
+  can-breathe flag, and the `i32` air consume/refill amounts. It is delivered
+  from `LivingBreatheEvent` and cannot change them.
+- `player.flyable_fall` encodes the player UUID, dimension, and finite `f32`
+  distance and multiplier in `0..=10,000`. It is delivered from
+  `PlayerFlyableFallEvent`.
+- `world.difficulty_change` encodes the lowercase new and old difficulty names.
+  It is delivered from `DifficultyChangeEvent`.
+- `world.chunk_data_save` encodes the dimension, `i32` chunk x/z, and the
+  top-level NBT entry count (never the tag itself). It is delivered from
+  `ChunkDataEvent.Save`.
+
+The four vetoes run synchronously on the owning logical-server thread, invoke
+at most 64 callbacks per attempt, and reject `#[event_async]`. Strings are
+bounded to 256 UTF-8 bytes and payloads to 0.25–2 KiB.
+
+See [drowning attempts](ENTITY_DROWN_ATTEMPTS.md),
+[note-change attempts](BLOCK_NOTE_BLOCK_CHANGE_ATTEMPTS.md),
+[grindstone input attempts](PLAYER_GRINDSTONE_PLACE_ATTEMPTS.md),
+[item stacking attempts](PLAYER_ITEM_STACKED_ATTEMPTS.md),
+[chunk delivery notifications](WORLD_CHUNK_WATCH_SENT.md),
+[client information](PLAYER_CLIENT_INFORMATION.md),
+[breathing notifications](ENTITY_BREATHE.md),
+[flyable fall notifications](PLAYER_FLYABLE_FALL.md),
+[difficulty change](WORLD_DIFFICULTY_CHANGE.md), and
+[chunk data saves](WORLD_CHUNK_DATA_SAVE.md).
 
 ABI 1.105.0 adds ten logical-server callbacks. Seven are synchronous vetoes
 that require `events.subscribe` and `events.cancel`:
