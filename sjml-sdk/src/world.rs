@@ -69,6 +69,10 @@ pub const MAX_WORLD_EXPLOSIONS_PER_TICK: usize = 2;
 pub const MAX_WORLD_LIGHTNING_STRIKES_PER_TICK: usize = 4;
 /// Maximum blocks one module can destroy per logical-server tick.
 pub const MAX_WORLD_BLOCK_DESTROYS_PER_TICK: usize = 32;
+/// Maximum UTF-8 bytes in one parsed block-state specification.
+pub const MAX_WORLD_BLOCK_STATE_BYTES: usize = 512;
+/// Maximum block-state changes one module can apply per logical-server tick.
+pub const MAX_WORLD_BLOCK_STATE_SETS_PER_TICK: usize = 32;
 /// Maximum ordinary item stacks one module can spawn per logical-server tick.
 pub const MAX_WORLD_ITEM_SPAWNS_PER_TICK: usize = 16;
 /// Maximum stack count accepted by [`spawn_item`] before the host checks the item's own limit.
@@ -1365,6 +1369,17 @@ struct WorldBlockDestroyRequest {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
+struct WorldBlockStateSetRequest {
+    world: WorldHandle,
+    x: i32,
+    y: i32,
+    z: i32,
+    state: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
 struct WorldItemSpawnRequest {
     world: WorldHandle,
     item_id: String,
@@ -1556,6 +1571,8 @@ extern "C" {
     fn imported_strike_lightning(query: i32, query_length: i32) -> i32;
     #[link_name = "destroy_block"]
     fn imported_destroy_block(query: i32, query_length: i32) -> i32;
+    #[link_name = "set_block_state"]
+    fn imported_set_block_state(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_item"]
     fn imported_spawn_item(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_particles"]
@@ -3807,6 +3824,102 @@ pub fn destroy_block(world: WorldHandle, position: BlockPos, drop_items: bool) -
     }
 }
 
+/// Sets one full block state at an already-loaded logical-server position.
+///
+/// The module must request and receive both `world.read` and `world.write`.
+/// The specification uses the vanilla block-state syntax, such as
+/// `minecraft:oak_stairs[facing=east,half=top,shape=straight,waterlogged=false]`,
+/// with at most 512 UTF-8 bytes and no NBT. The position must be inside build
+/// height and the world border, and its chunk must already be loaded; the call
+/// never requests a chunk load. Neighbor and client updates use the normal
+/// vanilla update flags. Each module can apply at most 32 changes per
+/// logical-server tick.
+pub fn set_block_state(world: WorldHandle, position: BlockPos, state: &str) -> SjmlResult<()> {
+    validate_world_position(position)?;
+    validate_block_state_spec(state)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldBlockStateSetRequest {
+            world,
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            state: state.to_owned(),
+        })?;
+        // SAFETY: the encoded request remains allocated and readable for this synchronous import.
+        let status = unsafe {
+            imported_set_block_state(query.as_ptr() as usize as u32 as i32, query.len() as i32)
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the block-state change",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = world;
+        Err(unsupported_target())
+    }
+}
+
+fn validate_block_state_spec(spec: &str) -> SjmlResult<()> {
+    if spec.len() < 3 || spec.len() > MAX_WORLD_BLOCK_STATE_BYTES {
+        return Err(SjmlError::new(
+            ErrorCode::PayloadTooLarge,
+            "block-state specification must be 3 to 512 UTF-8 bytes",
+        ));
+    }
+    let (id, properties) = match spec.find('[') {
+        Some(index) => (&spec[..index], Some(&spec[index + 1..])),
+        None => (spec, None),
+    };
+    validate_resource_id(id, "block state")?;
+    let Some(properties) = properties else {
+        return Ok(());
+    };
+    let Some(properties) = properties.strip_suffix(']') else {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block-state properties must end with ']'",
+        ));
+    };
+    if properties.is_empty() {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "block-state property list must not be empty",
+        ));
+    }
+    for pair in properties.split(',') {
+        let Some((key, value)) = pair.split_once('=') else {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "block-state properties must use key=value pairs",
+            ));
+        };
+        let valid_key = !key.is_empty()
+            && key
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+        let valid_value = !value.is_empty()
+            && value.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'_' | b'.' | b'-')
+            });
+        if !valid_key || !valid_value {
+            return Err(SjmlError::new(
+                ErrorCode::InvalidArgument,
+                "block-state property names and values must be lowercase identifiers",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Spawns one ordinary item stack in an already-loaded logical-server world.
 ///
 /// The module must request and receive `world.read` and `world.write`. The item ID may name any
@@ -4687,33 +4800,35 @@ mod tests {
         daylight_cycle_enabled, destroy_block, entity_type_tag_members, fluid_at, fluid_flow_at,
         fluid_tag_members, integer_game_rule, item_has_tag, item_tag_members, loaded_chunks,
         notify_neighbors_at, play_sound, raycast, schedule_block_tick, schedule_fluid_tick,
-        set_block, set_block_properties, set_block_with_options, set_daylight_cycle_enabled,
-        set_game_time, set_integer_game_rule, set_time, spawn_entity, spawn_item, spawn_particle,
-        spawn_projectile, strike_lightning, structures_at, tag_members, validate_biome_ids,
-        validate_block_property_updates, validate_fluid_flow, validate_loaded_chunk_query,
-        validate_loaded_chunk_results, validate_structure_ids, validate_tag_member_ids,
-        validate_world_position, Aabb, BiomeClimateQuery, BiomeClimateResponse, BiomeIdsQuery,
-        BiomeIdsResponse, BiomePrecipitation, BiomeTemperatureModifier, BlockCollisionBox,
-        BlockCollisionBoxesQuery, BlockCollisionBoxesResponse, BlockDestroySpeedQuery,
-        BlockDestroySpeedResponse, BlockPropertiesMutation, BlockPropertiesQuery,
-        BlockPropertiesResponse, BlockProperty, BlockStateBatch, BlockStateQuery,
-        BlockStateSnapshot, BlockTagQuery, BlockTagResponse, BlockUpdateOptions, ChunkPos,
-        DaylightCycleSnapshot, ExplosionInteraction, FluidFlowQuery, FluidFlowResponse,
-        FluidFlowSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity, ItemTagQuery,
-        ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
-        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery,
-        StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
+        set_block, set_block_properties, set_block_state, set_block_with_options,
+        set_daylight_cycle_enabled, set_game_time, set_integer_game_rule, set_time, spawn_entity,
+        spawn_item, spawn_particle, spawn_projectile, strike_lightning, structures_at, tag_members,
+        validate_biome_ids, validate_block_property_updates, validate_fluid_flow,
+        validate_loaded_chunk_query, validate_loaded_chunk_results, validate_structure_ids,
+        validate_tag_member_ids, validate_world_position, Aabb, BiomeClimateQuery,
+        BiomeClimateResponse, BiomeIdsQuery, BiomeIdsResponse, BiomePrecipitation,
+        BiomeTemperatureModifier, BlockCollisionBox, BlockCollisionBoxesQuery,
+        BlockCollisionBoxesResponse, BlockDestroySpeedQuery, BlockDestroySpeedResponse,
+        BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
+        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse,
+        BlockUpdateOptions, ChunkPos, DaylightCycleSnapshot, ExplosionInteraction, FluidFlowQuery,
+        FluidFlowResponse, FluidFlowSnapshot, FluidStateQuery, FluidStateResponse,
+        ItemSpawnVelocity, ItemTagQuery, ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse,
+        ProjectileVelocity, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
+        StructuresAtQuery, StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
         VanillaProjectileKind, WeatherCondition, WeatherSnapshot, WorldBlockDestroyRequest,
-        WorldCollisionQuery, WorldEntitySpawnRequest, WorldExplosionRequest, WorldGameRule,
-        WorldGameRuleMutation, WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
-        WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot,
-        WorldItemSpawnRequest, WorldLightningStrikeRequest, WorldProjectileSpawnRequest,
-        WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES,
-        MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
+        WorldBlockStateSetRequest, WorldCollisionQuery, WorldEntitySpawnRequest,
+        WorldExplosionRequest, WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery,
+        WorldGameRuleSnapshot, WorldIntegerGameRule, WorldIntegerGameRuleMutation,
+        WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot, WorldItemSpawnRequest,
+        WorldLightningStrikeRequest, WorldProjectileSpawnRequest, WorldRaycastQuery,
+        MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES, MAX_WORLD_BIOME_IDS,
+        MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
         MAX_WORLD_BLOCK_COLLISION_BOXES, MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_DESTROYS_PER_TICK,
         MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_PROPERTIES,
         MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
+        MAX_WORLD_BLOCK_STATE_BYTES, MAX_WORLD_BLOCK_STATE_SETS_PER_TICK,
         MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_EXPLOSIONS_PER_TICK,
         MAX_WORLD_EXPLOSION_POWER, MAX_WORLD_FLUID_FLOW_RESPONSE_BYTES,
@@ -4903,6 +5018,68 @@ mod tests {
             ErrorCode::UnknownErrorCode
         );
         assert_eq!(MAX_WORLD_BLOCK_DESTROYS_PER_TICK, 32);
+    }
+
+    #[test]
+    fn block_state_set_request_matches_the_java_wire_contract_and_validates_specs() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let request = WorldBlockStateSetRequest {
+            world,
+            x: -3,
+            y: 64,
+            z: 8,
+            state: "minecraft:stone".to_owned(),
+        };
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected.extend_from_slice(&64_i32.to_le_bytes());
+        expected.extend_from_slice(&8_i32.to_le_bytes());
+        expected.extend_from_slice(&15_u32.to_le_bytes());
+        expected.extend_from_slice(b"minecraft:stone");
+        assert_eq!(crate::to_bytes(&request).unwrap(), expected);
+
+        let position = crate::BlockPos { x: 0, y: 64, z: 0 };
+        assert_eq!(
+            set_block_state(world, position, "").unwrap_err().code(),
+            ErrorCode::PayloadTooLarge
+        );
+        for spec in [
+            "Stone",
+            "minecraft:oak_stairs[facing=east",
+            "minecraft:oak_stairs[facing]",
+            "minecraft:oak_stairs[=east]",
+        ] {
+            assert_eq!(
+                set_block_state(world, position, spec).unwrap_err().code(),
+                ErrorCode::InvalidArgument,
+                "{spec}"
+            );
+        }
+        assert_eq!(
+            set_block_state(
+                world,
+                crate::BlockPos {
+                    x: 30_000_001,
+                    y: 64,
+                    z: 0
+                },
+                "minecraft:stone"
+            )
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            set_block_state(world, position, "minecraft:oak_stairs[facing=east]")
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(MAX_WORLD_BLOCK_STATE_BYTES, 512);
+        assert_eq!(MAX_WORLD_BLOCK_STATE_SETS_PER_TICK, 32);
     }
 
     #[test]

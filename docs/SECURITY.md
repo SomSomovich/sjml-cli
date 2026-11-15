@@ -305,6 +305,15 @@ the player's spawn target and cannot change volume, pitch, or the requested
 position. The sound listener checks whether any active module subscribed before
 building a snapshot.
 
+ABI 1.101 adds `entity.lightning_strike_attempt`, which requires both event
+capabilities and receives only bounded target and bolt identity; a veto skips
+the strike for that entity only.
+
+`world::set_block_state` requires `world.read` and `world.write`, parses the
+state with Minecraft's own parser without NBT, accepts 3–512 UTF-8 bytes, checks
+build height, the world border, and already-loaded chunks, and allows at most 32
+changes per module per tick.
+
 `world::destroy_block` requires `world.read` and `world.write`. It accepts only
 an in-border, in-height, already-loaded non-air position, never loads a chunk,
 and runs the normal vanilla destroy path (including block loot and block-entity

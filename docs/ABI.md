@@ -1,14 +1,21 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.100.0**. This version adds the synchronous cancellable
-`sound.play_attempt` and `player.spawn_point_attempt` callbacks. Existing ABI
-1.99.0 contracts remain supported.
+The current ABI is **1.101.0**. This version adds the synchronous cancellable
+`entity.lightning_strike_attempt` callback and `world::set_block_state`.
+Existing ABI 1.100.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.101.0 adds one synchronous, cancellable logical-server callback,
+`entity.lightning_strike_attempt`, which can skip lightning damage for one
+entity, and `world::set_block_state`, which applies any parsed vanilla block
+state (without NBT) to a loaded position under `world.write` with a
+32-change-per-tick quota. Both use bounded schema-v1 payloads and loaded-only
+preflight.
 
 ABI 1.100.0 adds two synchronous, cancellable logical-server callbacks:
 `sound.play_attempt` can suppress a level sound before it is broadcast, and
@@ -834,6 +841,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.sleep_attempt`, `player.chat_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
 `entity.tame_attempt`, `entity.experience_drop_attempt`,
 `entity.convert_attempt`, `sound.play_attempt`, `player.spawn_point_attempt`,
+`entity.lightning_strike_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
@@ -925,6 +933,12 @@ ABI 1.100.0 adds two more cancellable attempts in the same Boolean-veto format:
 
 See [level sound attempts](SOUND_ATTEMPTS.md) and
 [spawn-point attempts](PLAYER_SPAWN_POINT_ATTEMPTS.md).
+
+ABI 1.101.0 adds `entity.lightning_strike_attempt` in the same Boolean-veto
+format: it encodes the target entity UUID and type, dimension ID, bolt UUID,
+and three `f64` coordinates. NeoForge fires it from
+`EntityStruckByLightningEvent`; a veto skips the strike for that entity. See
+[entity lightning-strike attempts](ENTITY_LIGHTNING_STRIKE_ATTEMPTS.md).
 
 ### Client item tooltip callback
 
@@ -2090,6 +2104,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `spawn_item` | `query_ptr, query_len` | Spawn one bounded ordinary stack from the current item registry, with loaded-only position checks and bounded velocity; status only |
 | `create_explosion` | `query_ptr, query_len` | Create one bounded schema-v1 vanilla explosion with loaded-area preflight; requires `world.read` and `world.explosion`; status only |
 | `destroy_block` | `query_ptr, query_len` | Destroy one existing loaded non-air block with an optional vanilla drop; requires `world.read` and `world.write`; status only |
+| `set_block_state` | `query_ptr, query_len` | Parse and apply one full block state (no NBT) at a loaded position; requires `world.read` and `world.write`; status only |
 | `strike_lightning` | `query_ptr, query_len` | Strike one bounded schema-v1 vanilla lightning bolt at a loaded block; requires `world.read` and `world.lightning`; status only |
 | `emit_game_event` | `query_ptr, query_len` | Dispatch one canonical game-event registry ID at a loaded block center with an empty source context; status only |
 | `spawn_particle` | `handle_ptr, handle_len, x, y, z, particle_id_ptr, particle_id_len` | Spawn one registered simple particle at the center of a loaded block; status only |
@@ -2339,6 +2354,14 @@ horizontal blast area must already be loaded. The module can create at most two
 explosions per logical-server tick. Missing capabilities, static-registration
 calls, client contexts, invalid values, and unloaded areas fail closed; this
 call never loads a chunk. See [creating explosions](WORLD_EXPLOSIONS.md).
+
+`set_block_state` requires `world.read` and `world.write`. Its bounded schema-v1
+request carries the world handle, three `i32` block coordinates, and a `u32`
+UTF-8 length plus state text of 3–512 bytes. The host parses it with Minecraft's
+block-state parser without NBT, applies normal neighbor/client updates, checks
+build height, the world border, and already-loaded chunks, and allows at most 32
+changes per module per logical-server tick. See
+[setting exact block states](WORLD_BLOCK_STATES.md).
 
 `destroy_block` requires `world.read` and `world.write`. Its exact schema-v1
 request is 41 bytes: `u32(1)`, the 24-byte module-owned world handle, three

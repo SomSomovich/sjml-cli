@@ -1833,6 +1833,33 @@ pub struct EntityConvertAttempt {
     pub outcome_entity_type_id: String,
 }
 
+/// Synchronous cancellable lightning-strike attempt against one entity.
+///
+/// NeoForge fires `entity.lightning_strike_attempt` when a lightning bolt is
+/// about to damage an entity. Return `Ok(true)` to skip the strike for that
+/// entity; the bolt and other nearby entities are unaffected. The detached
+/// snapshot contains the target entity UUID and registry type, the dimension,
+/// the bolt UUID, and the bolt position. Both `events.subscribe` and
+/// `events.cancel` are required, and the callback must remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityLightningStrikeAttempt {
+    /// Canonical UUID of the entity that would be struck.
+    pub entity_id: String,
+    /// Registry ID of the target entity type.
+    pub entity_type_id: String,
+    /// Resource location of the dimension containing the target.
+    pub dimension_id: String,
+    /// Canonical UUID of the lightning bolt entity.
+    pub lightning_id: String,
+    /// Bolt X coordinate in blocks.
+    pub x: f64,
+    /// Bolt Y coordinate in blocks.
+    pub y: f64,
+    /// Bolt Z coordinate in blocks.
+    pub z: f64,
+}
+
 /// Synchronous cancellable level-sound attempt on the logical server.
 ///
 /// NeoForge fires `sound.play_attempt` when Minecraft is about to play a sound
@@ -3466,28 +3493,29 @@ mod tests {
         EntityConvertAttempt, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
         EntityDropsAttempt, EntityDropsItemSnapshot, EntityEffectApplicationAttempt,
         EntityExperienceDropAttempt, EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntityKnockbackAttempt, EntityMountAttempt, EntityMountTarget, EntitySpawned,
-        EntityTameAttempt, EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt,
-        FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
-        ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
-        PlayerAdvancementEarned, PlayerAdvancementProgressEvent, PlayerAttackAttempt,
-        PlayerBreakSpeed, PlayerBreakSpeedAction, PlayerChatAttempt, PlayerDropAttempt,
-        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
-        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
-        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed,
-        PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved,
-        PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt,
-        PlayerSpawnPointAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
-        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        SoundPlayAttempt, SoundPlayEntity, SoundPlayPosition, SpawnPointBlockPosition,
-        WorldLifecycle, WorldTick, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
-        MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, MAX_PLAYER_BREAK_SPEED,
-        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
-        MAX_PLAYER_ITEM_CONSUMED_COUNT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
-        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
-        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        EntityKnockbackAttempt, EntityLightningStrikeAttempt, EntityMountAttempt,
+        EntityMountTarget, EntitySpawned, EntityTameAttempt, EntityTargetAttempt, EntityTick,
+        EventPriority, ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines,
+        ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse,
+        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerBreakSpeed,
+        PlayerBreakSpeedAction, PlayerChatAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
+        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
+        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
+        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed, PlayerItemCrafted,
+        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt,
+        PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt, PlayerSpawnPointAttempt,
+        PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
+        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, SoundPlayAttempt, SoundPlayEntity,
+        SoundPlayPosition, SpawnPointBlockPosition, WorldLifecycle, WorldTick,
+        MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
+        MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_ITEM_CONSUMED_COUNT,
+        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
+        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -4238,6 +4266,29 @@ mod tests {
         assert_eq!(
             from_bytes::<PlayerSpawnPointAttempt>(&expected).unwrap(),
             cleared
+        );
+
+        let strike = EntityLightningStrikeAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000003".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            lightning_id: "00000000-0000-0000-0000-000000000004".to_owned(),
+            x: 1.5,
+            y: 64.0,
+            z: -2.25,
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &strike.entity_id);
+        append_test_string(&mut expected, &strike.entity_type_id);
+        append_test_string(&mut expected, &strike.dimension_id);
+        append_test_string(&mut expected, &strike.lightning_id);
+        expected.extend_from_slice(&1.5_f64.to_bits().to_le_bytes());
+        expected.extend_from_slice(&64.0_f64.to_bits().to_le_bytes());
+        expected.extend_from_slice(&(-2.25_f64).to_bits().to_le_bytes());
+        assert_eq!(to_bytes(&strike).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<EntityLightningStrikeAttempt>(&expected).unwrap(),
+            strike
         );
     }
 

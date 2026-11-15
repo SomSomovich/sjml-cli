@@ -65,6 +65,8 @@ mod entity_join_attempt;
 mod entity_knockback_attempt;
 #[path = "gametest/entity_left_level.rs"]
 mod entity_left_level;
+#[path = "gametest/entity_lightning_strike_attempt.rs"]
+mod entity_lightning_strike_attempt;
 #[path = "gametest/entity_mount_attempt.rs"]
 mod entity_mount_attempt;
 #[path = "gametest/entity_navigation.rs"]
@@ -773,6 +775,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     player_chat_attempt::initialize()?;
     sound_play_attempt::initialize()?;
     player_spawn_point_attempt::initialize()?;
+    entity_lightning_strike_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;
     entity_breed_attempt::initialize()?;

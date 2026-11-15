@@ -66,6 +66,9 @@ pattern and require both `events.subscribe` and `events.cancel`:
 - `player.spawn_point_attempt` (`PlayerSpawnPointAttempt`) runs from
   `PlayerSetSpawnEvent`. A veto cancels the respawn-point change. See
   [spawn-point attempts](PLAYER_SPAWN_POINT_ATTEMPTS.md).
+- `entity.lightning_strike_attempt` (`EntityLightningStrikeAttempt`) runs from
+  `EntityStruckByLightningEvent`. A veto skips the strike for that entity only.
+  See [lightning-strike attempts](ENTITY_LIGHTNING_STRIKE_ATTEMPTS.md).
 
 A guest-created `world::create_explosion` also passes through the module's own
 `world.explosion_attempt` handlers, so a broad veto can suppress the guest's

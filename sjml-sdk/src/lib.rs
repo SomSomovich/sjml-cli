@@ -476,7 +476,7 @@ pub use widgets::{
 };
 pub use world::{
     block_collision_boxes, block_destroy_speed, create_explosion, destroy_block, fluid_flow_at,
-    spawn_particles, strike_lightning, BiomeClimateSnapshot, BiomePrecipitation,
+    set_block_state, spawn_particles, strike_lightning, BiomeClimateSnapshot, BiomePrecipitation,
     BiomeTemperatureModifier, BlockCollisionBox, BlockProperty, BlockStateSnapshot,
     BlockUpdateOptions, ChunkPos, ExplosionInteraction, FluidFlowSnapshot, FluidStateSnapshot,
     HeightmapType, ItemSpawnVelocity, LightSnapshot, ParticleSpawnOptions, ProjectileVelocity,
@@ -907,12 +907,12 @@ pub mod prelude {
     pub use crate::world;
     pub use crate::world::{
         block_collision_boxes, block_destroy_speed, create_explosion, destroy_block, fluid_flow_at,
-        spawn_particles, strike_lightning, BiomeClimateSnapshot, BiomePrecipitation,
-        BiomeTemperatureModifier, BlockCollisionBox, BlockProperty, BlockStateSnapshot,
-        BlockUpdateOptions, ChunkPos, ExplosionInteraction, FluidFlowSnapshot, FluidStateSnapshot,
-        HeightmapType, ItemSpawnVelocity, LightSnapshot, ParticleSpawnOptions, ProjectileVelocity,
-        RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, TagRegistry,
-        VanillaProjectileKind, WorldBorderSnapshot, WorldDifficulty, WorldGameRule,
+        set_block_state, spawn_particles, strike_lightning, BiomeClimateSnapshot,
+        BiomePrecipitation, BiomeTemperatureModifier, BlockCollisionBox, BlockProperty,
+        BlockStateSnapshot, BlockUpdateOptions, ChunkPos, ExplosionInteraction, FluidFlowSnapshot,
+        FluidStateSnapshot, HeightmapType, ItemSpawnVelocity, LightSnapshot, ParticleSpawnOptions,
+        ProjectileVelocity, RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint,
+        TagRegistry, VanillaProjectileKind, WorldBorderSnapshot, WorldDifficulty, WorldGameRule,
         WorldIntegerGameRule, WorldSpawnPoint, MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_COLLISION_BOXES, MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_DESTROYS_PER_TICK,
