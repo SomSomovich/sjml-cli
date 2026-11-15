@@ -103,6 +103,32 @@ pattern and require both `events.subscribe` and `events.cancel`:
   `SweepAttackEvent`. A veto clears the sweep and cancels the event. See
   [sweep-attack attempts](PLAYER_SWEEP_ATTACK_ATTEMPTS.md).
 
+- `item.expire_attempt` (`ItemExpireAttempt`) runs from `ItemExpireEvent`. A
+  veto extends the dropped item's lifetime with `setExtraLife`. See
+  [item expiry attempts](ITEM_EXPIRE_ATTEMPTS.md).
+- `entity.enderman_anger_attempt` (`EntityEndermanAngerAttempt`) runs from
+  `EnderManAngerEvent`. A veto keeps the Enderman from targeting the player.
+  See [Enderman anger attempts](ENTITY_ENDERMAN_ANGER_ATTEMPTS.md).
+- `entity.swap_items_attempt` (`EntitySwapItemsAttempt`) runs from
+  `LivingSwapItemsEvent.Hands`. A veto cancels the main/off-hand swap. See
+  [item swap attempts](ENTITY_SWAP_ITEMS_ATTEMPTS.md).
+- `player.arrow_nock_attempt` (`PlayerArrowNockAttempt`) and
+  `player.arrow_loose_attempt` (`PlayerArrowLooseAttempt`) run from
+  `ArrowNockEvent` and `ArrowLooseEvent`. A veto fails the draw or suppresses
+  the shot. See [bow nock attempts](PLAYER_ARROW_NOCK_ATTEMPTS.md) and
+  [bow release attempts](PLAYER_ARROW_LOOSE_ATTEMPTS.md).
+- `block.note_block_attempt` (`BlockNoteBlockAttempt`) runs from
+  `NoteBlockEvent.Play`. A veto suppresses the note sound and particles. See
+  [note block attempts](BLOCK_NOTE_BLOCK_ATTEMPTS.md).
+- `player.spawn_phantoms_attempt` (`PlayerSpawnPhantomsAttempt`) runs from
+  `PlayerSpawnPhantomsEvent`. A veto sets the result to `DENY`. See
+  [phantom spawn attempts](PLAYER_SPAWN_PHANTOMS_ATTEMPTS.md).
+
+Three observation notifications complete the wave: `player.anvil_repair`
+(`PlayerAnvilRepair`) from `AnvilRepairEvent`, `world.sleep_finished_time`
+(`WorldSleepFinishedTime`) from `SleepFinishedTimeEvent`, and
+`world.tags_updated` (`WorldTagsUpdated`) from `TagsUpdatedEvent`.
+
 Five observation notifications share the same bounded schema-v1 transport:
 `player.container_open` and `player.container_close` (`PlayerContainerOpened`,
 `PlayerContainerClosed`) require `player.container.observe` in addition to

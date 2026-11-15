@@ -492,7 +492,7 @@ pub fn init(path: &Path, id: Option<&str>, sdk: Option<&Path>) -> Result<()> {
             toml::Value::String(sdk.to_string_lossy().into_owned())
         )
     } else {
-        "sjml-sdk = \"0.112.0\"".into()
+        "sjml-sdk = \"0.113.0\"".into()
     };
     let parent = path
         .parent()

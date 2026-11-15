@@ -16,15 +16,26 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.114.0`, Rust SDK/macros `0.112.0`, private CLI
-`0.1.44`, and ABI `1.104.0`. ABI compatibility remains major-version based: host
-0.114.0 accepts ABI `1.0.x` through `1.104.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.104.0` and host range
-`^0.114.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.115.0`, Rust SDK/macros `0.113.0`, private CLI
+`0.1.45`, and ABI `1.105.0`. ABI compatibility remains major-version based: host
+0.115.0 accepts ABI `1.0.x` through `1.105.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.105.0` and host range
+`^0.115.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.105.0
+
+This version adds seven synchronous cancellable logical-server callbacks
+(`item.expire_attempt`, `entity.enderman_anger_attempt`,
+`entity.swap_items_attempt`, `player.arrow_nock_attempt`,
+`player.arrow_loose_attempt`, `block.note_block_attempt`, and
+`player.spawn_phantoms_attempt`) plus three observation notifications
+(`player.anvil_repair`, `world.sleep_finished_time`, and `world.tags_updated`).
+All payloads are bounded schema-v1 records; the vetoes reject asynchronous
+handlers.
 
 ### APIs added in ABI 1.104.0
 

@@ -1,7 +1,7 @@
 # Minecraft API coverage
 
-This is a source-based coverage matrix for the current target checkout at host **0.114.0**,
-SDK/macros **0.112.0**, private CLI **0.1.44**, ABI **1.104.0**, Minecraft **1.21.1**, and NeoForge
+This is a source-based coverage matrix for the current target checkout at host **0.115.0**,
+SDK/macros **0.113.0**, private CLI **0.1.45**, ABI **1.105.0**, Minecraft **1.21.1**, and NeoForge
 **21.1.265**. It records the public surface that exists in this tree, its path
 from a Minecraft hook to Rust/WASM, and the limits that remain. It is not a
 roadmap or a claim of complete Minecraft mod compatibility. The matrix tracks
@@ -16,6 +16,18 @@ bound and encode the byte boundary; domain-specific schemas/codecs are cited
 where present. Rust `extern` imports and public wrappers are in the cited SDK
 files. Registration callbacks and event-export callbacks use their own
 documented ABI paths rather than a host import for every operation.
+
+## ABI 1.105.0 additions
+
+ABI 1.105.0 adds seven synchronous cancellable logical-server vetoes
+(`item.expire_attempt`, `entity.enderman_anger_attempt`,
+`entity.swap_items_attempt`, `player.arrow_nock_attempt`,
+`player.arrow_loose_attempt`, `block.note_block_attempt`, and
+`player.spawn_phantoms_attempt`) and three observation notifications
+(`player.anvil_repair`, `world.sleep_finished_time`, and `world.tags_updated`).
+See the focused guides linked from [ABI 1.105.0 contract notes](ABI.md). Core
+codecs, host adapters, dispatcher/registry wiring, SDK types, and ten
+dedicated-server GameTests cover the wave.
 
 ## ABI 1.104.0 additions
 
@@ -291,6 +303,10 @@ unsupported by design, and 1 requiring additional research**. These totals are
 category counts, not percentages of Minecraft's total extension surface.
 
 ## What the evidence establishes
+
+- On 2026-11-15, host 0.115.0 / ABI 1.105.0 / SDK/macros 0.113.0 / private CLI 0.1.45 passed Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer`: 1,565 host tests, 743 core tests (one skipped), and all 208 required GameTests. The live guest vetoed marked item expiry, Enderman anger, zombie item swaps, bow nocks and releases, bell note blocks, and phantom spawns, while the anvil-repair, sleep-finished, and tag-reload notifications were captured. Cargo passed 841 CLI/SDK/macro tests. Headless checks do not verify visible client behavior or remote multiplayer.
+
+- On 2026-11-15, host 0.114.0 / ABI 1.104.0 / SDK/macros 0.112.0 / private CLI 0.1.44 passed Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer`: 1,541 host tests, 692 core tests (one skipped), and all 198 required GameTests. The live guest vetoed marked dimension travel, husk spawn finalization, zombie griefing, stray despawn, horse critical hits and sweep attacks, and a potion/nether-wart brew, while the container, wake-up, and chunk-watch notifications reached the guest. Cargo passed 804 CLI/SDK/macro tests. Headless checks do not verify visible client behavior or remote multiplayer.
 
 - On 2026-11-15, host 0.113.0 / ABI 1.103.0 / SDK/macros 0.111.0 / private CLI 0.1.43 passed Gradle `--no-daemon --configuration-cache --offline test build runGameTestServer`: 1,517 host tests, 642 core tests (one skipped), and all 188 required GameTests. The live guest vetoed a real player command and a real mob split while unmarked controls kept vanilla behavior. Cargo passed 772 CLI/SDK/macro tests, formatting, strict Clippy, and the SDK/GameTest wasm32 builds. The sound subscription precheck now reports no subscribers after a registry has closed, preventing a GameTest failure-reporting crash. Headless checks do not verify visible client behavior or remote multiplayer.
 

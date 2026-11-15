@@ -1,16 +1,24 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.104.0**. This version adds ten logical-server
-notification and veto callbacks covering container menus, dimension travel,
-spawn finalization, mob griefing, natural despawn, wake-up, critical hits,
-brewing, chunk watching, and sweep attacks. Existing ABI 1.103.0 contracts
-remain supported.
+The current ABI is **1.105.0**. This version adds ten more logical-server
+notification and veto callbacks covering anvil repairs, dropped-item expiry,
+Enderman anger, sleep time skip, main/off-hand item swaps, bow nocking and
+release, note blocks, phantom spawns, and registry tag reloads. Existing ABI
+1.104.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.105.0 adds ten logical-server callbacks. Seven are synchronous vetoes
+that require `events.subscribe` and `events.cancel`:
+`item.expire_attempt`, `entity.enderman_anger_attempt`,
+`entity.swap_items_attempt`, `player.arrow_nock_attempt`,
+`player.arrow_loose_attempt`, `block.note_block_attempt`, and
+`player.spawn_phantoms_attempt`. Three are observation notifications:
+`player.anvil_repair`, `world.sleep_finished_time`, and `world.tags_updated`.
 
 ABI 1.104.0 adds ten logical-server callbacks. Seven of them are synchronous
 vetoes that require `events.subscribe` and `events.cancel`:
@@ -977,6 +985,60 @@ ABI 1.102.0 adds two more cancellable attempts:
 
 See [piston movement attempts](BLOCK_PISTON_ATTEMPTS.md) and
 [anvil result attempts](PLAYER_ANVIL_UPDATE_ATTEMPTS.md).
+
+ABI 1.105.0 adds ten more logical-server callbacks. Each payload starts with a
+little-endian `i32` schema version `1`:
+
+- `item.expire_attempt` encodes the item entity UUID, item ID, `i32` count, the
+  dimension, three finite `f64` coordinates, and the `i32` age. NeoForge fires
+  it from `ItemExpireEvent`; a veto calls `setExtraLife(Short.MAX_VALUE)`, so
+  the dropped item does not expire.
+- `entity.enderman_anger_attempt` encodes the Enderman UUID and type, the
+  player UUID, and the dimension. NeoForge fires it from `EnderManAngerEvent`;
+  a veto keeps the Enderman from targeting the player.
+- `entity.swap_items_attempt` encodes the entity UUID and type, the dimension,
+  and two nested item snapshots (to main hand, to off hand), each with its own
+  schema version, canonical item ID, and `i32` count. NeoForge fires it from
+  `LivingSwapItemsEvent.Hands`; a veto cancels the swap.
+- `player.arrow_nock_attempt` encodes the player UUID, dimension, hand,
+  canonical item ID, `i32` count, and `u8` has-ammo. NeoForge fires it from
+  `ArrowNockEvent`; a veto fails the bow draw.
+- `player.arrow_loose_attempt` encodes the player UUID, dimension, item ID,
+  `i32` count, `i32` charge (0–10,000), and `u8` has-ammo. NeoForge fires it
+  from `ArrowLooseEvent`; a veto prevents the projectile from spawning.
+- `block.note_block_attempt` encodes the dimension, three `i32` coordinates,
+  the lowercase instrument name, `i32` note (0–24), and `i32` octave (0–2).
+  NeoForge fires it from `NoteBlockEvent.Play`; a veto suppresses the sound and
+  particles.
+- `player.spawn_phantoms_attempt` encodes the player UUID, dimension, `i32`
+  phantom count (0–64), and three `f64` coordinates. NeoForge fires it from
+  `PlayerSpawnPhantomsEvent`; a veto sets the result to `DENY`.
+- `player.anvil_repair` is an observation notification encoding the player
+  UUID, dimension, and three nested item snapshots (output, left, right) plus
+  the finite `f32` break chance in `0..=1`. It is delivered from
+  `AnvilRepairEvent`.
+- `world.sleep_finished_time` encodes the dimension, `i64` proposed new time,
+  and `i64` current day time. It is delivered from `SleepFinishedTimeEvent` and
+  cannot change the time skip.
+- `world.tags_updated` encodes the lowercase update cause
+  (`server_data_load` or `client_packet_received`) and two Boolean bytes for
+  client-packet and integrated-connection origin. It is delivered from
+  `TagsUpdatedEvent` after registry tags reload.
+
+All seven vetoes run synchronously on the owning logical-server thread, invoke
+at most 64 callbacks per attempt, and reject `#[event_async]`. Strings are
+bounded to 256 UTF-8 bytes and payloads to 1–2 KiB.
+
+See [anvil repair notifications](PLAYER_ANVIL_REPAIR.md),
+[item expiry attempts](ITEM_EXPIRE_ATTEMPTS.md),
+[Enderman anger attempts](ENTITY_ENDERMAN_ANGER_ATTEMPTS.md),
+[sleep-finished notifications](WORLD_SLEEP_FINISHED_TIME.md),
+[item swap attempts](ENTITY_SWAP_ITEMS_ATTEMPTS.md),
+[bow nock attempts](PLAYER_ARROW_NOCK_ATTEMPTS.md),
+[bow release attempts](PLAYER_ARROW_LOOSE_ATTEMPTS.md),
+[note block attempts](BLOCK_NOTE_BLOCK_ATTEMPTS.md),
+[phantom spawn attempts](PLAYER_SPAWN_PHANTOMS_ATTEMPTS.md), and
+[tag reload notifications](WORLD_TAGS_UPDATED.md).
 
 ABI 1.103.0 adds two more cancellable attempts:
 

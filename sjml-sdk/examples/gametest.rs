@@ -29,6 +29,8 @@ mod block_inventory_enchantments;
 mod block_inventory_lore;
 #[path = "gametest/block_inventory_move.rs"]
 mod block_inventory_move;
+#[path = "gametest/block_note_block_attempt.rs"]
+mod block_note_block_attempt;
 #[path = "gametest/block_piston_attempt.rs"]
 mod block_piston_attempt;
 #[path = "gametest/block_random_tick.rs"]
@@ -55,6 +57,8 @@ mod entity_despawn_attempt;
 mod entity_drops_attempt;
 #[path = "gametest/entity_effect_application.rs"]
 mod entity_effect_application;
+#[path = "gametest/entity_enderman_anger_attempt.rs"]
+mod entity_enderman_anger_attempt;
 #[path = "gametest/entity_equipment.rs"]
 mod entity_equipment;
 #[path = "gametest/entity_experience_drop_attempt.rs"]
@@ -89,6 +93,8 @@ mod entity_riding;
 mod entity_rotation;
 #[path = "gametest/entity_shield_block_attempt.rs"]
 mod entity_shield_block_attempt;
+#[path = "gametest/entity_swap_items_attempt.rs"]
+mod entity_swap_items_attempt;
 #[path = "gametest/entity_tame_attempt.rs"]
 mod entity_tame_attempt;
 #[path = "gametest/entity_target.rs"]
@@ -103,12 +109,20 @@ mod entity_tick;
 mod entity_travel_dimension_attempt;
 #[path = "gametest/gameplay_events.rs"]
 mod gameplay_events;
+#[path = "gametest/item_expire_attempt.rs"]
+mod item_expire_attempt;
 #[path = "gametest/player_advancements.rs"]
 mod player_advancements;
 #[path = "gametest/player_air_supply.rs"]
 mod player_air_supply;
+#[path = "gametest/player_anvil_repair.rs"]
+mod player_anvil_repair;
 #[path = "gametest/player_anvil_update_attempt.rs"]
 mod player_anvil_update_attempt;
+#[path = "gametest/player_arrow_loose_attempt.rs"]
+mod player_arrow_loose_attempt;
+#[path = "gametest/player_arrow_nock_attempt.rs"]
+mod player_arrow_nock_attempt;
 #[path = "gametest/player_attack_attempt.rs"]
 mod player_attack_attempt;
 #[path = "gametest/player_bossbar.rs"]
@@ -145,6 +159,8 @@ mod player_movement_state;
 mod player_potion_use_attempt;
 #[path = "gametest/player_respawn_point.rs"]
 mod player_respawn_point;
+#[path = "gametest/player_spawn_phantoms_attempt.rs"]
+mod player_spawn_phantoms_attempt;
 #[path = "gametest/player_spawn_point_attempt.rs"]
 mod player_spawn_point_attempt;
 #[path = "gametest/player_statistics.rs"]
@@ -201,10 +217,14 @@ mod world_redstone_signal;
 mod world_save_events;
 #[path = "gametest/world_set_block_options.rs"]
 mod world_set_block_options;
+#[path = "gametest/world_sleep_finished_time.rs"]
+mod world_sleep_finished_time;
 #[path = "gametest/world_spawn_point.rs"]
 mod world_spawn_point;
 #[path = "gametest/world_tag_members.rs"]
 mod world_tag_members;
+#[path = "gametest/world_tags_updated.rs"]
+mod world_tags_updated;
 
 static SAW_PIG_DEATH: AtomicBool = AtomicBool::new(false);
 static SAW_PIG_DEATH_ATTEMPT: AtomicBool = AtomicBool::new(false);
@@ -817,6 +837,16 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     player_sweep_attack_attempt::initialize()?;
     player_wake_up::initialize()?;
     world_chunk_watch::initialize()?;
+    block_note_block_attempt::initialize()?;
+    entity_enderman_anger_attempt::initialize()?;
+    entity_swap_items_attempt::initialize()?;
+    item_expire_attempt::initialize()?;
+    player_anvil_repair::initialize()?;
+    player_arrow_loose_attempt::initialize()?;
+    player_arrow_nock_attempt::initialize()?;
+    player_spawn_phantoms_attempt::initialize()?;
+    world_sleep_finished_time::initialize()?;
+    world_tags_updated::initialize()?;
     player_anvil_update_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;

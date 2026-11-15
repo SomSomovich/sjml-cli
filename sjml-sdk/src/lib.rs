@@ -94,6 +94,7 @@ pub mod abi;
 pub mod batch;
 pub mod block_brew_attempt;
 pub mod block_entity;
+pub mod block_note_block_attempt;
 pub mod chat_messages;
 pub mod client_assets;
 pub mod client_audio;
@@ -114,9 +115,11 @@ pub mod entity;
 pub mod entity_attributes;
 pub mod entity_data;
 pub mod entity_despawn_attempt;
+pub mod entity_enderman_anger_attempt;
 pub mod entity_finalize_spawn_attempt;
 pub mod entity_left_level;
 pub mod entity_mob_griefing_attempt;
+pub mod entity_swap_items_attempt;
 pub mod entity_teleport_attempt;
 pub mod entity_travel_dimension_attempt;
 mod error;
@@ -124,15 +127,20 @@ pub mod events;
 pub mod gl;
 pub mod host;
 pub mod inventory;
+pub mod item_expire_attempt;
 pub mod menu;
 pub mod model_animation;
 pub mod network;
 pub mod player;
 pub mod player_advancement;
+pub mod player_anvil_repair;
+pub mod player_arrow_loose_attempt;
+pub mod player_arrow_nock_attempt;
 pub mod player_bossbar;
 pub mod player_container_events;
 pub mod player_critical_hit_attempt;
 pub mod player_inventory;
+pub mod player_spawn_phantoms_attempt;
 pub mod player_statistics;
 pub mod player_sweep_attack_attempt;
 pub mod player_wake_up;
@@ -150,6 +158,8 @@ pub mod world;
 pub mod world_chunk_lifecycle;
 pub mod world_chunk_watch;
 pub mod world_save_events;
+pub mod world_sleep_finished_time;
+pub mod world_tags_updated;
 
 pub use abi::{
     BlockEntityHandle, BlockEntityTag, BlockHandle, BlockTag, EntityHandle, EntityTag,
@@ -165,6 +175,7 @@ pub use block_entity::{
     MAX_PERSISTENT_DATA_KEY_BYTES, MAX_PERSISTENT_DATA_STRING_BYTES, MAX_SIGN_TEXT_LINE_BYTES,
     MAX_SIGN_TEXT_RESPONSE_BYTES,
 };
+pub use block_note_block_attempt::BlockNoteBlockAttempt;
 pub use chat_messages::{
     ChatClickAction, ChatMessage, ChatMessageAction, ChatMessageSource,
     ChatMessageSubscriptionHandle, ChatSpan, ChatText, MAX_CHAT_INTERACTION_BYTES,
@@ -283,12 +294,14 @@ pub use entity_attributes::{
     MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
 };
 pub use entity_despawn_attempt::EntityDespawnAttempt;
+pub use entity_enderman_anger_attempt::EntityEndermanAngerAttempt;
 pub use entity_finalize_spawn_attempt::EntityFinalizeSpawnAttempt;
 pub use entity_left_level::{
     EntityLeftLevel, ENTITY_LEFT_LEVEL_EVENT_NAME, MAX_ENTITY_LEFT_LEVEL_CALLBACKS,
     MAX_ENTITY_LEFT_LEVEL_PAYLOAD_BYTES, MAX_ENTITY_LEFT_LEVEL_STRING_BYTES,
 };
 pub use entity_mob_griefing_attempt::EntityMobGriefingAttempt;
+pub use entity_swap_items_attempt::{EntitySwapItemsAttempt, SwapItemSnapshot};
 pub use entity_teleport_attempt::{
     EntityTeleportAttempt, EntityTeleportAttemptAction, EntityTeleportCause,
     ENTITY_TELEPORT_ATTEMPT_CANCEL_CAPABILITY, MAX_ENTITY_TELEPORT_ATTEMPT_COORDINATE,
@@ -368,6 +381,7 @@ pub use inventory::{
     BlockPos, Direction, InventoryEndpoint, InventorySnapshot, ItemStackDescriptor,
     ItemStackSnapshot, MAX_ITEM_TRANSFER_COUNT,
 };
+pub use item_expire_attempt::ItemExpireAttempt;
 pub use menu::{
     EditableMenuDefinition, EditableMenuEndpoint, EditableMenuSlot, EditableMenuStack, MenuAction,
     MenuDefinition, MenuItem,
@@ -416,6 +430,9 @@ pub use player_advancement::{
     PlayerAdvancementProgress, MAX_PLAYER_ADVANCEMENT_CRITERIA,
     MAX_PLAYER_ADVANCEMENT_CRITERION_ID_BYTES, MAX_PLAYER_ADVANCEMENT_PROGRESS_BYTES,
 };
+pub use player_anvil_repair::{AnvilRepairItemSnapshot, PlayerAnvilRepair};
+pub use player_arrow_loose_attempt::PlayerArrowLooseAttempt;
+pub use player_arrow_nock_attempt::PlayerArrowNockAttempt;
 pub use player_container_events::{PlayerContainerClosed, PlayerContainerOpened};
 pub use player_critical_hit_attempt::PlayerCriticalHitAttempt;
 pub use player_inventory::{
@@ -427,6 +444,7 @@ pub use player_inventory::{
     MAX_PLAYER_INVENTORY_MOVE_COUNT, MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
     MAX_PLAYER_INVENTORY_SLOT_INDEX,
 };
+pub use player_spawn_phantoms_attempt::PlayerSpawnPhantomsAttempt;
 pub use player_statistics::{
     increment as increment_player_statistic, read as player_statistic,
     set_value as set_player_statistic_value, PlayerStatistic, StatisticFamily,
@@ -530,6 +548,8 @@ pub use world_save_events::{
     MAX_WORLD_SAVE_GAME_TIME_TICKS, MAX_WORLD_SAVE_OBSERVED_PAYLOAD_BYTES,
     WORLD_SAVE_OBSERVED_EVENT_NAME,
 };
+pub use world_sleep_finished_time::WorldSleepFinishedTime;
+pub use world_tags_updated::WorldTagsUpdated;
 
 /// Common imports for an SJML guest module.
 pub mod prelude {
@@ -545,6 +565,7 @@ pub mod prelude {
         SignTextLines, MAX_PERSISTENT_DATA_KEY_BYTES, MAX_PERSISTENT_DATA_STRING_BYTES,
         MAX_SIGN_TEXT_LINE_BYTES, MAX_SIGN_TEXT_RESPONSE_BYTES,
     };
+    pub use crate::block_note_block_attempt::BlockNoteBlockAttempt;
     pub use crate::chat_messages;
     pub use crate::chat_messages::{
         ChatMessage, ChatMessageAction, ChatMessageSource, ChatMessageSubscriptionHandle,
@@ -683,6 +704,7 @@ pub mod prelude {
         ENTITY_DATA_MISSING, MAX_ENTITY_DATA_KEY_BYTES, MAX_ENTITY_DATA_VALUE_BYTES,
     };
     pub use crate::entity_despawn_attempt::EntityDespawnAttempt;
+    pub use crate::entity_enderman_anger_attempt::EntityEndermanAngerAttempt;
     pub use crate::entity_finalize_spawn_attempt::EntityFinalizeSpawnAttempt;
     pub use crate::entity_left_level;
     pub use crate::entity_left_level::{
@@ -690,6 +712,7 @@ pub mod prelude {
         MAX_ENTITY_LEFT_LEVEL_PAYLOAD_BYTES, MAX_ENTITY_LEFT_LEVEL_STRING_BYTES,
     };
     pub use crate::entity_mob_griefing_attempt::EntityMobGriefingAttempt;
+    pub use crate::entity_swap_items_attempt::{EntitySwapItemsAttempt, SwapItemSnapshot};
     pub use crate::entity_teleport_attempt::{
         EntityTeleportAttempt, EntityTeleportAttemptAction, EntityTeleportCause,
         ENTITY_TELEPORT_ATTEMPT_CANCEL_CAPABILITY,
@@ -772,6 +795,7 @@ pub mod prelude {
         BlockPos, Direction, InventoryEndpoint, InventorySnapshot, ItemStackDescriptor,
         ItemStackSnapshot, MAX_ITEM_TRANSFER_COUNT,
     };
+    pub use crate::item_expire_attempt::ItemExpireAttempt;
     pub use crate::menu;
     pub use crate::menu::{
         EditableMenuDefinition, EditableMenuEndpoint, EditableMenuSlot, EditableMenuStack,
@@ -826,6 +850,9 @@ pub mod prelude {
         PlayerAdvancementProgress, MAX_PLAYER_ADVANCEMENT_CRITERIA,
         MAX_PLAYER_ADVANCEMENT_CRITERION_ID_BYTES, MAX_PLAYER_ADVANCEMENT_PROGRESS_BYTES,
     };
+    pub use crate::player_anvil_repair::{AnvilRepairItemSnapshot, PlayerAnvilRepair};
+    pub use crate::player_arrow_loose_attempt::PlayerArrowLooseAttempt;
+    pub use crate::player_arrow_nock_attempt::PlayerArrowNockAttempt;
     pub use crate::player_container_events::{PlayerContainerClosed, PlayerContainerOpened};
     pub use crate::player_critical_hit_attempt::PlayerCriticalHitAttempt;
     pub use crate::player_inventory;
@@ -841,6 +868,7 @@ pub mod prelude {
         MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
         MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
+    pub use crate::player_spawn_phantoms_attempt::PlayerSpawnPhantomsAttempt;
     pub use crate::player_statistics;
     pub use crate::player_statistics::{
         increment as increment_player_statistic, read as player_statistic,
@@ -974,6 +1002,8 @@ pub mod prelude {
         MAX_WORLD_SAVE_GAME_TIME_TICKS, MAX_WORLD_SAVE_OBSERVED_PAYLOAD_BYTES,
         WORLD_SAVE_OBSERVED_EVENT_NAME,
     };
+    pub use crate::world_sleep_finished_time::WorldSleepFinishedTime;
+    pub use crate::world_tags_updated::WorldTagsUpdated;
     pub use crate::{
         client_command, client_command_suggestions, client_music_selection, command,
         command_suggestions, compute, event, event_async, mod_init, mod_register, mod_shutdown,
