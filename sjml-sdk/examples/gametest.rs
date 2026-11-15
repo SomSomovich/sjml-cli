@@ -27,6 +27,8 @@ mod block_inventory_enchantments;
 mod block_inventory_lore;
 #[path = "gametest/block_inventory_move.rs"]
 mod block_inventory_move;
+#[path = "gametest/block_piston_attempt.rs"]
+mod block_piston_attempt;
 #[path = "gametest/block_random_tick.rs"]
 mod block_random_tick;
 #[path = "gametest/block_state_light.rs"]
@@ -93,6 +95,8 @@ mod gameplay_events;
 mod player_advancements;
 #[path = "gametest/player_air_supply.rs"]
 mod player_air_supply;
+#[path = "gametest/player_anvil_update_attempt.rs"]
+mod player_anvil_update_attempt;
 #[path = "gametest/player_attack_attempt.rs"]
 mod player_attack_attempt;
 #[path = "gametest/player_bossbar.rs"]
@@ -776,6 +780,8 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     sound_play_attempt::initialize()?;
     player_spawn_point_attempt::initialize()?;
     entity_lightning_strike_attempt::initialize()?;
+    block_piston_attempt::initialize()?;
+    player_anvil_update_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;
     entity_breed_attempt::initialize()?;

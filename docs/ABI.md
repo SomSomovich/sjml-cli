@@ -1,14 +1,19 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.101.0**. This version adds the synchronous cancellable
-`entity.lightning_strike_attempt` callback and `world::set_block_state`.
-Existing ABI 1.100.0 contracts remain supported.
+The current ABI is **1.102.0**. This version adds the synchronous cancellable
+`block.piston_attempt` and `player.anvil_update_attempt` callbacks. Existing
+ABI 1.101.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.102.0 adds two synchronous, cancellable logical-server callbacks:
+`block.piston_attempt` can stop a piston before blocks move, and
+`player.anvil_update_attempt` can cancel an anvil result so the output slot is
+empty. Both use bounded schema-v1 payloads and require both event capabilities.
 
 ABI 1.101.0 adds one synchronous, cancellable logical-server callback,
 `entity.lightning_strike_attempt`, which can skip lightning damage for one
@@ -841,7 +846,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.sleep_attempt`, `player.chat_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
 `entity.tame_attempt`, `entity.experience_drop_attempt`,
 `entity.convert_attempt`, `sound.play_attempt`, `player.spawn_point_attempt`,
-`entity.lightning_strike_attempt`,
+`entity.lightning_strike_attempt`, `block.piston_attempt`, `player.anvil_update_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
@@ -939,6 +944,19 @@ format: it encodes the target entity UUID and type, dimension ID, bolt UUID,
 and three `f64` coordinates. NeoForge fires it from
 `EntityStruckByLightningEvent`; a veto skips the strike for that entity. See
 [entity lightning-strike attempts](ENTITY_LIGHTNING_STRIKE_ATTEMPTS.md).
+
+ABI 1.102.0 adds two more cancellable attempts:
+
+- `block.piston_attempt` encodes the dimension ID, three `i32` piston
+  coordinates, the lowercase facing name, an extending flag, the canonical
+  piston block ID, and the block-state text. NeoForge fires it from
+  `PistonEvent.Pre`; a veto prevents the movement.
+- `player.anvil_update_attempt` encodes the player UUID, both input item IDs and
+  counts, an optional client-supplied name, and the `i64` level cost. NeoForge
+  fires it from `AnvilUpdateEvent`; a veto empties the output slot.
+
+See [piston movement attempts](BLOCK_PISTON_ATTEMPTS.md) and
+[anvil result attempts](PLAYER_ANVIL_UPDATE_ATTEMPTS.md).
 
 ### Client item tooltip callback
 

@@ -51,6 +51,8 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.experience_drop_attempt"
             | "entity.convert_attempt"
             | "entity.lightning_strike_attempt"
+            | "block.piston_attempt"
+            | "player.anvil_update_attempt"
             | "sound.play_attempt"
             | "player.spawn_point_attempt"
             | "block.grow_attempt"
@@ -436,6 +438,20 @@ mod tests {
                 quote! { async fn lightning(_: EntityLightningStrikeAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.lightning_strike_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "block.piston_attempt"),
+                quote! { async fn piston(_: BlockPistonAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "block.piston_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.anvil_update_attempt"),
+                quote! { async fn anvil(_: PlayerAnvilUpdateAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.anvil_update_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

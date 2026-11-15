@@ -69,6 +69,12 @@ pattern and require both `events.subscribe` and `events.cancel`:
 - `entity.lightning_strike_attempt` (`EntityLightningStrikeAttempt`) runs from
   `EntityStruckByLightningEvent`. A veto skips the strike for that entity only.
   See [lightning-strike attempts](ENTITY_LIGHTNING_STRIKE_ATTEMPTS.md).
+- `block.piston_attempt` (`BlockPistonAttempt`) runs from `PistonEvent.Pre`. A
+  veto prevents the piston from moving blocks. See
+  [piston movement attempts](BLOCK_PISTON_ATTEMPTS.md).
+- `player.anvil_update_attempt` (`PlayerAnvilUpdateAttempt`) runs from
+  `AnvilUpdateEvent`. A veto empties the anvil output slot. See
+  [anvil result attempts](PLAYER_ANVIL_UPDATE_ATTEMPTS.md).
 
 A guest-created `world::create_explosion` also passes through the module's own
 `world.explosion_attempt` handlers, so a broad veto can suppress the guest's

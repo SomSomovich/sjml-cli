@@ -16,15 +16,21 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.111.0`, Rust SDK/macros `0.109.0`, private CLI
-`0.1.41`, and ABI `1.101.0`. ABI compatibility remains major-version based: host
-0.111.0 accepts ABI `1.0.x` through `1.101.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.101.0` and host range
-`^0.111.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.112.0`, Rust SDK/macros `0.110.0`, private CLI
+`0.1.42`, and ABI `1.102.0`. ABI compatibility remains major-version based: host
+0.112.0 accepts ABI `1.0.x` through `1.102.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.102.0` and host range
+`^0.112.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.102.0
+
+This version adds the synchronous cancellable `block.piston_attempt` and
+`player.anvil_update_attempt` callbacks. Both use bounded detached payloads,
+require both event capabilities, and reject asynchronous handlers.
 
 ### APIs added in ABI 1.101.0
 

@@ -25,11 +25,11 @@ pass has not been verified. Server-side chest menus support bounded action
 callbacks while keeping item movement disabled. Guest-declared entities and block entities can
 attach bounded colored or textured cuboid models with bounded sine rotations;
 live client visuals remain
-unverified. This guide describes the private SDK workspace target 0.109.0
-and core ABI 1.101.0. Live
+unverified. This guide describes the private SDK workspace target 0.110.0
+and core ABI 1.102.0. Live
 server-player scoreboard-team membership reads and guarded set/clear calls are
 documented in [PLAYER_TEAMS.md](PLAYER_TEAMS.md).
-SDK 0.109.0 adds `entity.lightning_strike_attempt` and `world::set_block_state`. SDK 0.108.0 adds `sound.play_attempt` and `player.spawn_point_attempt`. SDK 0.107.0 adds the `entity.convert_attempt` veto and `world::destroy_block`. SDK 0.106.0 adds cancellable inbound chat, animal-taming, and experience-drop attempts plus guest-created explosions and lightning strikes. SDK 0.105.0 adds client fog overrides, the `player.item_consumed` event, typed furnace-fuel registration, and Mob navigation snapshots and cancellation. See the focused guides and [ABI compatibility](COMPATIBILITY.md).
+SDK 0.110.0 adds `block.piston_attempt` and `player.anvil_update_attempt`. SDK 0.109.0 adds `entity.lightning_strike_attempt` and `world::set_block_state`. SDK 0.108.0 adds `sound.play_attempt` and `player.spawn_point_attempt`. SDK 0.107.0 adds the `entity.convert_attempt` veto and `world::destroy_block`. SDK 0.106.0 adds cancellable inbound chat, animal-taming, and experience-drop attempts plus guest-created explosions and lightning strikes. SDK 0.105.0 adds client fog overrides, the `player.item_consumed` event, typed furnace-fuel registration, and Mob navigation snapshots and cancellation. See the focused guides and [ABI compatibility](COMPATIBILITY.md).
 SDK 0.103.0 adds exact-state piston/fire behavior for registered blocks, bounded drop suppression during block updates, item repair tags and player-stack glint controls, non-player entity orientation/equipment/drop-chance APIs, raw client cursor motion, and observational sound-start callbacks.
 SDK 0.102.0 adds player ability writes, mob persistence and loot-pickup controls, chunk lifecycle notifications, client resource-reload and chat-history APIs, world-save and entity-left-level events, live villager trade access, and player statistic-change notifications.
 SDK 0.100.0 adds loaded-only biome climate and block destroy-speed reads, a
@@ -492,7 +492,7 @@ The SDK package is named `sjml-sdk` and its Rust crate is `sjml`:
 
 ```toml
 [dependencies]
-sjml-sdk = "0.109.0"
+sjml-sdk = "0.110.0"
 ```
 
 For development against this checkout, use

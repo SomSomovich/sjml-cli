@@ -1833,6 +1833,62 @@ pub struct EntityConvertAttempt {
     pub outcome_entity_type_id: String,
 }
 
+/// Synchronous cancellable piston movement attempt on the logical server.
+///
+/// NeoForge fires `block.piston_attempt` before a piston changes block states.
+/// Return `Ok(true)` to prevent the movement. The detached snapshot contains
+/// the dimension, piston position, facing, extension/retraction flag, and the
+/// piston block's canonical ID and state text. Both `events.subscribe` and
+/// `events.cancel` are required, and the callback must remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct BlockPistonAttempt {
+    /// Resource location of the dimension containing the piston.
+    pub dimension_id: String,
+    /// Piston block x coordinate.
+    pub x: i32,
+    /// Piston block y coordinate.
+    pub y: i32,
+    /// Piston block z coordinate.
+    pub z: i32,
+    /// Lowercase facing name, such as `east` or `up`.
+    pub direction: String,
+    /// True for extension and false for retraction.
+    pub extending: bool,
+    /// Canonical registry ID of the piston block.
+    pub block_id: String,
+    /// Canonical block-state text of the piston.
+    pub block_state: String,
+}
+
+/// Synchronous cancellable anvil result attempt on the logical server.
+///
+/// NeoForge fires `player.anvil_update_attempt` when an anvil menu recomputes
+/// its result. Return `Ok(true)` to cancel the result, which makes the output
+/// slot empty. The snapshot contains the player UUID, both input stack
+/// identities and counts (empty stacks use `minecraft:air` with count zero),
+/// the optional client-supplied name, and the current level cost. Both
+/// `events.subscribe` and `events.cancel` are required, and the callback must
+/// remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerAnvilUpdateAttempt {
+    /// Canonical UUID of the player using the anvil.
+    pub player_id: String,
+    /// Canonical item ID in the left input slot.
+    pub left_item_id: String,
+    /// Left input stack count.
+    pub left_count: u32,
+    /// Canonical item ID in the right input slot.
+    pub right_item_id: String,
+    /// Right input stack count.
+    pub right_count: u32,
+    /// Client-supplied rename text, when present.
+    pub name: Option<String>,
+    /// Current anvil level cost.
+    pub cost: i64,
+}
+
 /// Synchronous cancellable lightning-strike attempt against one entity.
 ///
 /// NeoForge fires `entity.lightning_strike_attempt` when a lightning bolt is
@@ -3487,35 +3543,35 @@ mod tests {
         subscribe, subscribe_with_interval, unsubscribe, AdvancementProgressOperation, BlockBreak,
         BlockBreakAttempt, BlockDropsAttempt, BlockDropsBreakerSnapshot, BlockDropsItemSnapshot,
         BlockFarmlandTrampleAttempt, BlockFertilizeAttempt, BlockFluidPlaceAttempt,
-        BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockRandomTick, BlockTick,
-        BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
-        ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
-        EntityConvertAttempt, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
-        EntityDropsAttempt, EntityDropsItemSnapshot, EntityEffectApplicationAttempt,
-        EntityExperienceDropAttempt, EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt,
-        EntityKnockbackAttempt, EntityLightningStrikeAttempt, EntityMountAttempt,
-        EntityMountTarget, EntitySpawned, EntityTameAttempt, EntityTargetAttempt, EntityTick,
-        EventPriority, ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines,
-        ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse,
-        ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
-        PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerBreakSpeed,
-        PlayerBreakSpeedAction, PlayerChatAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
-        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
-        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
-        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed, PlayerItemCrafted,
-        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt,
-        PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt, PlayerSpawnPointAttempt,
-        PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
-        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, SoundPlayAttempt, SoundPlayEntity,
-        SoundPlayPosition, SpawnPointBlockPosition, WorldLifecycle, WorldTick,
-        MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
-        MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
-        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
-        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_ITEM_CONSUMED_COUNT,
-        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
-        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        BlockGrowAttempt, BlockPistonAttempt, BlockPlace, BlockPlaceAttempt, BlockRandomTick,
+        BlockTick, BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt,
+        ClientActionHand, ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent,
+        EntityBreedAttempt, EntityConvertAttempt, EntityDamageAttempt, EntityDamaged, EntityDeath,
+        EntityDeathAttempt, EntityDropsAttempt, EntityDropsItemSnapshot,
+        EntityEffectApplicationAttempt, EntityExperienceDropAttempt, EntityFallAttempt,
+        EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntityLightningStrikeAttempt,
+        EntityMountAttempt, EntityMountTarget, EntitySpawned, EntityTameAttempt,
+        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
+        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        PlayerAdvancementProgressEvent, PlayerAnvilUpdateAttempt, PlayerAttackAttempt,
+        PlayerBreakSpeed, PlayerBreakSpeedAction, PlayerChatAttempt, PlayerDropAttempt,
+        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
+        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
+        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed,
+        PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved,
+        PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt,
+        PlayerSpawnPointAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
+        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        SoundPlayAttempt, SoundPlayEntity, SoundPlayPosition, SpawnPointBlockPosition,
+        WorldLifecycle, WorldTick, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
+        MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, MAX_PLAYER_BREAK_SPEED,
+        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
+        MAX_PLAYER_ITEM_CONSUMED_COUNT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
+        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
+        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -4289,6 +4345,52 @@ mod tests {
         assert_eq!(
             from_bytes::<EntityLightningStrikeAttempt>(&expected).unwrap(),
             strike
+        );
+
+        let piston = BlockPistonAttempt {
+            dimension_id: "minecraft:overworld".to_owned(),
+            x: 1,
+            y: 64,
+            z: -3,
+            direction: "east".to_owned(),
+            extending: true,
+            block_id: "minecraft:piston".to_owned(),
+            block_state: "minecraft:piston[facing=east,extended=false]".to_owned(),
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &piston.dimension_id);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&64_i32.to_le_bytes());
+        expected.extend_from_slice(&(-3_i32).to_le_bytes());
+        append_test_string(&mut expected, &piston.direction);
+        expected.push(1);
+        append_test_string(&mut expected, &piston.block_id);
+        append_test_string(&mut expected, &piston.block_state);
+        assert_eq!(to_bytes(&piston).unwrap(), expected);
+        assert_eq!(from_bytes::<BlockPistonAttempt>(&expected).unwrap(), piston);
+
+        let anvil = PlayerAnvilUpdateAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            left_item_id: "minecraft:diamond_sword".to_owned(),
+            left_count: 1,
+            right_item_id: "minecraft:diamond".to_owned(),
+            right_count: 2,
+            name: Some("Rename".to_owned()),
+            cost: 5,
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &anvil.player_id);
+        append_test_string(&mut expected, &anvil.left_item_id);
+        expected.extend_from_slice(&1_u32.to_le_bytes());
+        append_test_string(&mut expected, &anvil.right_item_id);
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        expected.push(1);
+        append_test_string(&mut expected, "Rename");
+        expected.extend_from_slice(&5_i64.to_le_bytes());
+        assert_eq!(to_bytes(&anvil).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<PlayerAnvilUpdateAttempt>(&expected).unwrap(),
+            anvil
         );
     }
 
