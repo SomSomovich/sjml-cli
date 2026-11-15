@@ -16,15 +16,27 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.113.0`, Rust SDK/macros `0.111.0`, private CLI
-`0.1.43`, and ABI `1.103.0`. ABI compatibility remains major-version based: host
-0.113.0 accepts ABI `1.0.x` through `1.103.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.103.0` and host range
-`^0.113.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.114.0`, Rust SDK/macros `0.112.0`, private CLI
+`0.1.44`, and ABI `1.104.0`. ABI compatibility remains major-version based: host
+0.114.0 accepts ABI `1.0.x` through `1.104.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.104.0` and host range
+`^0.114.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.104.0
+
+This version adds seven synchronous cancellable logical-server callbacks
+(`entity.travel_dimension_attempt`, `entity.finalize_spawn_attempt`,
+`entity.mob_griefing_attempt`, `entity.despawn_attempt`,
+`player.critical_hit_attempt`, `block.brew_attempt`, and
+`player.sweep_attack_attempt`) plus five observation notifications
+(`player.container_open`, `player.container_close`, `player.wake_up`,
+`world.chunk_watch`, and `world.chunk_unwatch`). Container notifications also
+require `player.container.observe`. All payloads are bounded schema-v1 records;
+the vetoes reject asynchronous handlers.
 
 ### APIs added in ABI 1.103.0
 

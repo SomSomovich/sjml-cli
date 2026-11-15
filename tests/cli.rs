@@ -187,7 +187,7 @@ fn generated_default_template_tracks_current_sdk_host_and_abi_versions() {
     ]));
 
     let cargo_manifest = fs::read_to_string(project.join("Cargo.toml")).unwrap();
-    assert!(cargo_manifest.contains("sjml-sdk = \"0.111.0\""));
+    assert!(cargo_manifest.contains("sjml-sdk = \"0.112.0\""));
 
     let package_manifest = fs::read_to_string(project.join("sjml.toml")).unwrap();
     assert!(package_manifest.contains("abi = \"^1.103.0\""));

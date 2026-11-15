@@ -1,7 +1,7 @@
 # Minecraft API coverage
 
-This is a source-based coverage matrix for the current target checkout at host **0.113.0**,
-SDK/macros **0.111.0**, private CLI **0.1.43**, ABI **1.103.0**, Minecraft **1.21.1**, and NeoForge
+This is a source-based coverage matrix for the current target checkout at host **0.114.0**,
+SDK/macros **0.112.0**, private CLI **0.1.44**, ABI **1.104.0**, Minecraft **1.21.1**, and NeoForge
 **21.1.265**. It records the public surface that exists in this tree, its path
 from a Minecraft hook to Rust/WASM, and the limits that remain. It is not a
 roadmap or a claim of complete Minecraft mod compatibility. The matrix tracks
@@ -16,6 +16,29 @@ bound and encode the byte boundary; domain-specific schemas/codecs are cited
 where present. Rust `extern` imports and public wrappers are in the cited SDK
 files. Registration callbacks and event-export callbacks use their own
 documented ABI paths rather than a host import for every operation.
+
+## ABI 1.104.0 additions
+
+ABI 1.104.0 adds seven synchronous cancellable logical-server vetoes
+(`entity.travel_dimension_attempt`, `entity.finalize_spawn_attempt`,
+`entity.mob_griefing_attempt`, `entity.despawn_attempt`,
+`player.critical_hit_attempt`, `block.brew_attempt`, and
+`player.sweep_attack_attempt`) and five observation notifications
+(`player.container_open`, `player.container_close`, `player.wake_up`,
+`world.chunk_watch`, and `world.chunk_unwatch`). Container notifications
+additionally require `player.container.observe`. See
+[player container events](PLAYER_CONTAINER_EVENTS.md),
+[dimension travel attempts](ENTITY_TRAVEL_DIMENSION_ATTEMPTS.md),
+[spawn finalization attempts](ENTITY_FINALIZE_SPAWN_ATTEMPTS.md),
+[mob griefing attempts](ENTITY_MOB_GRIEFING_ATTEMPTS.md),
+[despawn attempts](ENTITY_DESPAWN_ATTEMPTS.md),
+[wake-up notifications](PLAYER_WAKE_UP.md),
+[critical-hit attempts](PLAYER_CRITICAL_HIT_ATTEMPTS.md),
+[brewing attempts](BLOCK_BREW_ATTEMPTS.md),
+[chunk watch notifications](WORLD_CHUNK_WATCH.md), and
+[sweep-attack attempts](PLAYER_SWEEP_ATTACK_ATTEMPTS.md). Core codecs, host
+adapters, dispatcher/registry wiring, SDK types, and ten dedicated-server
+GameTests cover the wave.
 
 ## ABI 1.103.0 additions
 

@@ -7,6 +7,8 @@ use sjml::events::PlayerItemConsumed;
 use sjml::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "gametest/block_brew_attempt.rs"]
+mod block_brew_attempt;
 #[path = "gametest/block_drops_attempt.rs"]
 mod block_drops_attempt;
 #[path = "gametest/block_entity_sign_text.rs"]
@@ -47,6 +49,8 @@ mod entity_attribute_modifiers;
 mod entity_breed_attempt;
 #[path = "gametest/entity_convert_attempt.rs"]
 mod entity_convert_attempt;
+#[path = "gametest/entity_despawn_attempt.rs"]
+mod entity_despawn_attempt;
 #[path = "gametest/entity_drops_attempt.rs"]
 mod entity_drops_attempt;
 #[path = "gametest/entity_effect_application.rs"]
@@ -57,6 +61,8 @@ mod entity_equipment;
 mod entity_experience_drop_attempt;
 #[path = "gametest/entity_fall_attempt.rs"]
 mod entity_fall_attempt;
+#[path = "gametest/entity_finalize_spawn_attempt.rs"]
+mod entity_finalize_spawn_attempt;
 #[path = "gametest/entity_heal_attempt.rs"]
 mod entity_heal_attempt;
 #[path = "gametest/entity_health.rs"]
@@ -69,6 +75,8 @@ mod entity_knockback_attempt;
 mod entity_left_level;
 #[path = "gametest/entity_lightning_strike_attempt.rs"]
 mod entity_lightning_strike_attempt;
+#[path = "gametest/entity_mob_griefing_attempt.rs"]
+mod entity_mob_griefing_attempt;
 #[path = "gametest/entity_mob_split_attempt.rs"]
 mod entity_mob_split_attempt;
 #[path = "gametest/entity_mount_attempt.rs"]
@@ -91,6 +99,8 @@ mod entity_teleport;
 mod entity_teleport_attempt;
 #[path = "gametest/entity_tick.rs"]
 mod entity_tick;
+#[path = "gametest/entity_travel_dimension_attempt.rs"]
+mod entity_travel_dimension_attempt;
 #[path = "gametest/gameplay_events.rs"]
 mod gameplay_events;
 #[path = "gametest/player_advancements.rs"]
@@ -107,6 +117,10 @@ mod player_bossbar;
 mod player_chat_attempt;
 #[path = "gametest/player_command_attempt.rs"]
 mod player_command_attempt;
+#[path = "gametest/player_container_events.rs"]
+mod player_container_events;
+#[path = "gametest/player_critical_hit_attempt.rs"]
+mod player_critical_hit_attempt;
 #[path = "gametest/player_equipment_changed.rs"]
 mod player_equipment_changed;
 #[path = "gametest/player_experience_change.rs"]
@@ -135,6 +149,8 @@ mod player_respawn_point;
 mod player_spawn_point_attempt;
 #[path = "gametest/player_statistics.rs"]
 mod player_statistics;
+#[path = "gametest/player_sweep_attack_attempt.rs"]
+mod player_sweep_attack_attempt;
 #[path = "gametest/player_tab_list.rs"]
 mod player_tab_list;
 #[path = "gametest/player_tick.rs"]
@@ -143,6 +159,8 @@ mod player_tick;
 mod player_totem_use_attempt;
 #[path = "gametest/player_villager_trade.rs"]
 mod player_villager_trade;
+#[path = "gametest/player_wake_up.rs"]
+mod player_wake_up;
 #[path = "gametest/scoreboard.rs"]
 mod scoreboard;
 #[path = "gametest/scoreboard_display_slot.rs"]
@@ -159,6 +177,8 @@ mod world_block_tag;
 mod world_blocks;
 #[path = "gametest/world_chunk_lifecycle.rs"]
 mod world_chunk_lifecycle;
+#[path = "gametest/world_chunk_watch.rs"]
+mod world_chunk_watch;
 #[path = "gametest/world_difficulty.rs"]
 mod world_difficulty;
 #[path = "gametest/world_fluid_state.rs"]
@@ -787,6 +807,16 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     block_piston_attempt::initialize()?;
     player_command_attempt::initialize()?;
     entity_mob_split_attempt::initialize()?;
+    block_brew_attempt::initialize()?;
+    entity_despawn_attempt::initialize()?;
+    entity_finalize_spawn_attempt::initialize()?;
+    entity_mob_griefing_attempt::initialize()?;
+    entity_travel_dimension_attempt::initialize()?;
+    player_container_events::initialize()?;
+    player_critical_hit_attempt::initialize()?;
+    player_sweep_attack_attempt::initialize()?;
+    player_wake_up::initialize()?;
+    world_chunk_watch::initialize()?;
     player_anvil_update_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;

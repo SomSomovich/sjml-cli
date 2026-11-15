@@ -81,6 +81,34 @@ pattern and require both `events.subscribe` and `events.cancel`:
 - `entity.mob_split_attempt` (`EntityMobSplitAttempt`) runs from
   `MobSplitEvent`. A veto prevents every child from spawning. See
   [mob split attempts](ENTITY_MOB_SPLIT_ATTEMPTS.md).
+- `entity.travel_dimension_attempt` (`EntityTravelDimensionAttempt`) runs from
+  `EntityTravelToDimensionEvent`. A veto keeps the entity in its current
+  dimension. See [dimension travel attempts](ENTITY_TRAVEL_DIMENSION_ATTEMPTS.md).
+- `entity.finalize_spawn_attempt` (`EntityFinalizeSpawnAttempt`) runs from
+  `FinalizeSpawnEvent`. A veto marks the mob's spawn as cancelled. See
+  [spawn finalization attempts](ENTITY_FINALIZE_SPAWN_ATTEMPTS.md).
+- `entity.mob_griefing_attempt` (`EntityMobGriefingAttempt`) runs from
+  `EntityMobGriefingEvent`. A veto calls `setCanGrief(false)`. See
+  [mob griefing attempts](ENTITY_MOB_GRIEFING_ATTEMPTS.md).
+- `entity.despawn_attempt` (`EntityDespawnAttempt`) runs from `MobDespawnEvent`.
+  A veto sets the result to `DENY`, keeping the mob alive. See
+  [despawn attempts](ENTITY_DESPAWN_ATTEMPTS.md).
+- `player.critical_hit_attempt` (`PlayerCriticalHitAttempt`) runs from
+  `CriticalHitEvent`. A veto calls `setCriticalHit(false)`. See
+  [critical-hit attempts](PLAYER_CRITICAL_HIT_ATTEMPTS.md).
+- `block.brew_attempt` (`BlockBrewAttempt`) runs from `PotionBrewEvent.Pre`. A
+  veto cancels the whole brew without touching the item array. See
+  [brewing attempts](BLOCK_BREW_ATTEMPTS.md).
+- `player.sweep_attack_attempt` (`PlayerSweepAttackAttempt`) runs from
+  `SweepAttackEvent`. A veto clears the sweep and cancels the event. See
+  [sweep-attack attempts](PLAYER_SWEEP_ATTACK_ATTEMPTS.md).
+
+Five observation notifications share the same bounded schema-v1 transport:
+`player.container_open` and `player.container_close` (`PlayerContainerOpened`,
+`PlayerContainerClosed`) require `player.container.observe` in addition to
+`events.subscribe`; `player.wake_up` (`PlayerWakeUp`), `world.chunk_watch`
+(`WorldChunkWatched`), and `world.chunk_unwatch` (`WorldChunkUnwatched`) need
+only `events.subscribe`. They cannot cancel or rewrite the underlying action.
 
 A guest-created `world::create_explosion` also passes through the module's own
 `world.explosion_attempt` handlers, so a broad veto can suppress the guest's

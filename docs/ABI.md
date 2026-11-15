@@ -1,14 +1,28 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.103.0**. This version adds the synchronous cancellable
-`player.command_attempt` and `entity.mob_split_attempt` callbacks. Existing
-ABI 1.102.0 contracts remain supported.
+The current ABI is **1.104.0**. This version adds ten logical-server
+notification and veto callbacks covering container menus, dimension travel,
+spawn finalization, mob griefing, natural despawn, wake-up, critical hits,
+brewing, chunk watching, and sweep attacks. Existing ABI 1.103.0 contracts
+remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.104.0 adds ten logical-server callbacks. Seven of them are synchronous
+vetoes that require `events.subscribe` and `events.cancel`:
+`entity.travel_dimension_attempt`, `entity.finalize_spawn_attempt`,
+`entity.mob_griefing_attempt`, `entity.despawn_attempt`,
+`player.critical_hit_attempt`, `block.brew_attempt`, and
+`player.sweep_attack_attempt`. Five are observation notifications that require
+`events.subscribe`: `player.container_open`, `player.container_close`,
+`player.wake_up`, `world.chunk_watch`, and `world.chunk_unwatch`.
+`player.container_open` and `player.container_close` additionally require the
+separate `player.container.observe` grant. All payloads are bounded schema-v1
+records.
 
 ABI 1.103.0 adds two synchronous, cancellable logical-server callbacks:
 `player.command_attempt` can veto a player-issued command after parsing, and
@@ -975,6 +989,62 @@ ABI 1.103.0 adds two more cancellable attempts:
 
 See [player command attempts](PLAYER_COMMAND_ATTEMPTS.md) and
 [mob split attempts](ENTITY_MOB_SPLIT_ATTEMPTS.md).
+
+ABI 1.104.0 adds ten more logical-server callbacks. Each payload starts with a
+little-endian `i32` schema version `1`:
+
+- `player.container_open` and `player.container_close` encode the player UUID,
+  dimension ID, menu registry ID, `i32` container ID, and `i32` slot count.
+  NeoForge fires them from `PlayerContainerEvent.Open` and `.Close`; they are
+  observation only and require `player.container.observe`.
+- `entity.travel_dimension_attempt` encodes the entity UUID and type, the source
+  dimension, and the target dimension. NeoForge fires it from
+  `EntityTravelToDimensionEvent`; a veto keeps the entity in its current
+  dimension.
+- `entity.finalize_spawn_attempt` encodes the entity UUID and type, dimension,
+  three finite `f64` coordinates within ±30,000,000, the lowercase spawn type
+  name, and a finite `f32` effective difficulty. NeoForge fires it from
+  `FinalizeSpawnEvent`; a veto calls `setSpawnCancelled(true)`.
+- `entity.mob_griefing_attempt` encodes the entity UUID and type, dimension, and
+  the vanilla mob-griefing rule as a Boolean byte. NeoForge fires it from
+  `EntityMobGriefingEvent`; a veto calls `setCanGrief(false)`.
+- `entity.despawn_attempt` encodes the entity UUID and type, dimension, and
+  three finite `f64` coordinates. NeoForge fires it from `MobDespawnEvent`; a
+  veto sets the result to `DENY`, so the mob stays alive.
+- `player.wake_up` encodes the player UUID, dimension, and the
+  `wake_immediately` and `update_level` Boolean bytes. It is an observation
+  notification delivered from `PlayerWakeUpEvent`.
+- `player.critical_hit_attempt` encodes the player UUID, dimension, target UUID
+  and type, the vanilla critical flag, and the vanilla and current finite `f32`
+  damage multipliers in `0..=1,000`. NeoForge fires it from `CriticalHitEvent`;
+  a veto calls `setCriticalHit(false)`.
+- `block.brew_attempt` encodes a `u32` slot count of at most four and, for each
+  slot, a nested schema-v1 record with the canonical item ID (`minecraft:air`
+  for an empty slot) and a `u32` count of at most 1,000,000. NeoForge fires it
+  from `PotionBrewEvent.Pre`; a veto cancels the whole brew. The host never
+  writes the event's item list back, so a callback cannot create or duplicate
+  items.
+- `world.chunk_watch` and `world.chunk_unwatch` encode the player UUID,
+  dimension ID, and `i32` chunk x/z within ±4,000,000. They are observation
+  notifications delivered from `ChunkWatchEvent.Watch` and `.UnWatch`.
+- `player.sweep_attack_attempt` encodes the player UUID, dimension, target UUID
+  and type, and the vanilla sweep flag. NeoForge fires it from
+  `SweepAttackEvent`; a veto calls `setSweeping(false)` and cancels the event.
+
+All seven vetoes run synchronously on the owning logical-server thread, invoke
+at most 64 callbacks per attempt, and reject `#[event_async]`. Strings are
+bounded to 256 UTF-8 bytes and each payload to 1–2 KiB.
+
+See [player container events](PLAYER_CONTAINER_EVENTS.md),
+[dimension travel attempts](ENTITY_TRAVEL_DIMENSION_ATTEMPTS.md),
+[spawn finalization attempts](ENTITY_FINALIZE_SPAWN_ATTEMPTS.md),
+[mob griefing attempts](ENTITY_MOB_GRIEFING_ATTEMPTS.md),
+[despawn attempts](ENTITY_DESPAWN_ATTEMPTS.md),
+[wake-up notifications](PLAYER_WAKE_UP.md),
+[critical-hit attempts](PLAYER_CRITICAL_HIT_ATTEMPTS.md),
+[brewing attempts](BLOCK_BREW_ATTEMPTS.md),
+[chunk watch notifications](WORLD_CHUNK_WATCH.md), and
+[sweep-attack attempts](PLAYER_SWEEP_ATTACK_ATTEMPTS.md).
 
 ### Client item tooltip callback
 

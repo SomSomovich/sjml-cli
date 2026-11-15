@@ -92,6 +92,7 @@ compile_error!("SJML guest modules require wasm32-unknown-unknown; WASI targets 
 
 pub mod abi;
 pub mod batch;
+pub mod block_brew_attempt;
 pub mod block_entity;
 pub mod chat_messages;
 pub mod client_assets;
@@ -112,8 +113,12 @@ pub mod command_suggestions;
 pub mod entity;
 pub mod entity_attributes;
 pub mod entity_data;
+pub mod entity_despawn_attempt;
+pub mod entity_finalize_spawn_attempt;
 pub mod entity_left_level;
+pub mod entity_mob_griefing_attempt;
 pub mod entity_teleport_attempt;
+pub mod entity_travel_dimension_attempt;
 mod error;
 pub mod events;
 pub mod gl;
@@ -125,8 +130,12 @@ pub mod network;
 pub mod player;
 pub mod player_advancement;
 pub mod player_bossbar;
+pub mod player_container_events;
+pub mod player_critical_hit_attempt;
 pub mod player_inventory;
 pub mod player_statistics;
+pub mod player_sweep_attack_attempt;
+pub mod player_wake_up;
 pub mod recipe;
 pub mod registry;
 pub mod render;
@@ -139,6 +148,7 @@ pub mod task;
 pub mod widgets;
 pub mod world;
 pub mod world_chunk_lifecycle;
+pub mod world_chunk_watch;
 pub mod world_save_events;
 
 pub use abi::{
@@ -149,6 +159,7 @@ pub use abi::{
     StorageScopeTag, TaskHandle, TaskTag, WorldHandle, WorldTag,
 };
 pub use batch::{Batch, BatchValue, CallResult};
+pub use block_brew_attempt::{BlockBrewAttempt, BrewItemSnapshot};
 pub use block_entity::{
     BlockEntity, BlockEntitySnapshot, NbtValue, PersistentDataValue, SignSide, SignTextLines,
     MAX_PERSISTENT_DATA_KEY_BYTES, MAX_PERSISTENT_DATA_STRING_BYTES, MAX_SIGN_TEXT_LINE_BYTES,
@@ -271,15 +282,19 @@ pub use entity_attributes::{
     AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
     MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
 };
+pub use entity_despawn_attempt::EntityDespawnAttempt;
+pub use entity_finalize_spawn_attempt::EntityFinalizeSpawnAttempt;
 pub use entity_left_level::{
     EntityLeftLevel, ENTITY_LEFT_LEVEL_EVENT_NAME, MAX_ENTITY_LEFT_LEVEL_CALLBACKS,
     MAX_ENTITY_LEFT_LEVEL_PAYLOAD_BYTES, MAX_ENTITY_LEFT_LEVEL_STRING_BYTES,
 };
+pub use entity_mob_griefing_attempt::EntityMobGriefingAttempt;
 pub use entity_teleport_attempt::{
     EntityTeleportAttempt, EntityTeleportAttemptAction, EntityTeleportCause,
     ENTITY_TELEPORT_ATTEMPT_CANCEL_CAPABILITY, MAX_ENTITY_TELEPORT_ATTEMPT_COORDINATE,
     MAX_ENTITY_TELEPORT_ATTEMPT_ID_BYTES,
 };
+pub use entity_travel_dimension_attempt::EntityTravelDimensionAttempt;
 pub use error::{ErrorCode, SjmlError, SjmlResult};
 pub use events::BlockGrowAttempt;
 pub use events::EntityBreedAttempt;
@@ -401,6 +416,8 @@ pub use player_advancement::{
     PlayerAdvancementProgress, MAX_PLAYER_ADVANCEMENT_CRITERIA,
     MAX_PLAYER_ADVANCEMENT_CRITERION_ID_BYTES, MAX_PLAYER_ADVANCEMENT_PROGRESS_BYTES,
 };
+pub use player_container_events::{PlayerContainerClosed, PlayerContainerOpened};
+pub use player_critical_hit_attempt::PlayerCriticalHitAttempt;
 pub use player_inventory::{
     clear_item_glint_override as clear_player_inventory_item_glint_override,
     give_item as give_player_item, move_stack as move_player_inventory_stack,
@@ -416,6 +433,8 @@ pub use player_statistics::{
     MAX_INCREMENT as MAX_PLAYER_REGISTRY_STATISTIC_INCREMENT, MAX_STATISTIC_ID_BYTES,
     MAX_VALUE as MAX_PLAYER_REGISTRY_STATISTIC_VALUE,
 };
+pub use player_sweep_attack_attempt::PlayerSweepAttackAttempt;
+pub use player_wake_up::PlayerWakeUp;
 pub use recipe::{
     CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
 };
@@ -505,6 +524,7 @@ pub use world_chunk_lifecycle::{
     MAX_WORLD_CHUNK_LIFECYCLE_CALLBACKS, MAX_WORLD_CHUNK_LIFECYCLE_PAYLOAD_BYTES,
     WORLD_CHUNK_LOADED_EVENT_NAME, WORLD_CHUNK_UNLOADED_EVENT_NAME,
 };
+pub use world_chunk_watch::{WorldChunkUnwatched, WorldChunkWatched};
 pub use world_save_events::{
     WorldSaveObserved, MAX_WORLD_SAVE_CALLBACKS_PER_EVENT, MAX_WORLD_SAVE_DIMENSION_ID_BYTES,
     MAX_WORLD_SAVE_GAME_TIME_TICKS, MAX_WORLD_SAVE_OBSERVED_PAYLOAD_BYTES,
@@ -519,6 +539,7 @@ pub mod prelude {
         StorageScopeHandle, TaskHandle, WorldHandle,
     };
     pub use crate::batch::{self, Batch, BatchValue, CallResult};
+    pub use crate::block_brew_attempt::{BlockBrewAttempt, BrewItemSnapshot};
     pub use crate::block_entity::{
         self, BlockEntity, BlockEntitySnapshot, NbtValue, PersistentDataValue, SignSide,
         SignTextLines, MAX_PERSISTENT_DATA_KEY_BYTES, MAX_PERSISTENT_DATA_STRING_BYTES,
@@ -661,15 +682,19 @@ pub mod prelude {
     pub use crate::entity_data::{
         ENTITY_DATA_MISSING, MAX_ENTITY_DATA_KEY_BYTES, MAX_ENTITY_DATA_VALUE_BYTES,
     };
+    pub use crate::entity_despawn_attempt::EntityDespawnAttempt;
+    pub use crate::entity_finalize_spawn_attempt::EntityFinalizeSpawnAttempt;
     pub use crate::entity_left_level;
     pub use crate::entity_left_level::{
         EntityLeftLevel, ENTITY_LEFT_LEVEL_EVENT_NAME, MAX_ENTITY_LEFT_LEVEL_CALLBACKS,
         MAX_ENTITY_LEFT_LEVEL_PAYLOAD_BYTES, MAX_ENTITY_LEFT_LEVEL_STRING_BYTES,
     };
+    pub use crate::entity_mob_griefing_attempt::EntityMobGriefingAttempt;
     pub use crate::entity_teleport_attempt::{
         EntityTeleportAttempt, EntityTeleportAttemptAction, EntityTeleportCause,
         ENTITY_TELEPORT_ATTEMPT_CANCEL_CAPABILITY,
     };
+    pub use crate::entity_travel_dimension_attempt::EntityTravelDimensionAttempt;
     pub use crate::error::{ErrorCode, SjmlError, SjmlResult};
     pub use crate::events;
     pub use crate::events::BlockGrowAttempt;
@@ -801,6 +826,8 @@ pub mod prelude {
         PlayerAdvancementProgress, MAX_PLAYER_ADVANCEMENT_CRITERIA,
         MAX_PLAYER_ADVANCEMENT_CRITERION_ID_BYTES, MAX_PLAYER_ADVANCEMENT_PROGRESS_BYTES,
     };
+    pub use crate::player_container_events::{PlayerContainerClosed, PlayerContainerOpened};
+    pub use crate::player_critical_hit_attempt::PlayerCriticalHitAttempt;
     pub use crate::player_inventory;
     pub use crate::player_inventory::{
         clear_item_glint_override as clear_player_inventory_item_glint_override,
@@ -821,6 +848,8 @@ pub mod prelude {
         MAX_INCREMENT as MAX_PLAYER_REGISTRY_STATISTIC_INCREMENT, MAX_STATISTIC_ID_BYTES,
         MAX_VALUE as MAX_PLAYER_REGISTRY_STATISTIC_VALUE,
     };
+    pub use crate::player_sweep_attack_attempt::PlayerSweepAttackAttempt;
+    pub use crate::player_wake_up::PlayerWakeUp;
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
     pub use crate::registry::{
@@ -938,6 +967,7 @@ pub mod prelude {
         MAX_WORLD_CHUNK_LIFECYCLE_CALLBACKS, MAX_WORLD_CHUNK_LIFECYCLE_PAYLOAD_BYTES,
         WORLD_CHUNK_LOADED_EVENT_NAME, WORLD_CHUNK_UNLOADED_EVENT_NAME,
     };
+    pub use crate::world_chunk_watch::{WorldChunkUnwatched, WorldChunkWatched};
     pub use crate::world_save_events;
     pub use crate::world_save_events::{
         WorldSaveObserved, MAX_WORLD_SAVE_CALLBACKS_PER_EVENT, MAX_WORLD_SAVE_DIMENSION_ID_BYTES,
