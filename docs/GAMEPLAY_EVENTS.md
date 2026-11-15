@@ -75,6 +75,12 @@ pattern and require both `events.subscribe` and `events.cancel`:
 - `player.anvil_update_attempt` (`PlayerAnvilUpdateAttempt`) runs from
   `AnvilUpdateEvent`. A veto empties the anvil output slot. See
   [anvil result attempts](PLAYER_ANVIL_UPDATE_ATTEMPTS.md).
+- `player.command_attempt` (`PlayerCommandAttempt`) runs from `CommandEvent`
+  for player sources. A veto prevents command execution. See
+  [player command attempts](PLAYER_COMMAND_ATTEMPTS.md).
+- `entity.mob_split_attempt` (`EntityMobSplitAttempt`) runs from
+  `MobSplitEvent`. A veto prevents every child from spawning. See
+  [mob split attempts](ENTITY_MOB_SPLIT_ATTEMPTS.md).
 
 A guest-created `world::create_explosion` also passes through the module's own
 `world.explosion_attempt` handlers, so a broad veto can suppress the guest's

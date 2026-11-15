@@ -1833,6 +1833,46 @@ pub struct EntityConvertAttempt {
     pub outcome_entity_type_id: String,
 }
 
+/// Synchronous cancellable player command attempt on the logical server.
+///
+/// NeoForge fires `player.command_attempt` after command parsing and before
+/// execution when the command source's entity is a server player. Return
+/// `Ok(true)` to cancel execution. The snapshot contains the player UUID,
+/// dimension, and the raw command text as typed (without the leading slash).
+/// Commands longer than 1,024 UTF-8 bytes are not dispatched. Both
+/// `events.subscribe` and `events.cancel` are required, and the callback must
+/// remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerCommandAttempt {
+    /// Canonical UUID of the player issuing the command.
+    pub player_id: String,
+    /// Resource location of the player's dimension.
+    pub dimension_id: String,
+    /// Raw command text, bounded by the host to 1,024 UTF-8 bytes.
+    pub command: String,
+}
+
+/// Synchronous cancellable mob-split attempt on the logical server.
+///
+/// NeoForge fires `entity.mob_split_attempt` when a mob is removed and would
+/// spawn children, such as a slime or magma cube. Return `Ok(true)` to prevent
+/// every child from spawning. The snapshot contains the parent UUID and type,
+/// the dimension, and the number of pending children. Both `events.subscribe`
+/// and `events.cancel` are required, and the callback must remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityMobSplitAttempt {
+    /// Canonical UUID of the parent mob being removed.
+    pub parent_id: String,
+    /// Registry ID of the parent mob type.
+    pub parent_type_id: String,
+    /// Resource location of the dimension containing the parent.
+    pub dimension_id: String,
+    /// Number of children that would spawn.
+    pub child_count: u32,
+}
+
 /// Synchronous cancellable piston movement attempt on the logical server.
 ///
 /// NeoForge fires `block.piston_attempt` before a piston changes block states.
@@ -3550,28 +3590,29 @@ mod tests {
         EntityDeathAttempt, EntityDropsAttempt, EntityDropsItemSnapshot,
         EntityEffectApplicationAttempt, EntityExperienceDropAttempt, EntityFallAttempt,
         EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntityLightningStrikeAttempt,
-        EntityMountAttempt, EntityMountTarget, EntitySpawned, EntityTameAttempt,
-        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
-        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
-        PlayerAdvancementProgressEvent, PlayerAnvilUpdateAttempt, PlayerAttackAttempt,
-        PlayerBreakSpeed, PlayerBreakSpeedAction, PlayerChatAttempt, PlayerDropAttempt,
-        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
-        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
-        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed,
-        PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved,
-        PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt,
-        PlayerSpawnPointAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
-        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
-        SoundPlayAttempt, SoundPlayEntity, SoundPlayPosition, SpawnPointBlockPosition,
-        WorldLifecycle, WorldTick, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
-        MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, MAX_PLAYER_BREAK_SPEED,
-        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
-        MAX_PLAYER_ITEM_CONSUMED_COUNT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
-        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
-        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        EntityMobSplitAttempt, EntityMountAttempt, EntityMountTarget, EntitySpawned,
+        EntityTameAttempt, EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt,
+        FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
+        ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
+        PlayerAdvancementEarned, PlayerAdvancementProgressEvent, PlayerAnvilUpdateAttempt,
+        PlayerAttackAttempt, PlayerBreakSpeed, PlayerBreakSpeedAction, PlayerChatAttempt,
+        PlayerCommandAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
+        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
+        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
+        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed, PlayerItemCrafted,
+        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt,
+        PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt, PlayerSpawnPointAttempt,
+        PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
+        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, SoundPlayAttempt, SoundPlayEntity,
+        SoundPlayPosition, SpawnPointBlockPosition, WorldLifecycle, WorldTick,
+        MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
+        MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
+        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_ITEM_CONSUMED_COUNT,
+        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
+        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -4391,6 +4432,38 @@ mod tests {
         assert_eq!(
             from_bytes::<PlayerAnvilUpdateAttempt>(&expected).unwrap(),
             anvil
+        );
+
+        let command = PlayerCommandAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            command: "say hello".to_owned(),
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &command.player_id);
+        append_test_string(&mut expected, &command.dimension_id);
+        append_test_string(&mut expected, &command.command);
+        assert_eq!(to_bytes(&command).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<PlayerCommandAttempt>(&expected).unwrap(),
+            command
+        );
+
+        let split = EntityMobSplitAttempt {
+            parent_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            parent_type_id: "minecraft:slime".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            child_count: 3,
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &split.parent_id);
+        append_test_string(&mut expected, &split.parent_type_id);
+        append_test_string(&mut expected, &split.dimension_id);
+        expected.extend_from_slice(&3_u32.to_le_bytes());
+        assert_eq!(to_bytes(&split).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<EntityMobSplitAttempt>(&expected).unwrap(),
+            split
         );
     }
 

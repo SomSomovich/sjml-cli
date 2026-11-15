@@ -1,14 +1,19 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.102.0**. This version adds the synchronous cancellable
-`block.piston_attempt` and `player.anvil_update_attempt` callbacks. Existing
-ABI 1.101.0 contracts remain supported.
+The current ABI is **1.103.0**. This version adds the synchronous cancellable
+`player.command_attempt` and `entity.mob_split_attempt` callbacks. Existing
+ABI 1.102.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.103.0 adds two synchronous, cancellable logical-server callbacks:
+`player.command_attempt` can veto a player-issued command after parsing, and
+`entity.mob_split_attempt` can prevent a mob's children from spawning. Both use
+bounded schema-v1 payloads and require both event capabilities.
 
 ABI 1.102.0 adds two synchronous, cancellable logical-server callbacks:
 `block.piston_attempt` can stop a piston before blocks move, and
@@ -847,6 +852,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `entity.tame_attempt`, `entity.experience_drop_attempt`,
 `entity.convert_attempt`, `sound.play_attempt`, `player.spawn_point_attempt`,
 `entity.lightning_strike_attempt`, `block.piston_attempt`, `player.anvil_update_attempt`,
+`player.command_attempt`, `entity.mob_split_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
@@ -957,6 +963,18 @@ ABI 1.102.0 adds two more cancellable attempts:
 
 See [piston movement attempts](BLOCK_PISTON_ATTEMPTS.md) and
 [anvil result attempts](PLAYER_ANVIL_UPDATE_ATTEMPTS.md).
+
+ABI 1.103.0 adds two more cancellable attempts:
+
+- `player.command_attempt` encodes the player UUID, dimension ID, and raw
+  command text (1–1,024 UTF-8 bytes). NeoForge fires it from `CommandEvent`
+  only for player command sources; a veto prevents execution.
+- `entity.mob_split_attempt` encodes the parent UUID and registry type, the
+  dimension ID, and the `u32` pending child count. NeoForge fires it from
+  `MobSplitEvent`; a veto prevents every child from spawning.
+
+See [player command attempts](PLAYER_COMMAND_ATTEMPTS.md) and
+[mob split attempts](ENTITY_MOB_SPLIT_ATTEMPTS.md).
 
 ### Client item tooltip callback
 

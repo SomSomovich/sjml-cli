@@ -69,6 +69,8 @@ mod entity_knockback_attempt;
 mod entity_left_level;
 #[path = "gametest/entity_lightning_strike_attempt.rs"]
 mod entity_lightning_strike_attempt;
+#[path = "gametest/entity_mob_split_attempt.rs"]
+mod entity_mob_split_attempt;
 #[path = "gametest/entity_mount_attempt.rs"]
 mod entity_mount_attempt;
 #[path = "gametest/entity_navigation.rs"]
@@ -103,6 +105,8 @@ mod player_attack_attempt;
 mod player_bossbar;
 #[path = "gametest/player_chat_attempt.rs"]
 mod player_chat_attempt;
+#[path = "gametest/player_command_attempt.rs"]
+mod player_command_attempt;
 #[path = "gametest/player_equipment_changed.rs"]
 mod player_equipment_changed;
 #[path = "gametest/player_experience_change.rs"]
@@ -781,6 +785,8 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     player_spawn_point_attempt::initialize()?;
     entity_lightning_strike_attempt::initialize()?;
     block_piston_attempt::initialize()?;
+    player_command_attempt::initialize()?;
+    entity_mob_split_attempt::initialize()?;
     player_anvil_update_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;
