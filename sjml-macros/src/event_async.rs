@@ -50,6 +50,8 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.tame_attempt"
             | "entity.experience_drop_attempt"
             | "entity.convert_attempt"
+            | "sound.play_attempt"
+            | "player.spawn_point_attempt"
             | "block.grow_attempt"
             | "block.fertilize_attempt"
             | "block.farmland_trample_attempt"
@@ -426,6 +428,20 @@ mod tests {
                 quote! { async fn convert_attempt(_: EntityConvertAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.convert_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "sound.play_attempt"),
+                quote! { async fn sound_play_attempt(_: SoundPlayAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "sound.play_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.spawn_point_attempt"),
+                quote! { async fn spawn_point_attempt(_: PlayerSpawnPointAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.spawn_point_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

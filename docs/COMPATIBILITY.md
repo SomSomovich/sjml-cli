@@ -16,15 +16,22 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.109.0`, Rust SDK/macros `0.107.0`, private CLI
-`0.1.39`, and ABI `1.99.0`. ABI compatibility remains major-version based: host
-0.109.0 accepts ABI `1.0.x` through `1.99.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.99.0` and host range
-`^0.109.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.110.0`, Rust SDK/macros `0.108.0`, private CLI
+`0.1.40`, and ABI `1.100.0`. ABI compatibility remains major-version based: host
+0.110.0 accepts ABI `1.0.x` through `1.100.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.100.0` and host range
+`^0.110.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.100.0
+
+This version adds the synchronous cancellable `sound.play_attempt` callback,
+which can suppress a logical-server level sound after a subscription precheck,
+and `player.spawn_point_attempt`, which can veto a respawn-point change. Both
+use bounded schema-v1 payloads and require both event capabilities.
 
 ### APIs added in ABI 1.99.0
 

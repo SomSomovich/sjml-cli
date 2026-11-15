@@ -121,6 +121,8 @@ mod player_movement_state;
 mod player_potion_use_attempt;
 #[path = "gametest/player_respawn_point.rs"]
 mod player_respawn_point;
+#[path = "gametest/player_spawn_point_attempt.rs"]
+mod player_spawn_point_attempt;
 #[path = "gametest/player_statistics.rs"]
 mod player_statistics;
 #[path = "gametest/player_tab_list.rs"]
@@ -139,6 +141,8 @@ mod scoreboard_display_slot;
 mod scoreboard_objectives;
 #[path = "gametest/scoreboard_teams.rs"]
 mod scoreboard_teams;
+#[path = "gametest/sound_play_attempt.rs"]
+mod sound_play_attempt;
 #[path = "gametest/world_block_tag.rs"]
 mod world_block_tag;
 #[path = "gametest/world_blocks.rs"]
@@ -767,6 +771,8 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     entity_experience_drop_attempt::initialize()?;
     entity_convert_attempt::initialize()?;
     player_chat_attempt::initialize()?;
+    sound_play_attempt::initialize()?;
+    player_spawn_point_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;
     entity_breed_attempt::initialize()?;

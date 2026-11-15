@@ -298,6 +298,13 @@ source/outcome entity snapshot. The
 [ABI reference](ABI.md#event-subscription-imports-neoforge-adapter) lists the
 general per-module callback and subscription limits.
 
+ABI 1.100 adds `sound.play_attempt` and `player.spawn_point_attempt`. Both
+require `events.subscribe` and `events.cancel`, a synchronous handler, and a
+logical-server context; they expose bounded detached sound/position values and
+the player's spawn target and cannot change volume, pitch, or the requested
+position. The sound listener checks whether any active module subscribed before
+building a snapshot.
+
 `world::destroy_block` requires `world.read` and `world.write`. It accepts only
 an in-border, in-height, already-loaded non-air position, never loads a chunk,
 and runs the normal vanilla destroy path (including block loot and block-entity

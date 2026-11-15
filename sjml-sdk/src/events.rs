@@ -1833,6 +1833,89 @@ pub struct EntityConvertAttempt {
     pub outcome_entity_type_id: String,
 }
 
+/// Synchronous cancellable level-sound attempt on the logical server.
+///
+/// NeoForge fires `sound.play_attempt` when Minecraft is about to play a sound
+/// in a logical-server level. Return `Ok(true)` to suppress playback entirely.
+/// The detached snapshot includes the canonical sound ID, vanilla sound
+/// category, dimension, effective volume and pitch, and an optional world
+/// position or entity identity. It is observational otherwise: the callback
+/// cannot change the sound, volume, or pitch. Both `events.subscribe` and
+/// `events.cancel` are required, and the callback must remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct SoundPlayAttempt {
+    /// Canonical registry ID of the sound event.
+    pub sound_id: String,
+    /// Lowercase vanilla sound category name, such as `master` or `block`.
+    pub source: String,
+    /// Resource location of the dimension containing the sound.
+    pub dimension_id: String,
+    /// Effective volume requested by the caller.
+    pub volume: f32,
+    /// Effective pitch requested by the caller.
+    pub pitch: f32,
+    /// World-space position for at-position sounds.
+    pub position: Option<SoundPlayPosition>,
+    /// Entity identity for at-entity sounds.
+    pub entity: Option<SoundPlayEntity>,
+}
+
+/// Detached world-space position for an at-position sound.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct SoundPlayPosition {
+    /// X coordinate in blocks.
+    pub x: f64,
+    /// Y coordinate in blocks.
+    pub y: f64,
+    /// Z coordinate in blocks.
+    pub z: f64,
+}
+
+/// Detached entity identity for an at-entity sound.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct SoundPlayEntity {
+    /// Canonical UUID of the entity the sound plays on.
+    pub entity_id: String,
+    /// Registry ID of the entity type.
+    pub entity_type_id: String,
+}
+
+/// Synchronous cancellable spawn-point change attempt on the logical server.
+///
+/// NeoForge fires `player.spawn_point_attempt` when a player's respawn point is
+/// set, changed, or reset. Return `Ok(true)` to cancel the change. The detached
+/// snapshot contains the player UUID, the target dimension, an optional block
+/// position (absent when the point is being cleared), and whether Minecraft
+/// forced the change. Both `events.subscribe` and `events.cancel` are required,
+/// and the callback must remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerSpawnPointAttempt {
+    /// Canonical UUID of the player whose spawn point would change.
+    pub player_id: String,
+    /// Resource location of the target spawn dimension.
+    pub dimension_id: String,
+    /// Requested spawn block position; absent when the point is cleared.
+    pub new_spawn: Option<SpawnPointBlockPosition>,
+    /// Whether Minecraft forced the change rather than a normal bed/anchor use.
+    pub forced: bool,
+}
+
+/// Detached block position for a requested spawn point.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct SpawnPointBlockPosition {
+    /// Block x coordinate.
+    pub x: i32,
+    /// Block y coordinate.
+    pub y: i32,
+    /// Block z coordinate.
+    pub z: i32,
+}
+
 /// Synchronous cancellable knockback attempt for a living entity on the logical server.
 ///
 /// NeoForge 21.1.265 fires this before applying knockback. The event exposes original and current
@@ -3395,15 +3478,16 @@ mod tests {
         PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed,
         PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved,
         PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt,
-        PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
-        ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle, WorldTick,
-        MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
-        MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
-        MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MAX_PLAYER_EXPERIENCE_LEVEL_DELTA,
-        MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT, MAX_PLAYER_ITEM_CONSUMED_COUNT,
-        MAX_PLAYER_POTION_USE_DURATION_TICKS, MAX_PLAYER_POTION_USE_ITEM_COUNT,
-        MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL, MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
-        MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
+        PlayerSpawnPointAttempt, PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction,
+        PlayerVillagerTraded, ProjectileImpactAttempt, ResourcesReloaded, ServerTick,
+        SoundPlayAttempt, SoundPlayEntity, SoundPlayPosition, SpawnPointBlockPosition,
+        WorldLifecycle, WorldTick, MAX_ENTITY_DROPS_ATTEMPT_DROPS,
+        MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, MAX_PLAYER_BREAK_SPEED,
+        MAX_PLAYER_EQUIPMENT_ITEM_COUNT, MAX_PLAYER_EXPERIENCE_CHANGE_AMOUNT,
+        MAX_PLAYER_EXPERIENCE_LEVEL_DELTA, MAX_PLAYER_EXPERIENCE_LEVEL_SNAPSHOT,
+        MAX_PLAYER_ITEM_CONSUMED_COUNT, MAX_PLAYER_POTION_USE_DURATION_TICKS,
+        MAX_PLAYER_POTION_USE_ITEM_COUNT, MAX_PLAYER_TOTEM_USE_COUNT, MAX_SERVER_TICK_INTERVAL,
+        MIN_PLAYER_EXPERIENCE_CHANGE_AMOUNT, MIN_PLAYER_EXPERIENCE_LEVEL_DELTA,
     };
     use crate::inventory::BlockPos;
     use crate::ErrorCode;
@@ -4056,6 +4140,104 @@ mod tests {
         assert_eq!(
             from_bytes::<EntityConvertAttempt>(&expected).unwrap(),
             conversion
+        );
+    }
+
+    #[test]
+    fn sound_and_spawn_point_attempts_match_the_host_schema() {
+        let sound = SoundPlayAttempt {
+            sound_id: "minecraft:block.note_block.pling".to_owned(),
+            source: "blocks".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            volume: 1.0,
+            pitch: 1.25,
+            position: Some(SoundPlayPosition {
+                x: 1.5,
+                y: 64.0,
+                z: -2.25,
+            }),
+            entity: None,
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &sound.sound_id);
+        append_test_string(&mut expected, &sound.source);
+        append_test_string(&mut expected, &sound.dimension_id);
+        expected.extend_from_slice(&1.0_f32.to_bits().to_le_bytes());
+        expected.extend_from_slice(&1.25_f32.to_bits().to_le_bytes());
+        expected.push(1);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&1.5_f64.to_bits().to_le_bytes());
+        expected.extend_from_slice(&64.0_f64.to_bits().to_le_bytes());
+        expected.extend_from_slice(&(-2.25_f64).to_bits().to_le_bytes());
+        expected.push(0);
+        assert_eq!(to_bytes(&sound).unwrap(), expected);
+        assert_eq!(from_bytes::<SoundPlayAttempt>(&expected).unwrap(), sound);
+
+        let with_entity = SoundPlayAttempt {
+            sound_id: "minecraft:entity.cow.ambient".to_owned(),
+            source: "neutral".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            volume: 0.5,
+            pitch: 0.75,
+            position: None,
+            entity: Some(SoundPlayEntity {
+                entity_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+                entity_type_id: "minecraft:cow".to_owned(),
+            }),
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &with_entity.sound_id);
+        append_test_string(&mut expected, &with_entity.source);
+        append_test_string(&mut expected, &with_entity.dimension_id);
+        expected.extend_from_slice(&0.5_f32.to_bits().to_le_bytes());
+        expected.extend_from_slice(&0.75_f32.to_bits().to_le_bytes());
+        expected.push(0);
+        expected.push(1);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        let entity_id = with_entity.entity.as_ref().unwrap();
+        append_test_string(&mut expected, &entity_id.entity_id);
+        append_test_string(&mut expected, &entity_id.entity_type_id);
+        assert_eq!(to_bytes(&with_entity).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<SoundPlayAttempt>(&expected).unwrap(),
+            with_entity
+        );
+
+        let spawn = PlayerSpawnPointAttempt {
+            player_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            new_spawn: Some(SpawnPointBlockPosition { x: 1, y: 64, z: -3 }),
+            forced: false,
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &spawn.player_id);
+        append_test_string(&mut expected, &spawn.dimension_id);
+        expected.push(1);
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&1_i32.to_le_bytes());
+        expected.extend_from_slice(&64_i32.to_le_bytes());
+        expected.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected.push(0);
+        assert_eq!(to_bytes(&spawn).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<PlayerSpawnPointAttempt>(&expected).unwrap(),
+            spawn
+        );
+
+        let cleared = PlayerSpawnPointAttempt {
+            new_spawn: None,
+            forced: true,
+            ..spawn
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &cleared.player_id);
+        append_test_string(&mut expected, &cleared.dimension_id);
+        expected.push(0);
+        expected.push(1);
+        assert_eq!(to_bytes(&cleared).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<PlayerSpawnPointAttempt>(&expected).unwrap(),
+            cleared
         );
     }
 

@@ -1,14 +1,21 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.99.0**. This version adds the synchronous cancellable
-`entity.convert_attempt` callback and the bounded `world::destroy_block`
-operation under `world.write`. Existing ABI 1.98.0 contracts remain supported.
+The current ABI is **1.100.0**. This version adds the synchronous cancellable
+`sound.play_attempt` and `player.spawn_point_attempt` callbacks. Existing ABI
+1.99.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.100.0 adds two synchronous, cancellable logical-server callbacks:
+`sound.play_attempt` can suppress a level sound before it is broadcast, and
+`player.spawn_point_attempt` can veto a respawn-point change. Both use bounded
+schema-v1 payloads, require `events.subscribe` and `events.cancel`, and run on
+the owning server thread. The sound listener checks active subscriptions before
+building a snapshot.
 
 ABI 1.99.0 adds one synchronous, cancellable logical-server callback:
 `entity.convert_attempt` can veto a living entity's replacement by another
@@ -826,7 +833,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.advancement_progress`, `player.enchanted`,
 `player.sleep_attempt`, `player.chat_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
 `entity.tame_attempt`, `entity.experience_drop_attempt`,
-`entity.convert_attempt`,
+`entity.convert_attempt`, `sound.play_attempt`, `player.spawn_point_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
@@ -902,6 +909,22 @@ entity type ID, dimension ID, and canonical outcome entity type ID. NeoForge
 fires it from `LivingConversionEvent.Pre`; a veto prevents the replacement
 entity from spawning while the source stays alive. See
 [entity conversion attempts](ENTITY_CONVERSION_ATTEMPTS.md).
+
+ABI 1.100.0 adds two more cancellable attempts in the same Boolean-veto format:
+
+- `sound.play_attempt` encodes the canonical sound ID, lowercase sound category,
+  dimension ID, `f32` volume and pitch, a Boolean presence byte plus three
+  `f64` coordinates for at-position sounds, and a Boolean presence byte plus
+  entity UUID and type for at-entity sounds. NeoForge fires it from
+  `PlayLevelSoundEvent`; a veto suppresses playback. Values are observational
+  and cannot be changed by the guest.
+- `player.spawn_point_attempt` encodes the player UUID, target spawn dimension,
+  a Boolean presence byte plus a nested schema-v1 block position, and the
+  forced flag. NeoForge fires it from `PlayerSetSpawnEvent`; a veto cancels the
+  change.
+
+See [level sound attempts](SOUND_ATTEMPTS.md) and
+[spawn-point attempts](PLAYER_SPAWN_POINT_ATTEMPTS.md).
 
 ### Client item tooltip callback
 

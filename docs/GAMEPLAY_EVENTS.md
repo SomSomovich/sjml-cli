@@ -60,6 +60,12 @@ pattern and require both `events.subscribe` and `events.cancel`:
   `LivingConversionEvent.Pre`. A veto prevents the replacement entity from
   spawning while the source stays alive. See
   [entity conversion attempts](ENTITY_CONVERSION_ATTEMPTS.md).
+- `sound.play_attempt` (`SoundPlayAttempt`) runs from `PlayLevelSoundEvent`. A
+  veto suppresses the level sound; volume, pitch, and category are
+  observational. See [level sound attempts](SOUND_ATTEMPTS.md).
+- `player.spawn_point_attempt` (`PlayerSpawnPointAttempt`) runs from
+  `PlayerSetSpawnEvent`. A veto cancels the respawn-point change. See
+  [spawn-point attempts](PLAYER_SPAWN_POINT_ATTEMPTS.md).
 
 A guest-created `world::create_explosion` also passes through the module's own
 `world.explosion_attempt` handlers, so a broad veto can suppress the guest's
