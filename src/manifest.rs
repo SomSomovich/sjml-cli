@@ -481,8 +481,8 @@ impl Manifest {
                     "modules.exports.visibility: invalid visibility",
                 )?;
             }
-            let commands = array(m, "commands", 128)?;
-            let client_commands = array(m, "client_commands", 128)?;
+            let commands = array(m, "commands", 256)?;
+            let client_commands = array(m, "client_commands", 256)?;
             require(
                 commands.is_empty() || side != "client",
                 "client-only modules cannot declare server commands",
@@ -492,8 +492,8 @@ impl Manifest {
                 "server-only modules cannot declare client commands",
             )?;
             require(
-                commands.len() + client_commands.len() <= 128,
-                "modules.commands: server and client commands combined exceed 128 entries per module",
+                commands.len() + client_commands.len() <= 256,
+                "modules.commands: server and client commands combined exceed 256 entries per module",
             )?;
             let mut names = BTreeSet::new();
             validate_command_declarations(

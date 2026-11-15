@@ -1,12 +1,26 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.97.0**. This version adds bounded client fog overrides, the observational `player.item_consumed` event, typed furnace-fuel data-map registration, and loaded-Mob path snapshots and cancellation. Existing ABI 1.96.0 contracts remain supported.
+The current ABI is **1.98.0**. This version adds synchronous cancellable
+`player.chat_attempt`, `entity.tame_attempt`, and
+`entity.experience_drop_attempt` events plus bounded guest-created world
+explosions and lightning strikes. Existing ABI 1.97.0 contracts remain
+supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.98.0 adds three synchronous, cancellable logical-server callbacks:
+`player.chat_attempt` can veto an inbound chat broadcast;
+`entity.tame_attempt` can prevent vanilla taming; and
+`entity.experience_drop_attempt` can veto the experience awarded by a death.
+It also adds `world::create_explosion` under the separate `world.explosion`
+capability and `world::strike_lightning` under `world.lightning`, both with
+per-module tick quotas and loaded-chunk-only preflight. The maximum combined
+server and client command declarations per module increases from 128 to 256;
+previously valid manifests remain valid.
 
 ABI 1.97.0 adds physical-client fog color, distance, and shape overrides;
 the observation-only `player.item_consumed` completion event; static typed
@@ -804,7 +818,8 @@ The event name is strict UTF-8, 1–128 bytes, lowercase ASCII letters, digits,
 are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.moved`, `player.respawned`, `player.advancement_earned`,
 `player.advancement_progress`, `player.enchanted`,
-`player.sleep_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
+`player.sleep_attempt`, `player.chat_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
+`entity.tame_attempt`, `entity.experience_drop_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
@@ -822,6 +837,7 @@ Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.item_use_attempt`, `player.potion_use_attempt`, `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`,
 `client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.fall_attempt`, `entity.mount_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,
+`entity.tame_attempt`, `entity.experience_drop_attempt`, `player.chat_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.farmland_trample_attempt`, `block.fire_spread_attempt`,
 `block.fluid_place_attempt`, `player.fished_attempt`, `player.attack_attempt`, or `world.explosion_attempt` additionally
@@ -847,6 +863,30 @@ original-ratio-x, original-ratio-z, ratio-x, and ratio-z. The payload is at most
 1,024 bytes. Numeric inputs must be finite; strengths are in `[0, 1,000,000]`
 and ratios in `[-1,000,000, 1,000,000]`. Guest code can cancel the event but
 cannot modify the observed knockback parameters.
+
+ABI 1.98.0 adds three cancellable attempt payloads, all requiring
+`events.subscribe` and `events.cancel`, a synchronous callback, and a
+logical-server execution context. A callback returns exactly one Boolean byte:
+`1` vetoes the operation and `0` passes it through. Each payload starts with
+`u32 schema=1` and caps the whole event at 2 KiB and 64 callbacks:
+
+- `player.chat_attempt` encodes length-prefixed UTF-8 player UUID, sender name
+  (1–64 bytes), and the original unsigned raw text (0–1,024 bytes). NeoForge
+  fires it from `ServerChatEvent` after signed-chat verification; a veto cancels
+  the broadcast and nothing is rewritten or resent.
+- `entity.tame_attempt` encodes the animal UUID, canonical entity type ID,
+  dimension ID, tamer UUID, and tamer name (1–64 bytes). NeoForge fires it from
+  `AnimalTameEvent`; a veto prevents the vanilla taming.
+- `entity.experience_drop_attempt` encodes the entity UUID, canonical entity
+  type ID, dimension ID, a Boolean presence byte plus optional attacking player
+  UUID, and two signed `i32` values (original and currently requested
+  experience, each `0..=1,000,000`). NeoForge fires it from
+  `LivingExperienceDropEvent`; a veto awards zero experience while the death
+  and item drops continue.
+
+See [player chat attempts](PLAYER_CHAT_ATTEMPTS.md),
+[animal taming attempts](ENTITY_TAME_ATTEMPTS.md), and
+[experience-drop attempts](ENTITY_EXPERIENCE_DROP_ATTEMPTS.md).
 
 ### Client item tooltip callback
 
@@ -1350,7 +1390,7 @@ supported argument types and stable Rust field types are:
 omitted, the respective bound is the full `i32` limit. A `greedy_string` must
 be the final argument. String values are limited to 65,536 UTF-8 bytes each,
 and the complete input record is limited to 1 MiB. A module may declare up to
-128 combined server and client commands, and a command may declare up to 16
+256 combined server and client commands, and a command may declare up to 16
 arguments; the host stages at most 8,192 commands across all packages.
 Client-only modules cannot declare server commands. Local client-command
 declarations and their permissions are described in `FORMAT.md`.
@@ -2010,6 +2050,8 @@ registration binds the signatures but every call during `mod_register` returns
 | `notify_neighbors_at` | `handle_ptr, handle_len, x, y, z` | Run the ordinary vanilla neighbor update at a loaded position; status only |
 | `spawn_entity` | `query_ptr, query_len` | Spawn one registered, non-player entity from a bounded schema-v1 world/type/position record; status only |
 | `spawn_item` | `query_ptr, query_len` | Spawn one bounded ordinary stack from the current item registry, with loaded-only position checks and bounded velocity; status only |
+| `create_explosion` | `query_ptr, query_len` | Create one bounded schema-v1 vanilla explosion with loaded-area preflight; requires `world.read` and `world.explosion`; status only |
+| `strike_lightning` | `query_ptr, query_len` | Strike one bounded schema-v1 vanilla lightning bolt at a loaded block; requires `world.read` and `world.lightning`; status only |
 | `emit_game_event` | `query_ptr, query_len` | Dispatch one canonical game-event registry ID at a loaded block center with an empty source context; status only |
 | `spawn_particle` | `handle_ptr, handle_len, x, y, z, particle_id_ptr, particle_id_len` | Spawn one registered simple particle at the center of a loaded block; status only |
 | `play_sound` | `handle_ptr, handle_len, x, y, z, sound_id_ptr, sound_id_len, volume_bits, pitch_bits` | Play one registered sound at the center of a loaded block; status only |
@@ -2247,6 +2289,28 @@ already-loaded chunks. Velocity may be zero and has a magnitude limit of 4.0
 blocks per tick. A module may spawn 16 stacks per logical-server tick. Static
 registration, client contexts, invalid values, and unloaded positions are
 rejected; this call never loads a chunk or accepts NBT/data components.
+
+`create_explosion` requires `world.read` and the separate administrator-granted
+`world.explosion` capability. Its exact schema-v1 request is 58 bytes:
+`u32(1)`, the 24-byte module-owned world handle, three finite `f64` coordinates
+within ±30,000,000, an `f32` power, a Boolean fire byte, and an interaction byte
+(`0` none, `1` block). Power must be finite and in `0 < power <= 16`. The center
+must be inside build height and the world border, and every chunk touched by the
+horizontal blast area must already be loaded. The module can create at most two
+explosions per logical-server tick. Missing capabilities, static-registration
+calls, client contexts, invalid values, and unloaded areas fail closed; this
+call never loads a chunk. See [creating explosions](WORLD_EXPLOSIONS.md).
+
+`strike_lightning` requires `world.read` and the separate administrator-granted
+`world.lightning` capability. Its exact schema-v1 request is 41 bytes:
+`u32(1)`, the 24-byte module-owned world handle, three signed `i32` block
+coordinates, and a Boolean visual-only byte. The block column must be within
+±30,000,000 in x/z, the y coordinate must be inside build height, and the
+position must be inside the world border and an already-loaded chunk. The module
+can strike at most four bolts per logical-server tick. Missing capabilities,
+static-registration calls, client contexts, invalid values, and unloaded
+positions fail closed; this call never loads a chunk. See
+[striking lightning](WORLD_LIGHTNING.md).
 
 `emit_game_event` requires `world.read` and `world.write`. The schema-v1
 request is little-endian `u32 schema=1`, the 24-byte module-owned world handle,

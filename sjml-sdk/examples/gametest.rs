@@ -49,6 +49,8 @@ mod entity_drops_attempt;
 mod entity_effect_application;
 #[path = "gametest/entity_equipment.rs"]
 mod entity_equipment;
+#[path = "gametest/entity_experience_drop_attempt.rs"]
+mod entity_experience_drop_attempt;
 #[path = "gametest/entity_fall_attempt.rs"]
 mod entity_fall_attempt;
 #[path = "gametest/entity_heal_attempt.rs"]
@@ -71,6 +73,8 @@ mod entity_riding;
 mod entity_rotation;
 #[path = "gametest/entity_shield_block_attempt.rs"]
 mod entity_shield_block_attempt;
+#[path = "gametest/entity_tame_attempt.rs"]
+mod entity_tame_attempt;
 #[path = "gametest/entity_target.rs"]
 mod entity_target;
 #[path = "gametest/entity_teleport.rs"]
@@ -89,6 +93,8 @@ mod player_air_supply;
 mod player_attack_attempt;
 #[path = "gametest/player_bossbar.rs"]
 mod player_bossbar;
+#[path = "gametest/player_chat_attempt.rs"]
+mod player_chat_attempt;
 #[path = "gametest/player_equipment_changed.rs"]
 mod player_equipment_changed;
 #[path = "gametest/player_experience_change.rs"]
@@ -141,6 +147,8 @@ mod world_difficulty;
 mod world_fluid_state;
 #[path = "gametest/world_game_event.rs"]
 mod world_game_event;
+#[path = "gametest/world_hazards.rs"]
+mod world_hazards;
 #[path = "gametest/world_item_spawn.rs"]
 mod world_item_spawn;
 #[path = "gametest/world_item_tag.rs"]
@@ -751,6 +759,9 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     entity_fall_attempt::initialize()?;
     entity_mount_attempt::initialize()?;
     entity_drops_attempt::initialize()?;
+    entity_tame_attempt::initialize()?;
+    entity_experience_drop_attempt::initialize()?;
+    player_chat_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;
     entity_breed_attempt::initialize()?;

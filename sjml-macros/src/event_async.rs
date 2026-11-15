@@ -29,6 +29,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "player.drop_attempt"
             | "player.item_pickup_attempt"
             | "player.sleep_attempt"
+            | "player.chat_attempt"
             | "item.use"
             | "item.attack_attempt"
             | "item.use_on_block"
@@ -46,6 +47,8 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.join_attempt"
             | "entity.target_attempt"
             | "entity.breed_attempt"
+            | "entity.tame_attempt"
+            | "entity.experience_drop_attempt"
             | "block.grow_attempt"
             | "block.fertilize_attempt"
             | "block.farmland_trample_attempt"
@@ -394,6 +397,27 @@ mod tests {
                 quote! { async fn drops_attempt(_: EntityDropsAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.drops_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "player.chat_attempt"),
+                quote! { async fn chat_attempt(_: PlayerChatAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "player.chat_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.tame_attempt"),
+                quote! { async fn tame_attempt(_: EntityTameAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.tame_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.experience_drop_attempt"),
+                quote! { async fn experience_drop_attempt(_: EntityExperienceDropAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.experience_drop_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

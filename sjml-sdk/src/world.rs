@@ -61,6 +61,12 @@ pub const MIN_WORLD_PROJECTILE_SPEED: f64 = 0.1;
 pub const MAX_WORLD_PROJECTILE_SPEED: f64 = 4.0;
 /// Maximum vanilla projectiles one module can spawn per logical-server tick.
 pub const MAX_WORLD_PROJECTILES_PER_TICK: usize = 4;
+/// Maximum explosion power accepted by [`create_explosion`]; vanilla TNT uses 4 and charged creepers 6.
+pub const MAX_WORLD_EXPLOSION_POWER: f32 = 16.0;
+/// Maximum explosions one module can create per logical-server tick.
+pub const MAX_WORLD_EXPLOSIONS_PER_TICK: usize = 2;
+/// Maximum lightning strikes one module can create per logical-server tick.
+pub const MAX_WORLD_LIGHTNING_STRIKES_PER_TICK: usize = 4;
 /// Maximum ordinary item stacks one module can spawn per logical-server tick.
 pub const MAX_WORLD_ITEM_SPAWNS_PER_TICK: usize = 16;
 /// Maximum stack count accepted by [`spawn_item`] before the host checks the item's own limit.
@@ -533,6 +539,16 @@ pub struct ProjectileVelocity {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+}
+
+/// Block interaction requested for a guest-created explosion.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+pub enum ExplosionInteraction {
+    /// No blocks are destroyed; entities still receive vanilla explosion damage.
+    None = 0,
+    /// Vanilla block destruction and drops, subject to the world's explosion game rules.
+    Block = 1,
 }
 
 /// Bounded initial velocity for one ordinary world-spawned item stack.
@@ -1312,6 +1328,30 @@ struct WorldProjectileSpawnRequest {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
+struct WorldExplosionRequest {
+    world: WorldHandle,
+    x: f64,
+    y: f64,
+    z: f64,
+    power: f32,
+    fire: bool,
+    interaction: u8,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
+struct WorldLightningStrikeRequest {
+    world: WorldHandle,
+    x: i32,
+    y: i32,
+    z: i32,
+    visual_only: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
 struct WorldItemSpawnRequest {
     world: WorldHandle,
     item_id: String,
@@ -1497,6 +1537,10 @@ extern "C" {
     fn imported_spawn_entity(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_projectile"]
     fn imported_spawn_projectile(query: i32, query_length: i32) -> i32;
+    #[link_name = "create_explosion"]
+    fn imported_create_explosion(query: i32, query_length: i32) -> i32;
+    #[link_name = "strike_lightning"]
+    fn imported_strike_lightning(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_item"]
     fn imported_spawn_item(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_particles"]
@@ -3603,6 +3647,111 @@ pub fn spawn_projectile(
     }
 }
 
+/// Creates one vanilla explosion at an already-loaded logical-server position.
+///
+/// The module must request and receive `world.read` and the separate
+/// `world.explosion` administrator capability. Coordinates must be finite and
+/// within ±30,000,000; power must be finite and in `0 < power <= 16`. The
+/// explosion center must be inside build height and the world border, and every
+/// chunk touched by the horizontal blast area must already be loaded. Entities
+/// in range receive normal vanilla explosion damage; block destruction depends
+/// on [`ExplosionInteraction`] and the world's explosion game rules. Optional
+/// fire is placed with vanilla's random fire chance. Each module can create at
+/// most two explosions per logical-server tick. No call loads a chunk.
+pub fn create_explosion(
+    world: WorldHandle,
+    position: RaycastPoint,
+    power: f32,
+    fire: bool,
+    interaction: ExplosionInteraction,
+) -> SjmlResult<()> {
+    if !valid_raycast_point(position) {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "explosion coordinates must be finite and within ±30,000,000",
+        ));
+    }
+    if !power.is_finite() || power <= 0.0 || power > MAX_WORLD_EXPLOSION_POWER {
+        return Err(SjmlError::new(
+            ErrorCode::InvalidArgument,
+            "explosion power must be finite and within 0 < power <= 16",
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldExplosionRequest {
+            world,
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            power,
+            fire,
+            interaction: interaction as u8,
+        })?;
+        // SAFETY: the encoded request remains allocated and readable for this synchronous import.
+        let status = unsafe {
+            imported_create_explosion(query.as_ptr() as usize as u32 as i32, query.len() as i32)
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the explosion request",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, fire, interaction);
+        Err(unsupported_target())
+    }
+}
+
+/// Strikes one vanilla lightning bolt at the bottom center of an already-loaded block.
+///
+/// The module must request and receive `world.read` and the separate
+/// `world.lightning` administrator capability. The x/z column must be within
+/// ±30,000,000, the y coordinate must be inside build height, and the block
+/// must be inside the world border and an already-loaded chunk. `visual_only`
+/// requests vanilla's visual-only bolt, which produces the light and sound
+/// effects without fire or entity damage. Each module can strike at most four
+/// bolts per logical-server tick. No call loads a chunk.
+pub fn strike_lightning(
+    world: WorldHandle,
+    position: BlockPos,
+    visual_only: bool,
+) -> SjmlResult<()> {
+    validate_world_position(position)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldLightningStrikeRequest {
+            world,
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            visual_only,
+        })?;
+        // SAFETY: the encoded request remains allocated and readable for this synchronous import.
+        let status = unsafe {
+            imported_strike_lightning(query.as_ptr() as usize as u32 as i32, query.len() as i32)
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the lightning strike",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, visual_only);
+        Err(unsupported_target())
+    }
+}
+
 /// Spawns one ordinary item stack in an already-loaded logical-server world.
 ///
 /// The module must request and receive `world.read` and `world.write`. The item ID may name any
@@ -4479,42 +4628,44 @@ fn unsupported_target() -> SjmlError {
 mod tests {
     use super::{
         biome_at, biome_climate_at, biome_ids, block_collision_boxes, block_destroy_speed,
-        block_has_tag, block_properties, collides, day_time, daylight_cycle_enabled,
-        entity_type_tag_members, fluid_at, fluid_flow_at, fluid_tag_members, integer_game_rule,
-        item_has_tag, item_tag_members, loaded_chunks, notify_neighbors_at, play_sound, raycast,
-        schedule_block_tick, schedule_fluid_tick, set_block, set_block_properties,
-        set_block_with_options, set_daylight_cycle_enabled, set_game_time, set_integer_game_rule,
-        set_time, spawn_entity, spawn_item, spawn_particle, spawn_projectile, structures_at,
-        tag_members, validate_biome_ids, validate_block_property_updates, validate_fluid_flow,
-        validate_loaded_chunk_query, validate_loaded_chunk_results, validate_structure_ids,
-        validate_tag_member_ids, validate_world_position, Aabb, BiomeClimateQuery,
-        BiomeClimateResponse, BiomeIdsQuery, BiomeIdsResponse, BiomePrecipitation,
-        BiomeTemperatureModifier, BlockCollisionBox, BlockCollisionBoxesQuery,
-        BlockCollisionBoxesResponse, BlockDestroySpeedQuery, BlockDestroySpeedResponse,
-        BlockPropertiesMutation, BlockPropertiesQuery, BlockPropertiesResponse, BlockProperty,
-        BlockStateBatch, BlockStateQuery, BlockStateSnapshot, BlockTagQuery, BlockTagResponse,
-        BlockUpdateOptions, ChunkPos, DaylightCycleSnapshot, FluidFlowQuery, FluidFlowResponse,
+        block_has_tag, block_properties, collides, create_explosion, day_time,
+        daylight_cycle_enabled, entity_type_tag_members, fluid_at, fluid_flow_at,
+        fluid_tag_members, integer_game_rule, item_has_tag, item_tag_members, loaded_chunks,
+        notify_neighbors_at, play_sound, raycast, schedule_block_tick, schedule_fluid_tick,
+        set_block, set_block_properties, set_block_with_options, set_daylight_cycle_enabled,
+        set_game_time, set_integer_game_rule, set_time, spawn_entity, spawn_item, spawn_particle,
+        spawn_projectile, strike_lightning, structures_at, tag_members, validate_biome_ids,
+        validate_block_property_updates, validate_fluid_flow, validate_loaded_chunk_query,
+        validate_loaded_chunk_results, validate_structure_ids, validate_tag_member_ids,
+        validate_world_position, Aabb, BiomeClimateQuery, BiomeClimateResponse, BiomeIdsQuery,
+        BiomeIdsResponse, BiomePrecipitation, BiomeTemperatureModifier, BlockCollisionBox,
+        BlockCollisionBoxesQuery, BlockCollisionBoxesResponse, BlockDestroySpeedQuery,
+        BlockDestroySpeedResponse, BlockPropertiesMutation, BlockPropertiesQuery,
+        BlockPropertiesResponse, BlockProperty, BlockStateBatch, BlockStateQuery,
+        BlockStateSnapshot, BlockTagQuery, BlockTagResponse, BlockUpdateOptions, ChunkPos,
+        DaylightCycleSnapshot, ExplosionInteraction, FluidFlowQuery, FluidFlowResponse,
         FluidFlowSnapshot, FluidStateQuery, FluidStateResponse, ItemSpawnVelocity, ItemTagQuery,
         ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
         RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery,
         StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
         VanillaProjectileKind, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
-        WorldEntitySpawnRequest, WorldGameRule, WorldGameRuleMutation, WorldGameRuleQuery,
-        WorldGameRuleSnapshot, WorldIntegerGameRule, WorldIntegerGameRuleMutation,
-        WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot, WorldItemSpawnRequest,
-        WorldProjectileSpawnRequest, WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS,
-        MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES, MAX_WORLD_BIOME_IDS,
-        MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
+        WorldEntitySpawnRequest, WorldExplosionRequest, WorldGameRule, WorldGameRuleMutation,
+        WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
+        WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot,
+        WorldItemSpawnRequest, WorldLightningStrikeRequest, WorldProjectileSpawnRequest,
+        WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES,
+        MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
         MAX_WORLD_BLOCK_COLLISION_BOXES, MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_PROPERTIES,
         MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
         MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
-        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS,
-        MAX_WORLD_FLUID_FLOW_RESPONSE_BYTES, MAX_WORLD_FLUID_STATE_RESPONSE_BYTES,
-        MAX_WORLD_FLUID_TICK_DELAY_TICKS, MAX_WORLD_GAME_TIME_TICKS,
-        MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED, MAX_WORLD_ITEM_STACK_COUNT,
-        MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
-        MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_PROJECTILE_SPEED, MAX_WORLD_STRUCTURES_AT,
+        MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_EXPLOSIONS_PER_TICK,
+        MAX_WORLD_EXPLOSION_POWER, MAX_WORLD_FLUID_FLOW_RESPONSE_BYTES,
+        MAX_WORLD_FLUID_STATE_RESPONSE_BYTES, MAX_WORLD_FLUID_TICK_DELAY_TICKS,
+        MAX_WORLD_GAME_TIME_TICKS, MAX_WORLD_ITEM_SPAWNS_PER_TICK, MAX_WORLD_ITEM_SPAWN_SPEED,
+        MAX_WORLD_ITEM_STACK_COUNT, MAX_WORLD_ITEM_TAG_ID_BYTES, MAX_WORLD_ITEM_TAG_QUERY_BYTES,
+        MAX_WORLD_ITEM_TAG_RESPONSE_BYTES, MAX_WORLD_LIGHTNING_STRIKES_PER_TICK,
+        MAX_WORLD_PROJECTILE_SPEED, MAX_WORLD_STRUCTURES_AT,
         MAX_WORLD_STRUCTURES_AT_RESPONSE_BYTES, MAX_WORLD_STRUCTURE_ID_BYTES,
         MAX_WORLD_TAG_ID_BYTES, MAX_WORLD_TAG_MEMBERS, MAX_WORLD_TAG_MEMBERS_OUTPUT_BYTES,
         MAX_WORLD_TAG_MEMBERS_QUERY_BYTES, MAX_WORLD_TAG_MEMBERS_RESPONSE_BYTES,
@@ -4546,6 +4697,109 @@ mod tests {
             WeatherSnapshot::decode(&mut crate::Decoder::new(&encoded).unwrap()).unwrap(),
             snapshot
         );
+    }
+
+    #[test]
+    fn explosion_and_lightning_requests_match_the_java_wire_contract() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+
+        let explosion = WorldExplosionRequest {
+            world,
+            x: 1.5,
+            y: 64.0,
+            z: -2.25,
+            power: 4.0,
+            fire: true,
+            interaction: ExplosionInteraction::Block as u8,
+        };
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&1.5_f64.to_bits().to_le_bytes());
+        expected.extend_from_slice(&64.0_f64.to_bits().to_le_bytes());
+        expected.extend_from_slice(&(-2.25_f64).to_bits().to_le_bytes());
+        expected.extend_from_slice(&4.0_f32.to_bits().to_le_bytes());
+        expected.push(1);
+        expected.push(1);
+        assert_eq!(crate::to_bytes(&explosion).unwrap(), expected);
+        assert_eq!(expected.len(), 58);
+
+        let lightning = WorldLightningStrikeRequest {
+            world,
+            x: -3,
+            y: 64,
+            z: 8,
+            visual_only: true,
+        };
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected.extend_from_slice(&64_i32.to_le_bytes());
+        expected.extend_from_slice(&8_i32.to_le_bytes());
+        expected.push(1);
+        assert_eq!(crate::to_bytes(&lightning).unwrap(), expected);
+        assert_eq!(expected.len(), 41);
+    }
+
+    #[test]
+    fn explosion_and_lightning_validate_inputs_before_host_access() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let position = RaycastPoint::new(0.5, 64.0, 0.5);
+        for power in [0.0, -1.0, 16.01, f32::NAN, f32::INFINITY] {
+            assert_eq!(
+                create_explosion(world, position, power, false, ExplosionInteraction::None)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        for point in [
+            RaycastPoint::new(f64::NAN, 64.0, 0.5),
+            RaycastPoint::new(30_000_001.0, 64.0, 0.5),
+        ] {
+            assert_eq!(
+                create_explosion(world, point, 4.0, false, ExplosionInteraction::Block)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            create_explosion(world, position, 4.0, false, ExplosionInteraction::Block)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+
+        for block in [
+            crate::BlockPos {
+                x: 30_000_001,
+                y: 64,
+                z: 0,
+            },
+            crate::BlockPos {
+                x: 0,
+                y: 64,
+                z: -30_000_001,
+            },
+        ] {
+            assert_eq!(
+                strike_lightning(world, block, false).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            strike_lightning(world, crate::BlockPos { x: 0, y: 64, z: 0 }, true)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(MAX_WORLD_EXPLOSION_POWER, 16.0);
+        assert_eq!(MAX_WORLD_EXPLOSIONS_PER_TICK, 2);
+        assert_eq!(MAX_WORLD_LIGHTNING_STRIKES_PER_TICK, 4);
     }
 
     #[test]

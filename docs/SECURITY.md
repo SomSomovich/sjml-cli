@@ -276,6 +276,26 @@ world border, and build height are checked before insertion. A per-module
 16-spawn server-tick quota and finite 4-block/tick velocity limit bound the
 operation. No chunk-loading accessor is used.
 
+`world::create_explosion` requires `world.read` and the separate
+`world.explosion` grant. Coordinates must be finite and within ±30,000,000;
+power is limited to `0 < power <= 16`; the center must be inside build height
+and the world border; and every chunk touched by the horizontal blast area must
+already be loaded. A module may create at most two explosions per server tick
+across all dimensions. Explosions are unattributed, never force chunk loads,
+and remain subject to vanilla explosion game rules and the module's own
+`world.explosion_attempt` veto. `world::strike_lightning` requires `world.read`
+and the separate `world.lightning` grant, an in-border in-height block position
+in an already-loaded chunk, and at most four bolts per module per server tick.
+Visual-only bolts still produce light and sound but no fire or entity damage.
+
+The three ABI 1.98 cancellable callbacks `player.chat_attempt`,
+`entity.tame_attempt`, and `entity.experience_drop_attempt` require both
+`events.subscribe` and `events.cancel`, a synchronous handler, and a
+logical-server context. They receive only bounded detached identity, text, and
+numeric values and cannot rewrite or resend chat content. The
+[ABI reference](ABI.md#event-subscription-imports-neoforge-adapter) lists the
+general per-module callback and subscription limits.
+
 
 Typed block-entity persistence is restricted to a module's own registered block
 entities and requires `block_entity.data.read`; writes/removals also require

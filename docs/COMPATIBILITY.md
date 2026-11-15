@@ -16,15 +16,26 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.107.0`, Rust SDK/macros `0.105.0`, private CLI
-`0.1.37`, and ABI `1.97.0`. ABI compatibility remains major-version based: host
-0.107.0 accepts ABI `1.0.x` through `1.97.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.97.0` and host range
-`^0.107.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.108.0`, Rust SDK/macros `0.106.0`, private CLI
+`0.1.38`, and ABI `1.98.0`. ABI compatibility remains major-version based: host
+0.108.0 accepts ABI `1.0.x` through `1.98.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.98.0` and host range
+`^0.108.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.98.0
+
+This version adds synchronous cancellable `player.chat_attempt`,
+`entity.tame_attempt`, and `entity.experience_drop_attempt` server callbacks
+plus `world::create_explosion` and `world::strike_lightning` behind the
+separate `world.explosion` and `world.lightning` capabilities. Explosions and
+lightning are limited per module per tick, preflight only already-loaded
+chunks, and are denied to client and static-registration contexts. The maximum
+combined server and client command declarations per module rises from 128 to
+256. See the focused guides and the coverage matrix for exact bounds.
 
 ### APIs added in ABI 1.97.0
 

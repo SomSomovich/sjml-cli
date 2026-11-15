@@ -42,6 +42,27 @@ error does not cancel vanilla behavior.
 Both callbacks run on the logical server thread and receive bounded schema-v1
 payloads. They expose no Minecraft objects and do not cause chunks to load.
 
+Three additional synchronous, cancellable server attempts follow the same
+pattern and require both `events.subscribe` and `events.cancel`:
+
+- `player.chat_attempt` (`PlayerChatAttempt`) runs from NeoForge's
+  `ServerChatEvent` after signed-chat verification. A veto cancels the inbound
+  broadcast without rewriting or resending signed content. See
+  [inbound chat attempts](PLAYER_CHAT_ATTEMPTS.md).
+- `entity.tame_attempt` (`EntityTameAttempt`) runs from `AnimalTameEvent`. A
+  veto prevents the vanilla taming while leaving the animal's prior owner state
+  unchanged. See [animal taming attempts](ENTITY_TAME_ATTEMPTS.md).
+- `entity.experience_drop_attempt` (`EntityExperienceDropAttempt`) runs from
+  `LivingExperienceDropEvent`. A veto awards zero experience; the death and the
+  separate item-drop event continue. See
+  [experience-drop attempts](ENTITY_EXPERIENCE_DROP_ATTEMPTS.md).
+
+A guest-created `world::create_explosion` also passes through the module's own
+`world.explosion_attempt` handlers, so a broad veto can suppress the guest's
+explosions as well. See [creating explosions](WORLD_EXPLOSIONS.md) and
+[striking lightning](WORLD_LIGHTNING.md) for the separately granted world
+operations.
+
 The physical-client `client.item.tooltip` callback is synchronous and can
 append bounded literal lines to a vanilla tooltip; it is documented separately
 in [Client item-tooltip events](ITEM_TOOLTIP_EVENTS.md).

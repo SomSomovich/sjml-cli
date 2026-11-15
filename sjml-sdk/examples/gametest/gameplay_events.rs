@@ -50,7 +50,9 @@ fn observe_advancement_progress(event: PlayerAdvancementProgressEvent) -> SjmlRe
 
 #[event(name = "world.explosion_attempt")]
 fn cancel_test_explosion(event: ExplosionAttempt) -> SjmlResult<bool> {
-    let veto = event.block_interaction != "keep" && event.radius >= 2.0;
+    // Only the dedicated GameTest explosion uses power 3.0; guest-created
+    // explosions must still be able to run through the live world path.
+    let veto = (event.radius - 3.0).abs() < 0.001 && event.block_interaction != "keep";
     if veto {
         SAW_EXPLOSION_VETO.store(true, Ordering::Relaxed);
     }

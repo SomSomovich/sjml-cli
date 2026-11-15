@@ -94,7 +94,7 @@ granted `command.suggest` capability. The callback receives the unfinished
 text, argument index, source player UUID when available, and prior parsed
 arguments; it returns up to 64 unique values of up to 256 UTF-8 bytes each.
 A `greedy_string` must be the final argument. Command names are limited to 128
-characters. Each module can declare up to 128 server and client commands
+characters. Each module can declare up to 256 server and client commands
 combined across the two command arrays,
 with up to 16 arguments per command. Command names must be unique between both
 arrays. Server commands require the `content.register`
@@ -118,7 +118,7 @@ synchronous `#[client_command_suggestions(name = "...")]` callback receives a
 detached request with at most 256 UTF-8 bytes of partial text and prior parsed
 arguments, without a server source or world context. It returns at most 64
 suggestions of 256 UTF-8 bytes each on the physical-client main thread.
-The 128-command per-module limit is shared with `[[modules.commands]]`; names
+The 256-command per-module limit is shared with `[[modules.commands]]`; names
 must be unique across both arrays. Client-only modules cannot declare server
 commands, and server-only modules cannot declare client commands.
 See [client command declarations](CLIENT_COMMANDS.md).
@@ -167,7 +167,7 @@ not prove publisher identity or package authenticity.
 
 The host accepts at most 1 MiB of UTF-8 manifest text, nesting of 32 TOML
 levels, 256 entries in a manifest array, and strings up to 4,096 characters.
-There can be at most 256 modules, 128 combined server and client commands per
+There can be at most 256 modules, 256 combined server and client commands per
 module, 16 arguments per command, and 1,024 channels total. Metadata has the tighter bounds listed
 above. Archive path rules and ZIP limits are listed in the
 [package format](FORMAT.md#archive-rules-and-current-limits).

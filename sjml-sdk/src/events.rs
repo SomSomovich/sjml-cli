@@ -1741,6 +1741,76 @@ pub struct EntityDropsItemSnapshot {
     pub max_damage: Option<u32>,
 }
 
+/// Synchronous cancellable inbound chat attempt on the logical server.
+///
+/// NeoForge fires `player.chat_attempt` for a real inbound chat packet before
+/// Minecraft broadcasts the message. Return `Ok(true)` to cancel that message:
+/// no clients receive it and other server handlers do not observe the text.
+/// The payload carries only the sender UUID and name plus the unsigned raw
+/// text (at most 1,024 UTF-8 bytes). Observing, rewriting, or resending signed
+/// chat content is not available through this callback. Both
+/// `events.subscribe` and `events.cancel` are required, and the callback must
+/// remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct PlayerChatAttempt {
+    /// Canonical UUID of the player who sent the message.
+    pub player_id: String,
+    /// Game-profile name of the sending player.
+    pub player_name: String,
+    /// Original unsigned text payload from the client chat packet.
+    pub raw_text: String,
+}
+
+/// Synchronous cancellable animal taming attempt on the logical server.
+///
+/// NeoForge fires `entity.tame_attempt` from a vanilla taming hook before the
+/// animal is marked as tamed. Return `Ok(true)` to cancel taming: the animal
+/// keeps its previous owner state. The detached snapshot identifies the animal,
+/// its registry type, dimension, and the taming player. Both
+/// `events.subscribe` and `events.cancel` are required, and the callback must
+/// remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityTameAttempt {
+    /// Canonical UUID of the animal being tamed.
+    pub entity_id: String,
+    /// Registry ID of the animal's entity type.
+    pub entity_type_id: String,
+    /// Resource location of the dimension containing the animal.
+    pub dimension_id: String,
+    /// Canonical UUID of the player performing the taming attempt.
+    pub tamer_id: String,
+    /// Game-profile name of the taming player.
+    pub tamer_name: String,
+}
+
+/// Synchronous cancellable experience-drop attempt from a living entity death.
+///
+/// NeoForge fires `entity.experience_drop_attempt` before Minecraft spawns
+/// experience orbs. Return `Ok(true)` to cancel the drop; the entity still
+/// dies and item drops are controlled by `entity.drops_attempt`. The snapshot
+/// contains the detached entity identity, an optional last attacking player,
+/// and the original and currently requested experience amounts (each bounded to
+/// `0..=1_000_000`). Both `events.subscribe` and `events.cancel` are required,
+/// and the callback must remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityExperienceDropAttempt {
+    /// Canonical UUID of the living entity whose death would drop experience.
+    pub entity_id: String,
+    /// Registry ID of the living entity type.
+    pub entity_type_id: String,
+    /// Resource location of the dimension containing the entity.
+    pub dimension_id: String,
+    /// UUID of the last attacking player, when NeoForge still has one.
+    pub attacking_player_id: Option<String>,
+    /// Experience amount known before any modification.
+    pub original_experience: i32,
+    /// Experience amount that would currently be dropped.
+    pub dropped_experience: i32,
+}
+
 /// Synchronous cancellable knockback attempt for a living entity on the logical server.
 ///
 /// NeoForge 21.1.265 fires this before applying knockback. The event exposes original and current
@@ -3289,20 +3359,21 @@ mod tests {
         BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
         ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
         EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt, EntityDropsAttempt,
-        EntityDropsItemSnapshot, EntityEffectApplicationAttempt, EntityFallAttempt,
-        EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt, EntityMountAttempt,
-        EntityMountTarget, EntitySpawned, EntityTargetAttempt, EntityTick, EventPriority,
-        ExplosionAttempt, FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction,
-        ModuleBlockUse, ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock,
-        ModuleItemUseOnEntity, PlayerAdvancementEarned, PlayerAdvancementProgressEvent,
-        PlayerAttackAttempt, PlayerBreakSpeed, PlayerBreakSpeedAction, PlayerDropAttempt,
-        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
-        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
-        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
-        PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed,
-        PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved,
-        PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt,
-        PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
+        EntityDropsItemSnapshot, EntityEffectApplicationAttempt, EntityExperienceDropAttempt,
+        EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt,
+        EntityMountAttempt, EntityMountTarget, EntitySpawned, EntityTameAttempt,
+        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
+        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
+        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
+        PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerBreakSpeed,
+        PlayerBreakSpeedAction, PlayerChatAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
+        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
+        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
+        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
+        PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed, PlayerItemCrafted,
+        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt,
+        PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
+        PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
         ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle, WorldTick,
         MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
         MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
@@ -3874,6 +3945,79 @@ mod tests {
         assert_eq!(from_bytes::<EntityDropsAttempt>(&encoded).unwrap(), attempt);
         assert_eq!(MAX_ENTITY_DROPS_ATTEMPT_DROPS, 32);
         assert_eq!(MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT, 1_000_000);
+    }
+
+    #[test]
+    fn chat_tame_and_experience_attempts_match_the_host_schema() {
+        let chat = PlayerChatAttempt {
+            player_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            player_name: "Alice".to_owned(),
+            raw_text: "hello world".to_owned(),
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &chat.player_id);
+        append_test_string(&mut expected, &chat.player_name);
+        append_test_string(&mut expected, &chat.raw_text);
+        assert_eq!(to_bytes(&chat).unwrap(), expected);
+        assert_eq!(from_bytes::<PlayerChatAttempt>(&expected).unwrap(), chat);
+
+        let tame = EntityTameAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            entity_type_id: "minecraft:wolf".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            tamer_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            tamer_name: "Alice".to_owned(),
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &tame.entity_id);
+        append_test_string(&mut expected, &tame.entity_type_id);
+        append_test_string(&mut expected, &tame.dimension_id);
+        append_test_string(&mut expected, &tame.tamer_id);
+        append_test_string(&mut expected, &tame.tamer_name);
+        assert_eq!(to_bytes(&tame).unwrap(), expected);
+        assert_eq!(from_bytes::<EntityTameAttempt>(&expected).unwrap(), tame);
+
+        let drop_with_player = EntityExperienceDropAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000003".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            attacking_player_id: Some("00000000-0000-0000-0000-000000000001".to_owned()),
+            original_experience: 7,
+            dropped_experience: 3,
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &drop_with_player.entity_id);
+        append_test_string(&mut expected, &drop_with_player.entity_type_id);
+        append_test_string(&mut expected, &drop_with_player.dimension_id);
+        expected.push(1);
+        append_test_string(
+            &mut expected,
+            drop_with_player.attacking_player_id.as_ref().unwrap(),
+        );
+        expected.extend_from_slice(&7_i32.to_le_bytes());
+        expected.extend_from_slice(&3_i32.to_le_bytes());
+        assert_eq!(to_bytes(&drop_with_player).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<EntityExperienceDropAttempt>(&expected).unwrap(),
+            drop_with_player
+        );
+
+        let drop_without_player = EntityExperienceDropAttempt {
+            attacking_player_id: None,
+            ..drop_with_player
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &drop_without_player.entity_id);
+        append_test_string(&mut expected, &drop_without_player.entity_type_id);
+        append_test_string(&mut expected, &drop_without_player.dimension_id);
+        expected.push(0);
+        expected.extend_from_slice(&7_i32.to_le_bytes());
+        expected.extend_from_slice(&3_i32.to_le_bytes());
+        assert_eq!(to_bytes(&drop_without_player).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<EntityExperienceDropAttempt>(&expected).unwrap(),
+            drop_without_player
+        );
     }
 
     fn append_test_item_snapshot(output: &mut Vec<u8>, item: &BlockDropsItemSnapshot) {

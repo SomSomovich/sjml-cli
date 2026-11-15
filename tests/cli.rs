@@ -109,7 +109,7 @@ fn generated_project_builds_tests_packages_and_inspects_offline() {
     assert!(
         fs::read_to_string(project.join("sjml.toml"))
             .unwrap()
-            .contains("sjml = \"^0.107.0\"")
+            .contains("sjml = \"^0.108.0\"")
     );
     // Re-initialization must never overwrite user files.
     fs::write(project.join("keep.txt"), "owned").unwrap();
@@ -187,11 +187,11 @@ fn generated_default_template_tracks_current_sdk_host_and_abi_versions() {
     ]));
 
     let cargo_manifest = fs::read_to_string(project.join("Cargo.toml")).unwrap();
-    assert!(cargo_manifest.contains("sjml-sdk = \"0.105.0\""));
+    assert!(cargo_manifest.contains("sjml-sdk = \"0.106.0\""));
 
     let package_manifest = fs::read_to_string(project.join("sjml.toml")).unwrap();
-    assert!(package_manifest.contains("abi = \"^1.97.0\""));
-    assert!(package_manifest.contains("sjml = \"^0.107.0\""));
+    assert!(package_manifest.contains("abi = \"^1.98.0\""));
+    assert!(package_manifest.contains("sjml = \"^0.108.0\""));
 }
 
 #[test]
@@ -1060,12 +1060,12 @@ fn client_command_declarations_validate_side_arguments_and_cross_list_names() {
 }
 
 #[test]
-fn server_and_client_command_declarations_share_a_128_entry_limit() {
+fn server_and_client_command_declarations_share_a_256_entry_limit() {
     let tmp = sandbox();
     raw_project(tmp.path());
     let base = manifest().replace("side = 'server'", "side = 'both'");
     let mut text = base;
-    for index in 0..64 {
+    for index in 0..128 {
         text += &command_block("commands", &format!("server.command{index}"));
         text += &command_block("client_commands", &format!("client.command{index}"));
     }
@@ -1082,7 +1082,7 @@ fn server_and_client_command_declarations_share_a_128_entry_limit() {
     ok(run(&package));
     let accepted = fs::read(&output).unwrap();
 
-    text += &command_block("client_commands", "client.command64");
+    text += &command_block("client_commands", "client.command128");
     fs::write(tmp.path().join("sjml.toml"), text).unwrap();
     fails(run(&package), "E_MANIFEST");
     assert_eq!(fs::read(&output).unwrap(), accepted);
