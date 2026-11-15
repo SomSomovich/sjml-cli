@@ -49,6 +49,7 @@ pub fn expand_event_async(attribute: TokenStream, item: TokenStream) -> TokenStr
             | "entity.breed_attempt"
             | "entity.tame_attempt"
             | "entity.experience_drop_attempt"
+            | "entity.convert_attempt"
             | "block.grow_attempt"
             | "block.fertilize_attempt"
             | "block.farmland_trample_attempt"
@@ -418,6 +419,13 @@ mod tests {
                 quote! { async fn experience_drop_attempt(_: EntityExperienceDropAttempt) -> SjmlResult<()> { Ok(()) } },
             ),
             "entity.experience_drop_attempt is cancellable",
+        );
+        diagnostic(
+            expand_event_async(
+                quote!(name = "entity.convert_attempt"),
+                quote! { async fn convert_attempt(_: EntityConvertAttempt) -> SjmlResult<()> { Ok(()) } },
+            ),
+            "entity.convert_attempt is cancellable",
         );
         diagnostic(
             expand_event_async(

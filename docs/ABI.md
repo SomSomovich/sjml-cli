@@ -1,16 +1,22 @@
 # SJML Binary ABI v1
 
-The current ABI is **1.98.0**. This version adds synchronous cancellable
-`player.chat_attempt`, `entity.tame_attempt`, and
-`entity.experience_drop_attempt` events plus bounded guest-created world
-explosions and lightning strikes. Existing ABI 1.97.0 contracts remain
-supported.
+The current ABI is **1.99.0**. This version adds the synchronous cancellable
+`entity.convert_attempt` callback and the bounded `world::destroy_block`
+operation under `world.write`. Existing ABI 1.98.0 contracts remain supported.
 
 This document defines the core wire values implemented by the sjml-core ABI v1.
 The scalar and handle layouts are independent of Rust and NeoForge; later
 sections describe the current Rust SDK and NeoForge adapter bindings.
 
 ## Versioning
+
+ABI 1.99.0 adds one synchronous, cancellable logical-server callback:
+`entity.convert_attempt` can veto a living entity's replacement by another
+entity type, such as lightning-driven pig or villager conversion and
+zombie-villager curing. It also adds `world::destroy_block` under the existing
+`world.write` capability, which destroys one loaded non-air block with optional
+vanilla drops and a 32-block-per-tick module quota. Both contracts use bounded
+schema-v1 payloads and loaded-only preflight.
 
 ABI 1.98.0 adds three synchronous, cancellable logical-server callbacks:
 `player.chat_attempt` can veto an inbound chat broadcast;
@@ -820,6 +826,7 @@ are `server.started`, `server.stopping`, `player.joined`, `player.left`,
 `player.advancement_progress`, `player.enchanted`,
 `player.sleep_attempt`, `player.chat_attempt`, `player.item_use_attempt`, `player.potion_use_attempt`, `player.attack_attempt`, `entity.death`, `entity.death_attempt`, `entity.fall_attempt`, `entity.mount_attempt`,
 `entity.tame_attempt`, `entity.experience_drop_attempt`,
+`entity.convert_attempt`,
 `entity.damage_attempt`, `entity.knockback_attempt`, `entity.spawned`, `entity.join_attempt`,
 `entity.effect.tick`, `entity.effect_application`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `entity.heal_attempt`, `block.break`,
@@ -837,7 +844,8 @@ Subscribing to `block.break`, `block.break_attempt`, `block.place_attempt`,
 `player.item_use_attempt`, `player.potion_use_attempt`, `item.use`, `block.use`, `item.use_on_block`, `item.use_on_entity`,
 `client.chat.send_attempt`,
 `entity.death_attempt`, `entity.damage_attempt`, `entity.fall_attempt`, `entity.mount_attempt`, `entity.knockback_attempt`, `entity.heal_attempt`,
-`entity.tame_attempt`, `entity.experience_drop_attempt`, `player.chat_attempt`,
+`entity.tame_attempt`, `entity.experience_drop_attempt`,
+`entity.convert_attempt`, `entity.convert_attempt`, `player.chat_attempt`,
 `entity.effect_application`, `entity.join_attempt`, `entity.target_attempt`,
 `entity.projectile_impact_attempt`, `entity.breed_attempt`, `block.grow_attempt`, `block.fertilize_attempt`, `block.farmland_trample_attempt`, `block.fire_spread_attempt`,
 `block.fluid_place_attempt`, `player.fished_attempt`, `player.attack_attempt`, or `world.explosion_attempt` additionally
@@ -887,6 +895,13 @@ logical-server execution context. A callback returns exactly one Boolean byte:
 See [player chat attempts](PLAYER_CHAT_ATTEMPTS.md),
 [animal taming attempts](ENTITY_TAME_ATTEMPTS.md), and
 [experience-drop attempts](ENTITY_EXPERIENCE_DROP_ATTEMPTS.md).
+
+ABI 1.99.0 adds one more cancellable attempt in the same format:
+`entity.convert_attempt` encodes the source entity UUID, canonical source
+entity type ID, dimension ID, and canonical outcome entity type ID. NeoForge
+fires it from `LivingConversionEvent.Pre`; a veto prevents the replacement
+entity from spawning while the source stays alive. See
+[entity conversion attempts](ENTITY_CONVERSION_ATTEMPTS.md).
 
 ### Client item tooltip callback
 
@@ -2051,6 +2066,7 @@ registration binds the signatures but every call during `mod_register` returns
 | `spawn_entity` | `query_ptr, query_len` | Spawn one registered, non-player entity from a bounded schema-v1 world/type/position record; status only |
 | `spawn_item` | `query_ptr, query_len` | Spawn one bounded ordinary stack from the current item registry, with loaded-only position checks and bounded velocity; status only |
 | `create_explosion` | `query_ptr, query_len` | Create one bounded schema-v1 vanilla explosion with loaded-area preflight; requires `world.read` and `world.explosion`; status only |
+| `destroy_block` | `query_ptr, query_len` | Destroy one existing loaded non-air block with an optional vanilla drop; requires `world.read` and `world.write`; status only |
 | `strike_lightning` | `query_ptr, query_len` | Strike one bounded schema-v1 vanilla lightning bolt at a loaded block; requires `world.read` and `world.lightning`; status only |
 | `emit_game_event` | `query_ptr, query_len` | Dispatch one canonical game-event registry ID at a loaded block center with an empty source context; status only |
 | `spawn_particle` | `handle_ptr, handle_len, x, y, z, particle_id_ptr, particle_id_len` | Spawn one registered simple particle at the center of a loaded block; status only |
@@ -2300,6 +2316,19 @@ horizontal blast area must already be loaded. The module can create at most two
 explosions per logical-server tick. Missing capabilities, static-registration
 calls, client contexts, invalid values, and unloaded areas fail closed; this
 call never loads a chunk. See [creating explosions](WORLD_EXPLOSIONS.md).
+
+`destroy_block` requires `world.read` and `world.write`. Its exact schema-v1
+request is 41 bytes: `u32(1)`, the 24-byte module-owned world handle, three
+signed `i32` block coordinates, and a Boolean drop byte. The block column must
+be within ±30,000,000 in x/z, the y coordinate must be inside build height, and
+the position must be inside the world border and an already-loaded chunk. The
+position must contain a non-air block. With the drop flag set, the normal
+vanilla destroy path spawns block loot and handles block-entity contents;
+otherwise no items spawn. A module can destroy at most 32 blocks per
+logical-server tick. Missing capabilities, static-registration calls, client
+contexts, invalid positions, unloaded chunks, and air targets fail closed; this
+call never loads a chunk. See
+[destroying blocks](WORLD_BLOCK_DESTRUCTION.md).
 
 `strike_lightning` requires `world.read` and the separate administrator-granted
 `world.lightning` capability. Its exact schema-v1 request is 41 bytes:

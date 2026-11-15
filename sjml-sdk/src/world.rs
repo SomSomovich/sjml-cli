@@ -67,6 +67,8 @@ pub const MAX_WORLD_EXPLOSION_POWER: f32 = 16.0;
 pub const MAX_WORLD_EXPLOSIONS_PER_TICK: usize = 2;
 /// Maximum lightning strikes one module can create per logical-server tick.
 pub const MAX_WORLD_LIGHTNING_STRIKES_PER_TICK: usize = 4;
+/// Maximum blocks one module can destroy per logical-server tick.
+pub const MAX_WORLD_BLOCK_DESTROYS_PER_TICK: usize = 32;
 /// Maximum ordinary item stacks one module can spawn per logical-server tick.
 pub const MAX_WORLD_ITEM_SPAWNS_PER_TICK: usize = 16;
 /// Maximum stack count accepted by [`spawn_item`] before the host checks the item's own limit.
@@ -1352,6 +1354,17 @@ struct WorldLightningStrikeRequest {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(StableEncode)]
 #[sjml(version = 1)]
+struct WorldBlockDestroyRequest {
+    world: WorldHandle,
+    x: i32,
+    y: i32,
+    z: i32,
+    drop_items: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(StableEncode)]
+#[sjml(version = 1)]
 struct WorldItemSpawnRequest {
     world: WorldHandle,
     item_id: String,
@@ -1541,6 +1554,8 @@ extern "C" {
     fn imported_create_explosion(query: i32, query_length: i32) -> i32;
     #[link_name = "strike_lightning"]
     fn imported_strike_lightning(query: i32, query_length: i32) -> i32;
+    #[link_name = "destroy_block"]
+    fn imported_destroy_block(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_item"]
     fn imported_spawn_item(query: i32, query_length: i32) -> i32;
     #[link_name = "spawn_particles"]
@@ -3752,6 +3767,46 @@ pub fn strike_lightning(
     }
 }
 
+/// Destroys one existing block in an already-loaded logical-server world.
+///
+/// The module must request and receive both `world.read` and `world.write`.
+/// The position must be inside build height and the world border, and its
+/// chunk must already be loaded; the call never requests a chunk load. With
+/// `drop_items = true`, vanilla block drops and block-entity contents use the
+/// normal destroy path; with `false`, no items are spawned. The position must
+/// currently contain a non-air block. Each module can destroy at most 32 blocks
+/// per logical-server tick.
+pub fn destroy_block(world: WorldHandle, position: BlockPos, drop_items: bool) -> SjmlResult<()> {
+    validate_world_position(position)?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = to_bytes(&WorldBlockDestroyRequest {
+            world,
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            drop_items,
+        })?;
+        // SAFETY: the encoded request remains allocated and readable for this synchronous import.
+        let status = unsafe {
+            imported_destroy_block(query.as_ptr() as usize as u32 as i32, query.len() as i32)
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(SjmlError::from_abi_code(
+                status as u32,
+                "host rejected the block destroy",
+            ))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (world, drop_items);
+        Err(unsupported_target())
+    }
+}
+
 /// Spawns one ordinary item stack in an already-loaded logical-server world.
 ///
 /// The module must request and receive `world.read` and `world.write`. The item ID may name any
@@ -4629,7 +4684,7 @@ mod tests {
     use super::{
         biome_at, biome_climate_at, biome_ids, block_collision_boxes, block_destroy_speed,
         block_has_tag, block_properties, collides, create_explosion, day_time,
-        daylight_cycle_enabled, entity_type_tag_members, fluid_at, fluid_flow_at,
+        daylight_cycle_enabled, destroy_block, entity_type_tag_members, fluid_at, fluid_flow_at,
         fluid_tag_members, integer_game_rule, item_has_tag, item_tag_members, loaded_chunks,
         notify_neighbors_at, play_sound, raycast, schedule_block_tick, schedule_fluid_tick,
         set_block, set_block_properties, set_block_with_options, set_daylight_cycle_enabled,
@@ -4648,15 +4703,16 @@ mod tests {
         ItemTagResponse, LoadedChunksQuery, LoadedChunksResponse, ProjectileVelocity,
         RaycastBlockMode, RaycastFluidMode, RaycastHit, RaycastPoint, StructuresAtQuery,
         StructuresAtResponse, TagMembersQuery, TagMembersResponse, TagRegistry,
-        VanillaProjectileKind, WeatherCondition, WeatherSnapshot, WorldCollisionQuery,
-        WorldEntitySpawnRequest, WorldExplosionRequest, WorldGameRule, WorldGameRuleMutation,
-        WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
+        VanillaProjectileKind, WeatherCondition, WeatherSnapshot, WorldBlockDestroyRequest,
+        WorldCollisionQuery, WorldEntitySpawnRequest, WorldExplosionRequest, WorldGameRule,
+        WorldGameRuleMutation, WorldGameRuleQuery, WorldGameRuleSnapshot, WorldIntegerGameRule,
         WorldIntegerGameRuleMutation, WorldIntegerGameRuleQuery, WorldIntegerGameRuleSnapshot,
         WorldItemSpawnRequest, WorldLightningStrikeRequest, WorldProjectileSpawnRequest,
         WorldRaycastQuery, MAX_WEATHER_DURATION_TICKS, MAX_WORLD_BIOME_CLIMATE_RESPONSE_BYTES,
         MAX_WORLD_BIOME_IDS, MAX_WORLD_BIOME_IDS_RESPONSE_BYTES, MAX_WORLD_BIOME_ID_BYTES,
         MAX_WORLD_BLOCK_COLLISION_BOXES, MAX_WORLD_BLOCK_COLLISION_BOXES_RESPONSE_BYTES,
-        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_PROPERTIES,
+        MAX_WORLD_BLOCK_COORDINATE, MAX_WORLD_BLOCK_DESTROYS_PER_TICK,
+        MAX_WORLD_BLOCK_DESTROY_SPEED, MAX_WORLD_BLOCK_PROPERTIES,
         MAX_WORLD_BLOCK_PROPERTY_MUTATION_BYTES, MAX_WORLD_BLOCK_PROPERTY_UPDATES,
         MAX_WORLD_BLOCK_TAG_ID_BYTES, MAX_WORLD_BLOCK_TAG_RESPONSE_BYTES,
         MAX_WORLD_BLOCK_TICK_DELAY_TICKS, MAX_WORLD_DAY_TIME_TICKS, MAX_WORLD_EXPLOSIONS_PER_TICK,
@@ -4800,6 +4856,53 @@ mod tests {
         assert_eq!(MAX_WORLD_EXPLOSION_POWER, 16.0);
         assert_eq!(MAX_WORLD_EXPLOSIONS_PER_TICK, 2);
         assert_eq!(MAX_WORLD_LIGHTNING_STRIKES_PER_TICK, 4);
+    }
+
+    #[test]
+    fn block_destroy_request_matches_the_java_wire_contract_and_validates_position() {
+        let world = WorldHandle::new(1, 2, 3, 4).unwrap();
+        let request = WorldBlockDestroyRequest {
+            world,
+            x: -3,
+            y: 64,
+            z: 8,
+            drop_items: true,
+        };
+        let mut expected = 1_u32.to_le_bytes().to_vec();
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&((4_u64 << 32) | 3).to_le_bytes());
+        expected.extend_from_slice(&(-3_i32).to_le_bytes());
+        expected.extend_from_slice(&64_i32.to_le_bytes());
+        expected.extend_from_slice(&8_i32.to_le_bytes());
+        expected.push(1);
+        assert_eq!(crate::to_bytes(&request).unwrap(), expected);
+        assert_eq!(expected.len(), 41);
+
+        for block in [
+            crate::BlockPos {
+                x: 30_000_001,
+                y: 64,
+                z: 0,
+            },
+            crate::BlockPos {
+                x: 0,
+                y: 64,
+                z: -30_000_001,
+            },
+        ] {
+            assert_eq!(
+                destroy_block(world, block, true).unwrap_err().code(),
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert_eq!(
+            destroy_block(world, crate::BlockPos { x: 0, y: 64, z: 0 }, false)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnknownErrorCode
+        );
+        assert_eq!(MAX_WORLD_BLOCK_DESTROYS_PER_TICK, 32);
     }
 
     #[test]

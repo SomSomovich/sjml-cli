@@ -16,15 +16,24 @@ pages. See [Security](SECURITY.md) for table and operation limits.
 
 ## Version compatibility
 
-The current target is host `0.108.0`, Rust SDK/macros `0.106.0`, private CLI
-`0.1.38`, and ABI `1.98.0`. ABI compatibility remains major-version based: host
-0.108.0 accepts ABI `1.0.x` through `1.98.0`; it rejects later contracts it does
-not know. Packages using these APIs declare ABI `^1.98.0` and host range
-`^0.108.0`. The private CLI version is documented for the Codex workspace; no
+The current target is host `0.109.0`, Rust SDK/macros `0.107.0`, private CLI
+`0.1.39`, and ABI `1.99.0`. ABI compatibility remains major-version based: host
+0.109.0 accepts ABI `1.0.x` through `1.99.0`; it rejects later contracts it does
+not know. Packages using these APIs declare ABI `^1.99.0` and host range
+`^0.109.0`. The private CLI version is documented for the Codex workspace; no
 crates.io publication is implied.
 
 Package manifests use SemVer ranges for `abi`, `minecraft`, and `sjml`; those
 ranges are checked during package validation and activation.
+
+### APIs added in ABI 1.99.0
+
+This version adds the synchronous cancellable `entity.convert_attempt`
+callback for living-entity replacement attempts and the bounded
+`world::destroy_block` operation under `world.write`, which destroys one loaded
+non-air block with optional vanilla drops and a 32-block-per-tick quota. Both
+contracts preflight only already-loaded chunks and fail closed on client and
+static-registration contexts.
 
 ### APIs added in ABI 1.98.0
 

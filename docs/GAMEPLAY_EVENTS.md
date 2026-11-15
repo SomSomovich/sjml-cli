@@ -56,6 +56,10 @@ pattern and require both `events.subscribe` and `events.cancel`:
   `LivingExperienceDropEvent`. A veto awards zero experience; the death and the
   separate item-drop event continue. See
   [experience-drop attempts](ENTITY_EXPERIENCE_DROP_ATTEMPTS.md).
+- `entity.convert_attempt` (`EntityConvertAttempt`) runs from
+  `LivingConversionEvent.Pre`. A veto prevents the replacement entity from
+  spawning while the source stays alive. See
+  [entity conversion attempts](ENTITY_CONVERSION_ATTEMPTS.md).
 
 A guest-created `world::create_explosion` also passes through the module's own
 `world.explosion_attempt` handlers, so a broad veto can suppress the guest's

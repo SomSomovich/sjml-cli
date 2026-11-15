@@ -292,9 +292,17 @@ The three ABI 1.98 cancellable callbacks `player.chat_attempt`,
 `entity.tame_attempt`, and `entity.experience_drop_attempt` require both
 `events.subscribe` and `events.cancel`, a synchronous handler, and a
 logical-server context. They receive only bounded detached identity, text, and
-numeric values and cannot rewrite or resend chat content. The
+numeric values and cannot rewrite or resend chat content. ABI 1.99 adds
+`entity.convert_attempt` with the same requirements and a detached
+source/outcome entity snapshot. The
 [ABI reference](ABI.md#event-subscription-imports-neoforge-adapter) lists the
 general per-module callback and subscription limits.
+
+`world::destroy_block` requires `world.read` and `world.write`. It accepts only
+an in-border, in-height, already-loaded non-air position, never loads a chunk,
+and runs the normal vanilla destroy path (including block loot and block-entity
+handling) only when the request asks for drops. A module can destroy at most 32
+blocks per server tick.
 
 
 Typed block-entity persistence is restricted to a module's own registered block

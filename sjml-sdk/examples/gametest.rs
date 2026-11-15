@@ -43,6 +43,8 @@ mod entity_ai_control;
 mod entity_attribute_modifiers;
 #[path = "gametest/entity_breed_attempt.rs"]
 mod entity_breed_attempt;
+#[path = "gametest/entity_convert_attempt.rs"]
+mod entity_convert_attempt;
 #[path = "gametest/entity_drops_attempt.rs"]
 mod entity_drops_attempt;
 #[path = "gametest/entity_effect_application.rs"]
@@ -139,6 +141,8 @@ mod scoreboard_objectives;
 mod scoreboard_teams;
 #[path = "gametest/world_block_tag.rs"]
 mod world_block_tag;
+#[path = "gametest/world_blocks.rs"]
+mod world_blocks;
 #[path = "gametest/world_chunk_lifecycle.rs"]
 mod world_chunk_lifecycle;
 #[path = "gametest/world_difficulty.rs"]
@@ -761,6 +765,7 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     entity_drops_attempt::initialize()?;
     entity_tame_attempt::initialize()?;
     entity_experience_drop_attempt::initialize()?;
+    entity_convert_attempt::initialize()?;
     player_chat_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;

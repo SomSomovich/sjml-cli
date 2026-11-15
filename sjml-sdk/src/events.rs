@@ -1811,6 +1811,28 @@ pub struct EntityExperienceDropAttempt {
     pub dropped_experience: i32,
 }
 
+/// Synchronous cancellable living-entity conversion attempt on the logical server.
+///
+/// NeoForge fires `entity.convert_attempt` when a living entity is about to be
+/// replaced by another entity type, such as a pig struck by lightning or a
+/// zombie villager finishing its cure. Return `Ok(true)` to cancel the
+/// replacement; the original entity remains alive. The detached snapshot
+/// contains the source entity UUID and registry type, the dimension, and the
+/// requested outcome type. Both `events.subscribe` and `events.cancel` are
+/// required, and the callback must remain synchronous.
+#[derive(Debug, PartialEq, StableEncode, StableDecode)]
+#[sjml(version = 1)]
+pub struct EntityConvertAttempt {
+    /// Canonical UUID of the entity that would be replaced.
+    pub entity_id: String,
+    /// Registry ID of the source entity type.
+    pub entity_type_id: String,
+    /// Resource location of the dimension containing the entity.
+    pub dimension_id: String,
+    /// Registry ID of the entity type the source would become.
+    pub outcome_entity_type_id: String,
+}
+
 /// Synchronous cancellable knockback attempt for a living entity on the logical server.
 ///
 /// NeoForge 21.1.265 fires this before applying knockback. The event exposes original and current
@@ -3358,22 +3380,22 @@ mod tests {
         BlockGrowAttempt, BlockPlace, BlockPlaceAttempt, BlockRandomTick, BlockTick,
         BlockTickProperty, BlockUseAction, ClientAction, ClientActionAttempt, ClientActionHand,
         ClientChatSendAttempt, ClientItemTooltip, ClientTick, EffectTickEvent, EntityBreedAttempt,
-        EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt, EntityDropsAttempt,
-        EntityDropsItemSnapshot, EntityEffectApplicationAttempt, EntityExperienceDropAttempt,
-        EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt, EntityKnockbackAttempt,
-        EntityMountAttempt, EntityMountTarget, EntitySpawned, EntityTameAttempt,
-        EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt, FishedDropSnapshot,
-        InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse, ModuleItemAttackAttempt,
-        ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity, PlayerAdvancementEarned,
-        PlayerAdvancementProgressEvent, PlayerAttackAttempt, PlayerBreakSpeed,
-        PlayerBreakSpeedAction, PlayerChatAttempt, PlayerDropAttempt, PlayerEquipmentChanged,
-        PlayerEquipmentItemSnapshot, PlayerEquipmentSlot, PlayerExperienceChangeAction,
-        PlayerExperienceChangeAttempt, PlayerExperienceLevelChangeAction,
-        PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt, PlayerInteracted,
-        PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed, PlayerItemCrafted,
-        PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved, PlayerPotionUseAttempt,
-        PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt, PlayerTick,
-        PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
+        EntityConvertAttempt, EntityDamageAttempt, EntityDamaged, EntityDeath, EntityDeathAttempt,
+        EntityDropsAttempt, EntityDropsItemSnapshot, EntityEffectApplicationAttempt,
+        EntityExperienceDropAttempt, EntityFallAttempt, EntityHealAttempt, EntityJoinAttempt,
+        EntityKnockbackAttempt, EntityMountAttempt, EntityMountTarget, EntitySpawned,
+        EntityTameAttempt, EntityTargetAttempt, EntityTick, EventPriority, ExplosionAttempt,
+        FishedDropSnapshot, InventoryChanged, ItemTooltipLines, ItemUseAction, ModuleBlockUse,
+        ModuleItemAttackAttempt, ModuleItemUse, ModuleItemUseOnBlock, ModuleItemUseOnEntity,
+        PlayerAdvancementEarned, PlayerAdvancementProgressEvent, PlayerAttackAttempt,
+        PlayerBreakSpeed, PlayerBreakSpeedAction, PlayerChatAttempt, PlayerDropAttempt,
+        PlayerEquipmentChanged, PlayerEquipmentItemSnapshot, PlayerEquipmentSlot,
+        PlayerExperienceChangeAction, PlayerExperienceChangeAttempt,
+        PlayerExperienceLevelChangeAction, PlayerExperienceLevelChangeAttempt, PlayerFishedAttempt,
+        PlayerInteracted, PlayerInteractionAttempt, PlayerItemBroken, PlayerItemConsumed,
+        PlayerItemCrafted, PlayerItemPickupAttempt, PlayerItemUseAttempt, PlayerMoved,
+        PlayerPotionUseAttempt, PlayerPotionUseAttemptAction, PlayerRespawned, PlayerSleepAttempt,
+        PlayerTick, PlayerTotemUseAttempt, PlayerTotemUseAttemptAction, PlayerVillagerTraded,
         ProjectileImpactAttempt, ResourcesReloaded, ServerTick, WorldLifecycle, WorldTick,
         MAX_ENTITY_DROPS_ATTEMPT_DROPS, MAX_ENTITY_DROPS_ATTEMPT_ITEM_COUNT,
         MAX_PLAYER_BREAK_SPEED, MAX_PLAYER_EQUIPMENT_ITEM_COUNT,
@@ -4017,6 +4039,23 @@ mod tests {
         assert_eq!(
             from_bytes::<EntityExperienceDropAttempt>(&expected).unwrap(),
             drop_without_player
+        );
+
+        let conversion = EntityConvertAttempt {
+            entity_id: "00000000-0000-0000-0000-000000000004".to_owned(),
+            entity_type_id: "minecraft:pig".to_owned(),
+            dimension_id: "minecraft:overworld".to_owned(),
+            outcome_entity_type_id: "minecraft:zombified_piglin".to_owned(),
+        };
+        let mut expected = 1_i32.to_le_bytes().to_vec();
+        append_test_string(&mut expected, &conversion.entity_id);
+        append_test_string(&mut expected, &conversion.entity_type_id);
+        append_test_string(&mut expected, &conversion.dimension_id);
+        append_test_string(&mut expected, &conversion.outcome_entity_type_id);
+        assert_eq!(to_bytes(&conversion).unwrap(), expected);
+        assert_eq!(
+            from_bytes::<EntityConvertAttempt>(&expected).unwrap(),
+            conversion
         );
     }
 
