@@ -114,6 +114,7 @@ pub mod client_screen;
 pub mod client_sound_started;
 pub mod command_suggestions;
 pub mod entity;
+pub mod entity_armor_hurt_attempt;
 pub mod entity_attributes;
 pub mod entity_breathe;
 pub mod entity_data;
@@ -122,9 +123,11 @@ pub mod entity_destroy_block_attempt;
 pub mod entity_drown_attempt;
 pub mod entity_enderman_anger_attempt;
 pub mod entity_finalize_spawn_attempt;
+pub mod entity_jump;
 pub mod entity_left_level;
 pub mod entity_mob_griefing_attempt;
 pub mod entity_projectile_ammo_attempt;
+pub mod entity_spawn_placement_attempt;
 pub mod entity_swap_items_attempt;
 pub mod entity_teleport_attempt;
 pub mod entity_travel_dimension_attempt;
@@ -143,20 +146,25 @@ pub mod player_anvil_repair;
 pub mod player_arrow_loose_attempt;
 pub mod player_arrow_nock_attempt;
 pub mod player_bossbar;
+pub mod player_changed_dimension;
 pub mod player_client_information;
 pub mod player_container_events;
 pub mod player_continue_sleeping_attempt;
 pub mod player_critical_hit_attempt;
 pub mod player_flyable_fall;
+pub mod player_game_mode_change_attempt;
 pub mod player_grindstone_place_attempt;
 pub mod player_grindstone_take_attempt;
 pub mod player_inventory;
+pub mod player_item_smelted;
 pub mod player_item_stacked_attempt;
 pub mod player_permissions_change_attempt;
 pub mod player_spawn_phantoms_attempt;
 pub mod player_statistics;
 pub mod player_sweep_attack_attempt;
+pub mod player_tracking;
 pub mod player_wake_up;
+pub mod player_xp_pickup_attempt;
 pub mod recipe;
 pub mod registry;
 pub mod render;
@@ -176,6 +184,7 @@ pub mod world_chunk_watch_sent;
 pub mod world_difficulty_change;
 pub mod world_explosion_knockback_attempt;
 pub mod world_fluid_source_attempt;
+pub mod world_potential_spawns_attempt;
 pub mod world_save_events;
 pub mod world_sleep_finished_time;
 pub mod world_tags_updated;
@@ -311,6 +320,7 @@ pub use entity::{
     NAVIGATION_WRITE_CAPABILITY, PERSISTENCE_WRITE_CAPABILITY, ROTATION_WRITE_CAPABILITY,
     TARGET_WRITE_CAPABILITY, TELEPORT_CAPABILITY, VILLAGER_TRADE_WRITE_CAPABILITY,
 };
+pub use entity_armor_hurt_attempt::EntityArmorHurtAttempt;
 pub use entity_attributes::{
     AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
     MAX_TRANSIENT_ATTRIBUTE_MODIFIER_AMOUNT,
@@ -321,12 +331,14 @@ pub use entity_destroy_block_attempt::EntityDestroyBlockAttempt;
 pub use entity_drown_attempt::EntityDrownAttempt;
 pub use entity_enderman_anger_attempt::EntityEndermanAngerAttempt;
 pub use entity_finalize_spawn_attempt::EntityFinalizeSpawnAttempt;
+pub use entity_jump::EntityJump;
 pub use entity_left_level::{
     EntityLeftLevel, ENTITY_LEFT_LEVEL_EVENT_NAME, MAX_ENTITY_LEFT_LEVEL_CALLBACKS,
     MAX_ENTITY_LEFT_LEVEL_PAYLOAD_BYTES, MAX_ENTITY_LEFT_LEVEL_STRING_BYTES,
 };
 pub use entity_mob_griefing_attempt::EntityMobGriefingAttempt;
 pub use entity_projectile_ammo_attempt::{AmmoItemSnapshot, EntityProjectileAmmoAttempt};
+pub use entity_spawn_placement_attempt::EntitySpawnPlacementAttempt;
 pub use entity_swap_items_attempt::{EntitySwapItemsAttempt, SwapItemSnapshot};
 pub use entity_teleport_attempt::{
     EntityTeleportAttempt, EntityTeleportAttemptAction, EntityTeleportCause,
@@ -459,11 +471,13 @@ pub use player_advancement::{
 pub use player_anvil_repair::{AnvilRepairItemSnapshot, PlayerAnvilRepair};
 pub use player_arrow_loose_attempt::PlayerArrowLooseAttempt;
 pub use player_arrow_nock_attempt::PlayerArrowNockAttempt;
+pub use player_changed_dimension::PlayerChangedDimension;
 pub use player_client_information::PlayerClientInformation;
 pub use player_container_events::{PlayerContainerClosed, PlayerContainerOpened};
 pub use player_continue_sleeping_attempt::PlayerContinueSleepingAttempt;
 pub use player_critical_hit_attempt::PlayerCriticalHitAttempt;
 pub use player_flyable_fall::PlayerFlyableFall;
+pub use player_game_mode_change_attempt::PlayerGameModeChangeAttempt;
 pub use player_grindstone_place_attempt::{
     GrindstonePlaceItemSnapshot, PlayerGrindstonePlaceAttempt,
 };
@@ -477,6 +491,7 @@ pub use player_inventory::{
     MAX_PLAYER_INVENTORY_MOVE_COUNT, MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
     MAX_PLAYER_INVENTORY_SLOT_INDEX,
 };
+pub use player_item_smelted::PlayerItemSmelted;
 pub use player_item_stacked_attempt::{PlayerItemStackedAttempt, StackedItemSnapshot};
 pub use player_permissions_change_attempt::PlayerPermissionsChangeAttempt;
 pub use player_spawn_phantoms_attempt::PlayerSpawnPhantomsAttempt;
@@ -487,7 +502,9 @@ pub use player_statistics::{
     MAX_VALUE as MAX_PLAYER_REGISTRY_STATISTIC_VALUE,
 };
 pub use player_sweep_attack_attempt::PlayerSweepAttackAttempt;
+pub use player_tracking::{PlayerStartTracking, PlayerStopTracking};
 pub use player_wake_up::PlayerWakeUp;
+pub use player_xp_pickup_attempt::PlayerXpPickupAttempt;
 pub use recipe::{
     CraftingSlot, RecipeEvaluation, RecipeMatchInput, RECIPE_CALLBACK_SCHEMA_VERSION,
 };
@@ -584,6 +601,7 @@ pub use world_chunk_watch_sent::WorldChunkWatchSent;
 pub use world_difficulty_change::WorldDifficultyChange;
 pub use world_explosion_knockback_attempt::WorldExplosionKnockbackAttempt;
 pub use world_fluid_source_attempt::WorldFluidSourceAttempt;
+pub use world_potential_spawns_attempt::WorldPotentialSpawnsAttempt;
 pub use world_save_events::{
     WorldSaveObserved, MAX_WORLD_SAVE_CALLBACKS_PER_EVENT, MAX_WORLD_SAVE_DIMENSION_ID_BYTES,
     MAX_WORLD_SAVE_GAME_TIME_TICKS, MAX_WORLD_SAVE_OBSERVED_PAYLOAD_BYTES,
@@ -738,6 +756,7 @@ pub mod prelude {
         NAVIGATION_WRITE_CAPABILITY, PERSISTENCE_WRITE_CAPABILITY, TARGET_WRITE_CAPABILITY,
         TELEPORT_CAPABILITY, VILLAGER_TRADE_WRITE_CAPABILITY,
     };
+    pub use crate::entity_armor_hurt_attempt::EntityArmorHurtAttempt;
     pub use crate::entity_attributes;
     pub use crate::entity_attributes::{
         AttributeValues, LivingAttribute, MAX_ATTRIBUTE_MODIFIER_KEY_BYTES,
@@ -753,6 +772,7 @@ pub mod prelude {
     pub use crate::entity_drown_attempt::EntityDrownAttempt;
     pub use crate::entity_enderman_anger_attempt::EntityEndermanAngerAttempt;
     pub use crate::entity_finalize_spawn_attempt::EntityFinalizeSpawnAttempt;
+    pub use crate::entity_jump::EntityJump;
     pub use crate::entity_left_level;
     pub use crate::entity_left_level::{
         EntityLeftLevel, ENTITY_LEFT_LEVEL_EVENT_NAME, MAX_ENTITY_LEFT_LEVEL_CALLBACKS,
@@ -762,6 +782,7 @@ pub mod prelude {
     pub use crate::entity_projectile_ammo_attempt::{
         AmmoItemSnapshot, EntityProjectileAmmoAttempt,
     };
+    pub use crate::entity_spawn_placement_attempt::EntitySpawnPlacementAttempt;
     pub use crate::entity_swap_items_attempt::{EntitySwapItemsAttempt, SwapItemSnapshot};
     pub use crate::entity_teleport_attempt::{
         EntityTeleportAttempt, EntityTeleportAttemptAction, EntityTeleportCause,
@@ -903,11 +924,13 @@ pub mod prelude {
     pub use crate::player_anvil_repair::{AnvilRepairItemSnapshot, PlayerAnvilRepair};
     pub use crate::player_arrow_loose_attempt::PlayerArrowLooseAttempt;
     pub use crate::player_arrow_nock_attempt::PlayerArrowNockAttempt;
+    pub use crate::player_changed_dimension::PlayerChangedDimension;
     pub use crate::player_client_information::PlayerClientInformation;
     pub use crate::player_container_events::{PlayerContainerClosed, PlayerContainerOpened};
     pub use crate::player_continue_sleeping_attempt::PlayerContinueSleepingAttempt;
     pub use crate::player_critical_hit_attempt::PlayerCriticalHitAttempt;
     pub use crate::player_flyable_fall::PlayerFlyableFall;
+    pub use crate::player_game_mode_change_attempt::PlayerGameModeChangeAttempt;
     pub use crate::player_grindstone_place_attempt::{
         GrindstonePlaceItemSnapshot, PlayerGrindstonePlaceAttempt,
     };
@@ -927,6 +950,7 @@ pub mod prelude {
         MAX_PLAYER_INVENTORY_SLOTS, MAX_PLAYER_INVENTORY_SLOT_COUNT,
         MAX_PLAYER_INVENTORY_SLOT_INDEX,
     };
+    pub use crate::player_item_smelted::PlayerItemSmelted;
     pub use crate::player_item_stacked_attempt::{PlayerItemStackedAttempt, StackedItemSnapshot};
     pub use crate::player_permissions_change_attempt::PlayerPermissionsChangeAttempt;
     pub use crate::player_spawn_phantoms_attempt::PlayerSpawnPhantomsAttempt;
@@ -938,7 +962,9 @@ pub mod prelude {
         MAX_VALUE as MAX_PLAYER_REGISTRY_STATISTIC_VALUE,
     };
     pub use crate::player_sweep_attack_attempt::PlayerSweepAttackAttempt;
+    pub use crate::player_tracking::{PlayerStartTracking, PlayerStopTracking};
     pub use crate::player_wake_up::PlayerWakeUp;
+    pub use crate::player_xp_pickup_attempt::PlayerXpPickupAttempt;
     pub use crate::recipe::{CraftingSlot, RecipeEvaluation, RecipeMatchInput};
     pub use crate::registry;
     pub use crate::registry::{
@@ -1063,6 +1089,7 @@ pub mod prelude {
     pub use crate::world_difficulty_change::WorldDifficultyChange;
     pub use crate::world_explosion_knockback_attempt::WorldExplosionKnockbackAttempt;
     pub use crate::world_fluid_source_attempt::WorldFluidSourceAttempt;
+    pub use crate::world_potential_spawns_attempt::WorldPotentialSpawnsAttempt;
     pub use crate::world_save_events;
     pub use crate::world_save_events::{
         WorldSaveObserved, MAX_WORLD_SAVE_CALLBACKS_PER_EVENT, MAX_WORLD_SAVE_DIMENSION_ID_BYTES,

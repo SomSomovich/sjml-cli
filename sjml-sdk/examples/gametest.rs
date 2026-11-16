@@ -49,6 +49,8 @@ mod block_use;
 mod entity_age;
 #[path = "gametest/entity_ai_control.rs"]
 mod entity_ai_control;
+#[path = "gametest/entity_armor_hurt_attempt.rs"]
+mod entity_armor_hurt_attempt;
 #[path = "gametest/entity_attribute_modifiers.rs"]
 mod entity_attribute_modifiers;
 #[path = "gametest/entity_breathe.rs"]
@@ -83,6 +85,8 @@ mod entity_heal_attempt;
 mod entity_health;
 #[path = "gametest/entity_join_attempt.rs"]
 mod entity_join_attempt;
+#[path = "gametest/entity_jump.rs"]
+mod entity_jump;
 #[path = "gametest/entity_knockback_attempt.rs"]
 mod entity_knockback_attempt;
 #[path = "gametest/entity_left_level.rs"]
@@ -105,6 +109,8 @@ mod entity_riding;
 mod entity_rotation;
 #[path = "gametest/entity_shield_block_attempt.rs"]
 mod entity_shield_block_attempt;
+#[path = "gametest/entity_spawn_placement_attempt.rs"]
+mod entity_spawn_placement_attempt;
 #[path = "gametest/entity_swap_items_attempt.rs"]
 mod entity_swap_items_attempt;
 #[path = "gametest/entity_tame_attempt.rs"]
@@ -139,6 +145,8 @@ mod player_arrow_nock_attempt;
 mod player_attack_attempt;
 #[path = "gametest/player_bossbar.rs"]
 mod player_bossbar;
+#[path = "gametest/player_changed_dimension.rs"]
+mod player_changed_dimension;
 #[path = "gametest/player_chat_attempt.rs"]
 mod player_chat_attempt;
 #[path = "gametest/player_client_information.rs"]
@@ -161,6 +169,8 @@ mod player_fall_distance;
 mod player_fished_attempt;
 #[path = "gametest/player_flyable_fall.rs"]
 mod player_flyable_fall;
+#[path = "gametest/player_game_mode_change_attempt.rs"]
+mod player_game_mode_change_attempt;
 #[path = "gametest/player_grindstone_place_attempt.rs"]
 mod player_grindstone_place_attempt;
 #[path = "gametest/player_grindstone_take_attempt.rs"]
@@ -173,6 +183,8 @@ mod player_inventory_enchantment;
 mod player_inventory_give;
 #[path = "gametest/player_inventory_lore.rs"]
 mod player_inventory_lore;
+#[path = "gametest/player_item_smelted.rs"]
+mod player_item_smelted;
 #[path = "gametest/player_item_stacked_attempt.rs"]
 mod player_item_stacked_attempt;
 #[path = "gametest/player_item_use_attempt.rs"]
@@ -199,10 +211,14 @@ mod player_tab_list;
 mod player_tick;
 #[path = "gametest/player_totem_use_attempt.rs"]
 mod player_totem_use_attempt;
+#[path = "gametest/player_tracking.rs"]
+mod player_tracking;
 #[path = "gametest/player_villager_trade.rs"]
 mod player_villager_trade;
 #[path = "gametest/player_wake_up.rs"]
 mod player_wake_up;
+#[path = "gametest/player_xp_pickup_attempt.rs"]
+mod player_xp_pickup_attempt;
 #[path = "gametest/scoreboard.rs"]
 mod scoreboard;
 #[path = "gametest/scoreboard_display_slot.rs"]
@@ -249,6 +265,8 @@ mod world_item_tag;
 mod world_light_at;
 #[path = "gametest/world_neighbor_update.rs"]
 mod world_neighbor_update;
+#[path = "gametest/world_potential_spawns_attempt.rs"]
+mod world_potential_spawns_attempt;
 #[path = "gametest/world_redstone_signal.rs"]
 mod world_redstone_signal;
 #[path = "gametest/world_save_events.rs"]
@@ -907,6 +925,15 @@ fn subscribe_to_server_events() -> SjmlResult<()> {
     world_chunk_data_save::initialize()?;
     world_chunk_watch_sent::initialize()?;
     world_difficulty_change::initialize()?;
+    entity_armor_hurt_attempt::initialize()?;
+    entity_jump::initialize()?;
+    entity_spawn_placement_attempt::initialize()?;
+    player_changed_dimension::initialize()?;
+    player_game_mode_change_attempt::initialize()?;
+    player_item_smelted::initialize()?;
+    player_tracking::initialize()?;
+    player_xp_pickup_attempt::initialize()?;
+    world_potential_spawns_attempt::initialize()?;
     player_anvil_update_attempt::initialize()?;
     entity_join_attempt::initialize()?;
     entity_knockback_attempt::initialize()?;
